@@ -24,7 +24,7 @@ export function HomeScreen() {
   const recommendAndSubmit = () =>
     run((s) => {
       const plan = s.recommendPlan();
-      return s.submitPlan(plan);
+      return s.submitPlan(plan, { origin: 'RECOMMENDED' });
     }, '추천 플랜을 확정 제출했어요');
 
   const recChanges = preview?.adjustments.filter((a) => a.kind === 'UNAVAILABLE_REPLACED' || a.kind === 'AUTO_ROTATION') ?? [];

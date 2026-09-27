@@ -45,6 +45,8 @@ export function createProposal(
   base: PlanBundle,
   at: GameTimestamp,
   id: string,
+  /** diff 표시용 선수 이름 (없으면 id 그대로) */
+  nameOf?: (playerId: string) => string,
 ): Proposal {
   const reason = input.reason.trim();
   if (reason.length < 1 || reason.length > MAX_REASON_LENGTH) {
@@ -58,7 +60,7 @@ export function createProposal(
     throw new DomainError('PROPOSAL_LIMIT', `미결 제안은 코치 1인당 ${MAX_OPEN_PER_COACH}장까지입니다`);
   }
   const after = applyPatch(base, input.payload.patch);
-  const diff = diffBundles(base, after);
+  const diff = diffBundles(base, after, nameOf);
   if (diff.length === 0) throw new DomainError('PROPOSAL_INVALID', '현재 플랜과 달라지는 내용이 없습니다');
   const paths = diff.map((d) => d.path).sort().join('|');
   const dup = open.find(
@@ -91,6 +93,10 @@ function structuredCloneSafe<T>(x: T): T {
 }
 
 export function applyPatch(base: PlanBundle, patch: PlanChangePatch): PlanBundle {
+  const badSlot = (k: unknown) => k !== undefined && k !== 'A' && k !== 'B';
+  if (!patch || badSlot(patch.startSlot) || (patch.instructions && badSlot(patch.instructions.slot)) || (patch.lineup && (!Array.isArray(patch.lineup.starters) || !Array.isArray(patch.lineup.bench)))) {
+    throw new DomainError('PROPOSAL_INVALID', '제안 내용 형식이 올바르지 않습니다');
+  }
   const plan: MatchPlan = structuredCloneSafe(base.plan);
   const tactics: Record<SlotKey, TacticSlot> = structuredCloneSafe(base.tactics);
   if (patch.lineup) plan.lineup = { starters: [...patch.lineup.starters], bench: [...patch.lineup.bench] };
@@ -107,18 +113,19 @@ export function applyPatch(base: PlanBundle, patch: PlanChangePatch): PlanBundle
 
 const fmtStep = (v: number | boolean) => (typeof v === 'boolean' ? (v ? 'ON' : 'OFF') : v > 0 ? `+${v}` : String(v));
 
-export function diffBundles(before: PlanBundle, after: PlanBundle): ProposalDiffItem[] {
+export function diffBundles(before: PlanBundle, after: PlanBundle, nameOf: (playerId: string) => string = (id) => id): ProposalDiffItem[] {
   const out: ProposalDiffItem[] = [];
+  const names = (ids: readonly string[]) => ids.map(nameOf).join(', ') || '-';
   const b = before.plan;
   const a = after.plan;
   const n = Math.max(b.lineup.starters.length, a.lineup.starters.length);
   for (let i = 0; i < n; i++) {
     const x = b.lineup.starters[i] ?? '';
     const y = a.lineup.starters[i] ?? '';
-    if (x !== y) out.push({ path: `lineup.starters[${i}]`, label: `선발 ${i + 1}번 자리`, before: x || '-', after: y || '-' });
+    if (x !== y) out.push({ path: `lineup.starters[${i}]`, label: `선발 ${i + 1}번 자리`, before: x ? nameOf(x) : '-', after: y ? nameOf(y) : '-' });
   }
   if (b.lineup.bench.join(',') !== a.lineup.bench.join(',')) {
-    out.push({ path: 'lineup.bench', label: '벤치', before: b.lineup.bench.join(', ') || '-', after: a.lineup.bench.join(', ') || '-' });
+    out.push({ path: 'lineup.bench', label: '벤치', before: names(b.lineup.bench), after: names(a.lineup.bench) });
   }
   if (b.startSlot !== a.startSlot) out.push({ path: 'startSlot', label: '시작 전술', before: b.startSlot, after: a.startSlot });
   for (const slot of ['A', 'B'] as SlotKey[]) {
@@ -137,7 +144,7 @@ export function diffBundles(before: PlanBundle, after: PlanBundle): ProposalDiff
   if (oo(b) !== oo(a)) {
     const show = (p: MatchPlan) =>
       p.opponentOrders
-        ? [p.opponentOrders.markTarget ? `마크 ${p.opponentOrders.markTarget}` : '', p.opponentOrders.attackSide ? `공략 ${p.opponentOrders.attackSide}` : '']
+        ? [p.opponentOrders.markTarget ? `마크 ${nameOf(p.opponentOrders.markTarget)}` : '', p.opponentOrders.attackSide ? `공략 ${p.opponentOrders.attackSide}` : '']
             .filter(Boolean)
             .join(' · ') || '지정'
         : '없음';

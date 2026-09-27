@@ -176,6 +176,50 @@ describe('GameService', () => {
     expect(storage.load()).toBeNull();
   });
 
+  it('[리뷰 R1] 구조가 깨진 세이브는 가져오기 거부 + 기존 저장 유지, 불러오기는 null', () => {
+    const storage = createMemoryStorage();
+    const s = svc(storage);
+    s.newGame({ seed: 3 });
+    const good = s.exportSave();
+    const before = s.getSnapshot();
+    const broken = (mut: (x: Record<string, any>) => void) => {
+      const x = JSON.parse(good);
+      mut(x);
+      return JSON.stringify(x);
+    };
+    const cases = [
+      broken((x) => delete x.fixtures),
+      broken((x) => delete x.players[x.clubs[x.userClubId].playerIds[0]]),
+      broken((x) => (x.clubs[x.userClubId].tactics.A.formation = 'NOPE')),
+      broken((x) => delete x.finances[x.userClubId]),
+      broken((x) => (x.actorUserId = 'intruder')),
+      broken((x) => (x.time.day = 99)),
+    ];
+    for (const json of cases) expect(code(() => s.importSave(json))).toBe('SAVE_INCOMPATIBLE');
+    expect(s.getSnapshot()).toBe(before);
+    expect(storage.load()).toBe(good);
+    expect(svc(createMemoryStorage(cases[1]!)).loadGame()).toBeNull();
+    expect(code(() => s.importSave(good))).toBe('no-error');
+  });
+
+  it('[리뷰 R2] 제안 diff 는 선수 id 가 아니라 이름을 보여주고, 잘못된 슬롯 패치는 PROPOSAL_INVALID', () => {
+    const s = svc();
+    s.newGame({ seed: 4 });
+    const snap = s.getSnapshot()!;
+    const matchId = s.getNextMatch()!.id;
+    const rec = s.recommendPlan();
+    const sub = rec.lineup.bench.find((id) => snap.players[id]!.primary !== 'GK')!;
+    const starters = [...rec.lineup.starters];
+    starters[6] = sub;
+    s.switchRole('COACH');
+    const p = s.propose({ payload: { kind: 'PLAN_CHANGE', matchId, patch: { lineup: { starters, bench: rec.lineup.bench.filter((x) => x !== sub) } } }, reason: '로테이션' });
+    const d = p.diff.find((x) => x.path === 'lineup.starters[6]')!;
+    expect(d.after).toBe(snap.players[sub]!.name);
+    expect(d.before).toBe(snap.players[rec.lineup.starters[6]!]!.name);
+    const bad = { instructions: { slot: 'C', patch: { press: 1 } } } as never;
+    expect(code(() => s.propose({ payload: { kind: 'PLAN_CHANGE', matchId, patch: bad }, reason: 'x' }))).toBe('PROPOSAL_INVALID');
+  });
+
   it('저장 실패 시 이전 상태를 유지하고 STORAGE_FULL', () => {
     let fail = false;
     const base = createMemoryStorage();

@@ -16,7 +16,7 @@ export function FinanceScreen() {
           <Stat label="KC 잔액" value={formatKc(f.balance)} />
           <Stat label="지출 가능액 B" value={formatKc(f.spendable)} sub="잔액 − 남은 연봉" />
           <Stat label="이번 시즌 수입" value={<span className="pos">{formatKc(f.seasonIncome, true)}</span>} />
-          <Stat label="이번 시즌 지출" value={<span className="neg">{formatKc(f.seasonExpense)}</span>} />
+          <Stat label="이번 시즌 지출" value={<span className="neg">{formatKc(-Math.abs(f.seasonExpense))}</span>} />
         </div>
       </Card>
       <Card title="연봉 캡">

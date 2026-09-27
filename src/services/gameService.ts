@@ -167,6 +167,50 @@ function tacticIssues(formation: string, roles: readonly string[], instr: TeamIn
   return out;
 }
 
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const PHASES = ['MATCHDAY', 'OFFSEASON', 'SEASON_OVER'];
+
+/**
+ * 가져오기·불러오기 세이브의 구조·참조 무결성 검사. 문제가 있으면 첫 문제 문장, 없으면 null.
+ * 얕은 검사만 하면 깨진 세이브가 저장소에 커밋돼 매 부팅마다 화면 오류로 막힌다.
+ */
+function saveProblem(x: unknown): string | null {
+  if (!isObj(x)) return '객체가 아닙니다';
+  if (x.schemaVersion !== SCHEMA_VERSION) return `schemaVersion ${String(x.schemaVersion)} ≠ ${SCHEMA_VERSION}`;
+  const t = x.time;
+  if (!isNum(x.gameSeed) || !isNum(x.seq) || !isObj(t) || !Number.isInteger(t.season) || (t.season as number) < 1 || !Number.isInteger(t.day) || (t.day as number) < 1 || (t.day as number) > 28) return '시간·시드 정보가 올바르지 않습니다';
+  if (!PHASES.includes(x.phase as string)) return `알 수 없는 phase: ${String(x.phase)}`;
+  const st = x.settings;
+  if (!isObj(st) || !TIER_ECONOMY[st.tier as keyof typeof TIER_ECONOMY] || !(EngineConstants.TAC_CAP_OPTIONS as readonly unknown[]).includes(st.tacCap)) return 'settings 가 올바르지 않습니다';
+  for (const k of ['clubs', 'players', 'summaries', 'records', 'plans', 'finances', 'proposals'] as const) if (!isObj(x[k])) return `${k} 가 없습니다`;
+  for (const k of ['fixtures', 'memberships', 'seasonHistory', 'actionLog'] as const) if (!Array.isArray(x[k])) return `${k} 가 없습니다`;
+  const clubs = x.clubs as Record<string, unknown>;
+  const players = x.players as Record<string, unknown>;
+  const finances = x.finances as Record<string, unknown>;
+  if (typeof x.userClubId !== 'string' || !isObj(clubs[x.userClubId])) return '사용자 구단이 없습니다';
+  for (const [id, c] of Object.entries(clubs)) {
+    if (!isObj(c) || c.id !== id || typeof c.name !== 'string' || !Array.isArray(c.playerIds) || !isObj(c.tactics)) return `구단 ${id} 형식 오류`;
+    for (const pid of c.playerIds) {
+      const p = players[pid as string];
+      if (!isObj(p) || !isObj(p.attrs) || !isObj(p.availability) || !isObj(p.contract) || !isObj(p.season) || !isNum(p.condition) || !isNum(p.ovr)) return `선수 ${String(pid)} 형식 오류`;
+    }
+    for (const k of ['A', 'B']) {
+      const sl = (c.tactics as Record<string, unknown>)[k];
+      const def = isObj(sl) ? FORMATIONS[sl.formation as keyof typeof FORMATIONS] : undefined;
+      if (!isObj(sl) || !def || !Array.isArray(sl.roles) || sl.roles.length !== def.slots.length || !isObj(sl.instructions) || !isNum(sl.familiarity)) return `구단 ${id} 전술 ${k} 형식 오류`;
+    }
+    const f = finances[id];
+    if (!isObj(f) || !isNum(f.balance) || !isNum(f.transferOnlyBudget) || !Array.isArray(f.ledger)) return `구단 ${id} 재정 형식 오류`;
+  }
+  for (const f of x.fixtures as unknown[]) {
+    if (!isObj(f) || typeof f.id !== 'string' || !isNum(f.season) || !isNum(f.day) || !isObj(clubs[f.homeId as string]) || !isObj(clubs[f.awayId as string])) return '일정 형식 오류';
+  }
+  const ms = x.memberships as unknown[];
+  if (!ms.some((m) => isObj(m) && m.userId === x.actorUserId && m.clubId === x.userClubId)) return '현재 사용자 멤버십이 없습니다';
+  return null;
+}
+
 class LocalGameService implements GameService {
   readonly contractVersion = CONTRACT_VERSION;
   private readonly storage: StoragePort;
@@ -319,7 +363,8 @@ class LocalGameService implements GameService {
     if (!raw) return null;
     try {
       const parsed = JSON.parse(raw) as GameState;
-      if (!parsed || parsed.schemaVersion !== SCHEMA_VERSION || !parsed.clubs || !parsed.players) return null;
+      if (saveProblem(parsed) !== null) return null;
+      this.preview(parsed); // 손상 세이브면 여기서 throw → null (부팅 크래시 루프 방지)
       this.state = parsed;
       this.replayCache.clear();
       this.notify();
@@ -347,8 +392,14 @@ class LocalGameService implements GameService {
     } catch {
       throw new GameError('SAVE_INCOMPATIBLE', '저장 데이터를 읽을 수 없습니다 (JSON 형식 오류)');
     }
-    if (!parsed || typeof parsed !== 'object' || parsed.schemaVersion !== SCHEMA_VERSION || !parsed.clubs || !parsed.players || !parsed.time) {
-      throw new GameError('SAVE_INCOMPATIBLE', `호환되지 않는 저장 데이터입니다 (schemaVersion ${String((parsed as { schemaVersion?: unknown })?.schemaVersion)} ≠ ${SCHEMA_VERSION})`);
+    const problem = saveProblem(parsed);
+    if (problem !== null) throw new GameError('SAVE_INCOMPATIBLE', `호환되지 않는 저장 데이터입니다 (${problem})`);
+    try {
+      // 조회 경로 사전 실행: 구조 검사를 통과해도 화면이 쓰는 계산에서 깨지면 커밋하지 않는다
+      this.preview(parsed);
+      computeStandings(Object.keys(parsed.clubs).sort(), Object.values(parsed.summaries), parsed.time.season, 0);
+    } catch (e) {
+      throw new GameError('SAVE_INCOMPATIBLE', `저장 데이터가 손상되었습니다 (${e instanceof Error ? e.message : String(e)})`);
     }
     this.replayCache.clear();
     this.commit(parsed);
@@ -664,7 +715,7 @@ class LocalGameService implements GameService {
     if (!f || input.payload.matchId !== f.id) throw new GameError('PROPOSAL_INVALID', '다음 경기에 대한 제안만 할 수 있습니다');
     const author = this.membership(s);
     const id = `pr-s${s.time.season}-${s.seq + 1}`;
-    const proposal = this.run(() => createProposal(input, author, Object.values(s.proposals), this.bundle(s), this.ts(s), id));
+    const proposal = this.run(() => createProposal(input, author, Object.values(s.proposals), this.bundle(s), this.ts(s), id, (pid) => s.players[pid]?.name ?? pid));
     this.commit(this.withLog({ ...s, proposals: { ...s.proposals, [id]: proposal } }, 'PROPOSAL_CREATED', { proposalId: id, paths: proposal.diff.map((d) => d.path) }));
     return proposal;
   }

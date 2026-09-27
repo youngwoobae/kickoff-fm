@@ -4,6 +4,7 @@ import type { Membership, PlanChangePatch, Proposal, SlotKey, Step, TeamInstruct
 import { Badge, Card, Empty, Segmented, Sheet, StepSlider } from '../components/kit';
 import { INSTR_LABEL, PROPOSAL_STATUS_LABEL, SLIDERS, seatLabel, type SliderKey } from '../format';
 import { ProposeSheet } from '../plan/PlanActions';
+import { useToast } from '../components/Toast';
 import { useAction, useActor, useGame, useQuery } from '../service/ServiceContext';
 
 const REJECT_REASONS = ['이번 경기엔 안 맞음', '다른 제안과 겹침', '선수 컨디션 고려', '기타'];
@@ -92,6 +93,7 @@ function QuickProposal() {
 function ProposalCard({ p, seat }: { p: Proposal; seat: string }) {
   const snap = useGame();
   const run = useAction();
+  const toast = useToast();
   const [rejectOpen, setRejectOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [stale, setStale] = useState<string[] | null>(null);
@@ -106,7 +108,11 @@ function ProposalCard({ p, seat }: { p: Proposal; seat: string }) {
     const r = run((s) => s.approve(p.id, edits), (res) => (res.ok ? `승인했어요. 구단주 명의로 확정 제출됨${res.superseded.length ? ` (대체된 제안 ${res.superseded.length}건)` : ''}` : undefined));
     if (!r) return;
     if (r.ok) setStale(null);
-    else setStale(r.details);
+    else {
+      // STALE 제안은 OPEN 필터에서 바로 사라지므로 카드 안 문구만으로는 보이지 않는다 → 토스트로 알린다
+      setStale(r.details);
+      toast.show(`재검증 실패로 무효 처리: ${r.details.join(', ')}`, 'error');
+    }
   };
   const myReaction = p.reactions.find((r) => r.userId === snap.actorUserId)?.choice;
 
