@@ -1,0 +1,1542 @@
+/**
+ * GameService 가짜 구현 (소유: B, 개발 전용).
+ * - 화면 개발용 메모리 상태 + localStorage(별도 키) 보존. 규칙은 근사치다(실제 규칙은 A 의 domain).
+ * - `implements GameService` 로 계약 적합성을 타입 체크가 보장한다.
+ * - VITE_FAKE_SERVICE=1 이거나 URL 에 ?fake=1 이 있으면 이 구현을 쓴다(ui/service/serviceHost.ts).
+ */
+import type {
+  ApproveResult,
+  CalibrationOptions,
+  CalibrationProgress,
+  CalibrationReport,
+  CalibrationTarget,
+  Catalog,
+  ChanceType,
+  ClubId,
+  CommentaryLine,
+  DayResult,
+  FactorCard,
+  FinanceSummary,
+  FitLevel,
+  FormLetter,
+  Fixture,
+  FormationDef,
+  FormationId,
+  GameSnapshot,
+  GameState,
+  LedgerEntry,
+  LedgerKind,
+  MatchId,
+  MatchPlan,
+  MatchReplay,
+  MatchReport,
+  MatchSummary,
+  Membership,
+  OpponentScout,
+  PlanAdjustment,
+  PlanChangePatch,
+  PlanRecord,
+  PlanSource,
+  PlanState,
+  PlanValidationIssue,
+  Player,
+  PlayerId,
+  Position,
+  PresetId,
+  Proposal,
+  ProposalDiffItem,
+  ProposalId,
+  ProposalInput,
+  ProposalStatus,
+  ResolvedPlan,
+  RuleId,
+  SeasonNo,
+  SeasonOutcome,
+  SlotKey,
+  StandingRow,
+  Step,
+  Suggestion,
+  TacticCap,
+  TacticSlot,
+  TeamInstructions,
+  TeamSummaryLite,
+  TimelineItem,
+  UiLogKind,
+  ActionLogKind,
+} from '../../types';
+import {
+  CONTRACT_VERSION,
+  GameError,
+  type FixtureFilter,
+  type GameService,
+  type NewGameOptions,
+  type ResimulateOverrides,
+  type TacticSlotInput,
+  type TacticUpdateResult,
+} from '../../services';
+import {
+  ADJACENT,
+  BOT_STYLES,
+  CATALOG,
+  CLUB_NAMES,
+  FORMATIONS,
+  KEY_ATTRS,
+  PRESET_INSTR,
+  RULES,
+  STYLE_SETUP,
+  hashString,
+  koreanName,
+  mulberry32,
+} from './fakeData';
+import { conditionalText } from '../format';
+
+const FAKE_SAVE_KEY = 'kickoff-fm/fake/v1';
+const USER_CLUB: ClubId = 'c00';
+const OWNER_ID = 'u-owner';
+const COACH_ID = 'u-coach';
+const ECON = { budget: 60_000_000, cap: 48_000_000, win: 1_200_000, draw: 500_000, loss: 200_000 };
+const FIT_MULT: Record<FitLevel, number> = { NATURAL: 1, ACCOMPLISHED: 0.95, CAPABLE: 0.88, UNSUITED: 0.75 };
+const SQUAD_TEMPLATE: Position[] = [
+  'GK', 'GK', 'CB', 'CB', 'CB', 'CB', 'FB', 'FB', 'FB', 'FB', 'DM', 'DM',
+  'CM', 'CM', 'CM', 'AM', 'W', 'W', 'W', 'ST', 'ST', 'ST',
+];
+
+interface FakeSave {
+  state: GameState;
+  reports: Record<MatchId, MatchReport>;
+  replays: Record<MatchId, MatchReplay>;
+}
+
+const clone = <T>(v: T): T => structuredClone(v);
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+const round2 = (v: number) => Math.round(v * 100) / 100;
+const clampStep = (v: number): Step => clamp(Math.round(v), -2, 2) as Step;
+
+function fitOf(p: Player, pos: Position): FitLevel {
+  if (p.primary === pos) return 'NATURAL';
+  return p.positions[pos] ?? 'UNSUITED';
+}
+function available(p: Player | undefined): boolean {
+  return !!p && p.availability.injuryDays <= 0 && p.availability.suspendedMatches <= 0;
+}
+function condEff(c: number): number {
+  if (c >= 90) return 1;
+  if (c >= 60) return 0.85 + ((c - 60) / 30) * 0.15;
+  return 0.8;
+}
+function formationOf(id: FormationId): FormationDef {
+  return FORMATIONS.find((f) => f.id === id) ?? (FORMATIONS[0] as FormationDef);
+}
+function poisson(rng: () => number, lambda: number): number {
+  const L = Math.exp(-lambda);
+  let k = 0;
+  let p = 1;
+  do {
+    k++;
+    p *= rng();
+  } while (p > L && k < 12);
+  return k - 1;
+}
+function poissonPmf(lambda: number, k: number): number {
+  let f = 1;
+  for (let i = 2; i <= k; i++) f *= i;
+  return (Math.exp(-lambda) * lambda ** k) / f;
+}
+function xPoints(xgFor: number, xgAgainst: number): number {
+  let w = 0;
+  let d = 0;
+  for (let a = 0; a <= 10; a++) {
+    for (let b = 0; b <= 10; b++) {
+      const p = poissonPmf(Math.max(0.05, xgFor), a) * poissonPmf(Math.max(0.05, xgAgainst), b);
+      if (a > b) w += p;
+      else if (a === b) d += p;
+    }
+  }
+  return round2(3 * w + d);
+}
+const LEDGER_MEMO: Partial<Record<LedgerKind, string>> = {
+  SEASON_BUDGET: '시즌 기본 배정금',
+  SALARY: '연봉 일할 차감',
+  MATCH_WIN: '승리 수당',
+  MATCH_DRAW: '무승부 수당',
+  MATCH_LOSS: '패배 수당',
+  PRIZE: '순위 상금',
+  CHAMPION_BONUS: '우승 수당',
+  CARRY_EXCESS_SPLIT: '이월 상한 초과분 → 한정 예산',
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+function genPlayer(rng: () => number, id: PlayerId, clubId: ClubId, pos: Position, level: number): Player {
+  const base = level / 5;
+  const keys = KEY_ATTRS[pos];
+  const attrs = {} as Player['attrs'];
+  for (const k of [
+    'passing', 'dribbling', 'finishing', 'crossing', 'tackling', 'vision', 'positioning',
+    'composure', 'workRate', 'pace', 'stamina', 'physical', 'reflexes', 'aerialCommand', 'kicking',
+  ] as const) {
+    const isGkAttr = k === 'reflexes' || k === 'aerialCommand' || k === 'kicking';
+    let v: number;
+    if (isGkAttr && pos !== 'GK') v = 1 + Math.floor(rng() * 5);
+    else if (!isGkAttr && pos === 'GK' && !keys.includes(k)) v = base - 5 + rng() * 4;
+    else v = base - 3 + rng() * 5 + (keys.includes(k) ? 2 : 0);
+    attrs[k] = clamp(Math.round(v), 1, 20);
+  }
+  const ovr = Math.round((keys.reduce((s, k) => s + attrs[k], 0) / keys.length) * 5);
+  const positions: Player['positions'] = { [pos]: 'NATURAL' };
+  for (const [adj, fit] of Object.entries(ADJACENT[pos]) as [Position, FitLevel][]) {
+    positions[adj] = rng() < 0.25 ? 'ACCOMPLISHED' : fit;
+  }
+  const age = 18 + Math.floor(rng() * 16);
+  const grades = ['E', 'D', 'C', 'B', 'A', 'S'] as const;
+  const g = clamp(Math.floor(ovr / 17), 0, 4);
+  return {
+    id,
+    clubId,
+    name: koreanName(rng),
+    age,
+    primary: pos,
+    positions,
+    attrs,
+    ovr,
+    potential: ovr + Math.floor(rng() * 10),
+    scoutRange: [grades[g] ?? 'C', grades[g + 1] ?? 'S'],
+    condition: 85 + Math.floor(rng() * 16),
+    morale: 0,
+    contract: { seasonsLeft: 1 + Math.floor(rng() * 4), salary: 0 },
+    availability: { injuryDays: 0, suspendedMatches: 0 },
+    isTemporary: false,
+    season: { apps: 0, starts: 0, minutes: 0, goals: 0, shots: 0, keyPasses: 0, tackles: 0, redCards: 0 },
+  };
+}
+
+function genFixtures(season: SeasonNo, clubIds: ClubId[], rng: () => number): Fixture[] {
+  const ids = [...clubIds].sort(() => rng() - 0.5);
+  const n = ids.length;
+  const rounds: [ClubId, ClubId][][] = [];
+  const arr = [...ids];
+  for (let r = 0; r < n - 1; r++) {
+    const pairs: [ClubId, ClubId][] = [];
+    for (let i = 0; i < n / 2; i++) {
+      const a = arr[i] as ClubId;
+      const b = arr[n - 1 - i] as ClubId;
+      pairs.push(r % 2 === 0 ? [a, b] : [b, a]);
+    }
+    rounds.push(pairs);
+    const last = arr.pop() as ClubId;
+    arr.splice(1, 0, last);
+  }
+  const fixtures: Fixture[] = [];
+  rounds.forEach((pairs, r) => {
+    for (const [h, a] of pairs) {
+      fixtures.push({ id: `s${season}-d${r + 1}-${h}-${a}`, season, day: r + 1, homeId: h, awayId: a, played: false });
+      const d2 = r + 1 + (n - 1);
+      fixtures.push({ id: `s${season}-d${d2}-${a}-${h}`, season, day: d2, homeId: a, awayId: h, played: false });
+    }
+  });
+  return fixtures.sort((x, y) => x.day - y.day || x.id.localeCompare(y.id));
+}
+
+function mkSlot(key: SlotKey, formation: FormationId, preset: PresetId, familiarity: number): TacticSlot {
+  const f = formationOf(formation);
+  return { key, formation, roles: f.slots.map((s) => s.defaultRole), instructions: { ...PRESET_INSTR[preset] }, familiarity };
+}
+
+function describeInstr(i: TeamInstructions): string {
+  const parts: string[] = [];
+  const lab: [keyof TeamInstructions, string][] = [
+    ['mentality', '공격성향'], ['press', '압박'], ['line', '라인'], ['width', '폭'], ['tempo', '템포'], ['directness', '패스'],
+  ];
+  for (const [k, l] of lab) {
+    const v = i[k] as number;
+    if (v !== 0) parts.push(`${l} ${v > 0 ? '+' : ''}${v}`);
+  }
+  if (i.counter) parts.push('역습');
+  if (i.offsideTrap) parts.push('오프사이드 트랩');
+  return parts.length ? parts.join(' · ') : '모두 보통';
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+export class FakeGameService implements GameService {
+  readonly contractVersion = CONTRACT_VERSION;
+  private state: GameState | null = null;
+  private reports: Record<MatchId, MatchReport> = {};
+  private replays: Record<MatchId, MatchReplay> = {};
+  private readonly listeners = new Set<() => void>();
+  private readonly persist: boolean;
+
+  constructor(opts: { persist?: boolean } = {}) {
+    this.persist = opts.persist ?? true;
+  }
+
+  // ── 내부 유틸 ─────────────────────────────────────────────────────
+  private req(): GameState {
+    if (!this.state) throw new GameError('NO_GAME', '진행 중인 게임이 없습니다');
+    return this.state;
+  }
+  private commit(next: GameState): void {
+    this.state = next;
+    this.save();
+    for (const l of this.listeners) l();
+  }
+  private save(): void {
+    if (!this.persist || !this.state) return;
+    try {
+      const payload: FakeSave = { state: this.state, reports: this.reports, replays: this.replays };
+      globalThis.localStorage?.setItem(FAKE_SAVE_KEY, JSON.stringify(payload));
+    } catch {
+      /* 용량 초과 등은 무시 (개발용) */
+    }
+  }
+  private log(s: GameState, kind: ActionLogKind, data?: Record<string, unknown>): void {
+    s.actionLog.push({ at: new Date().toISOString(), gameTime: { ...s.time }, actor: s.actorUserId, kind, data });
+    if (s.actionLog.length > 5000) s.actionLog.splice(0, s.actionLog.length - 5000);
+  }
+  private seat(s: GameState): Membership['seat'] {
+    return s.memberships.find((m) => m.userId === s.actorUserId)?.seat ?? 'COACH_SPECTATOR';
+  }
+  private requireOwner(s: GameState): void {
+    if (this.seat(s) !== 'OWNER') throw new GameError('PERMISSION_DENIED', '구단주만 할 수 있습니다 (코치는 제안하기를 사용하세요)');
+  }
+  private requireCoach(s: GameState): void {
+    if (this.seat(s) !== 'COACH') throw new GameError('PERMISSION_DENIED', '코치만 제안할 수 있습니다');
+  }
+  private ts(s: GameState) {
+    s.seq += 1;
+    return { season: s.time.season, day: s.time.day, seq: s.seq };
+  }
+  private nextFixture(s: GameState, clubId: ClubId = s.userClubId): Fixture | null {
+    if (s.phase !== 'MATCHDAY') return null;
+    return (
+      s.fixtures.find((f) => !f.played && f.day >= s.time.day && (f.homeId === clubId || f.awayId === clubId)) ?? null
+    );
+  }
+  private squadOf(s: GameState, clubId: ClubId): Player[] {
+    const club = s.clubs[clubId];
+    if (!club) throw new GameError('NOT_FOUND', `구단 없음: ${clubId}`);
+    return club.playerIds.map((id) => s.players[id]).filter((p): p is Player => !!p);
+  }
+
+  /** 슬롯 A(또는 지정 슬롯) 포메이션 기준 최고 11명 + 벤치 7명 */
+  private systemPlan(s: GameState, clubId: ClubId, matchId: MatchId | null, slot: SlotKey = 'A'): MatchPlan {
+    const club = s.clubs[clubId];
+    if (!club) throw new GameError('NOT_FOUND', clubId);
+    const f = formationOf(club.tactics[slot].formation);
+    const pool = this.squadOf(s, clubId).filter(available);
+    const used = new Set<PlayerId>();
+    const starters: PlayerId[] = [];
+    for (const sl of f.slots) {
+      let best: Player | undefined;
+      let bestScore = -1;
+      for (const p of pool) {
+        if (used.has(p.id)) continue;
+        const score = p.ovr * FIT_MULT[fitOf(p, sl.position)] * condEff(p.condition) * (sl.position === 'GK' ? (p.primary === 'GK' ? 1 : 0.3) : p.primary === 'GK' ? 0.2 : 1);
+        if (score > bestScore) {
+          bestScore = score;
+          best = p;
+        }
+      }
+      if (best) {
+        used.add(best.id);
+        starters.push(best.id);
+      }
+    }
+    const rest = pool.filter((p) => !used.has(p.id)).sort((a, b) => b.ovr - a.ovr);
+    const gk = rest.find((p) => p.primary === 'GK');
+    const bench = [...(gk ? [gk] : []), ...rest.filter((p) => p !== gk)].slice(0, 7).map((p) => p.id);
+    return { clubId, matchId, lineup: { starters, bench }, startSlot: slot, conditionals: [], autoSubThreshold: 55, autoRotation: true };
+  }
+
+  /** 4.7 근사: 후보 선택 → 보정 */
+  private resolve(s: GameState, clubId: ClubId, fx: Fixture | null): ResolvedPlan {
+    const ps = s.plans[clubId] ?? {};
+    const club = s.clubs[clubId];
+    if (!club) throw new GameError('NOT_FOUND', clubId);
+    let source: PlanSource = 'SYSTEM';
+    let plan: MatchPlan;
+    if (ps.confirmed) {
+      source = 'CONFIRMED';
+      plan = clone(ps.confirmed.plan);
+    } else if (club.defaultPlan) {
+      source = 'DEFAULT';
+      plan = clone(club.defaultPlan);
+    } else if (club.lastUsedPlan) {
+      source = 'LAST_USED';
+      plan = clone(club.lastUsedPlan);
+      delete plan.opponentOrders;
+    } else {
+      plan = this.systemPlan(s, clubId, fx?.id ?? null);
+    }
+    plan.matchId = fx?.id ?? null;
+    const adjustments = this.adjust(s, plan, fx);
+    return { plan, source, adjustments };
+  }
+
+  private adjust(s: GameState, plan: MatchPlan, fx: Fixture | null): PlanAdjustment[] {
+    const adj: PlanAdjustment[] = [];
+    const club = s.clubs[plan.clubId];
+    if (!club) return adj;
+    const oppId = fx ? (fx.homeId === plan.clubId ? fx.awayId : fx.homeId) : null;
+    if (plan.opponentOrders && plan.opponentOrders.opponentId !== oppId) {
+      delete plan.opponentOrders;
+      adj.push({ kind: 'OPP_ORDERS_CLEARED', note: '다른 상대 기준 맞춤 지시라서 제거했어요' });
+    }
+    const f = formationOf(club.tactics[plan.startSlot].formation);
+    const inPlan = new Set([...plan.lineup.starters, ...plan.lineup.bench]);
+    const squad = this.squadOf(s, plan.clubId);
+    const pickReplacement = (pos: Position, minCond: number): Player | undefined =>
+      [...plan.lineup.bench.map((id) => s.players[id]), ...squad.filter((p) => !inPlan.has(p.id))]
+        .filter((p): p is Player => available(p) && (p?.condition ?? 0) >= minCond && !plan.lineup.starters.includes(p!.id))
+        .sort((a, b) => b.ovr * FIT_MULT[fitOf(b, pos)] - a.ovr * FIT_MULT[fitOf(a, pos)])[0];
+    const swapIn = (i: number, p: Player) => {
+      const outId = plan.lineup.starters[i];
+      plan.lineup.starters[i] = p.id;
+      const bi = plan.lineup.bench.indexOf(p.id);
+      if (bi >= 0 && outId) plan.lineup.bench[bi] = outId;
+      else if (bi >= 0) plan.lineup.bench.splice(bi, 1);
+      inPlan.add(p.id);
+    };
+    plan.lineup.starters.forEach((id, i) => {
+      const p = s.players[id];
+      const pos = f.slots[i]?.position ?? 'CM';
+      if (!available(p)) {
+        const r = pickReplacement(pos, 0);
+        if (r) {
+          swapIn(i, r);
+          adj.push({ kind: 'UNAVAILABLE_REPLACED', playerOut: id, playerIn: r.id, note: `${p?.name ?? id} 출전 불가 → ${r.name}` });
+        }
+      } else if (plan.autoRotation && p && p.condition < 70) {
+        const r = pickReplacement(pos, 70);
+        if (r && r.ovr >= p.ovr - 12) {
+          swapIn(i, r);
+          adj.push({ kind: 'AUTO_ROTATION', playerOut: id, playerIn: r.id, note: `${p.name} 휴식(컨디션 ${Math.round(p.condition)}) → ${r.name}` });
+        }
+      }
+    });
+    const bad = plan.lineup.bench.filter((id) => !available(s.players[id]));
+    if (bad.length) {
+      plan.lineup.bench = plan.lineup.bench.filter((id) => available(s.players[id]));
+      adj.push({ kind: 'VALIDITY_FIX', note: `벤치 출전 불가 선수 ${bad.length}명 제외` });
+    }
+    const all = new Set([...plan.lineup.starters, ...plan.lineup.bench]);
+    for (const c of plan.conditionals) {
+      if (c.enabled && c.action.kind === 'SWITCH_SLOT' && !club.tactics[c.action.slot]) {
+        c.enabled = false;
+        adj.push({ kind: 'CONDITIONAL_DISABLED', conditionalId: c.id, note: '없는 슬롯 참조' });
+      }
+    }
+    void all;
+    return adj;
+  }
+
+  // ── 구독 ──────────────────────────────────────────────────────────
+  getSnapshot(): GameSnapshot | null {
+    return this.state;
+  }
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  // ── 수명 주기 ──────────────────────────────────────────────────────
+  newGame(opts: NewGameOptions = {}): GameSnapshot {
+    const seed = opts.seed ?? (Date.now() & 0x7fffffff);
+    const rng = mulberry32(seed);
+    const clubs: GameState['clubs'] = {};
+    const players: GameState['players'] = {};
+    CLUB_NAMES.forEach(([name, short], idx) => {
+      const id = `c${String(idx).padStart(2, '0')}`;
+      const isHuman = id === USER_CLUB;
+      const style = isHuman ? undefined : BOT_STYLES[idx - 1];
+      const level = isHuman ? 62 : 62 * (0.9 + rng() * 0.18);
+      const playerIds: PlayerId[] = [];
+      SQUAD_TEMPLATE.forEach((pos, j) => {
+        const pid = `${id}-p${String(j).padStart(2, '0')}`;
+        const p = genPlayer(rng, pid, id, pos, level + (j % 2 === 0 ? 4 : -3) + (rng() * 8 - 4));
+        players[pid] = p;
+        playerIds.push(pid);
+      });
+      const totalOvr = playerIds.reduce((s, pid) => s + (players[pid]?.ovr ?? 0), 0);
+      for (const pid of playerIds) {
+        const p = players[pid];
+        if (p) p.contract.salary = Math.round(((ECON.cap * 0.94 * p.ovr) / totalOvr) / 1000) * 1000;
+      }
+      const setup = style ? STYLE_SETUP[style] : { formation: '4-3-3' as const, preset: 'BALANCED' as const, alt: '4-2-3-1' as const, altPreset: 'LOW_BLOCK' as const };
+      clubs[id] = {
+        id,
+        name: isHuman && opts.clubName ? opts.clubName : name,
+        shortName: isHuman && opts.clubName ? opts.clubName.trim().split(/\s+/)[0]?.slice(0, 4) ?? short : short,
+        isHuman,
+        ownerUserId: isHuman ? OWNER_ID : undefined,
+        botStyle: style,
+        playerIds,
+        tactics: { A: mkSlot('A', setup.formation, setup.preset, 70), B: mkSlot('B', setup.alt, setup.altPreset, 40) },
+      };
+    });
+    const clubIds = Object.keys(clubs);
+    const finances: GameState['finances'] = {};
+    for (const id of clubIds) finances[id] = { clubId: id, balance: 0, transferOnlyBudget: 0, ledger: [] };
+    const s: GameState = {
+      schemaVersion: 1,
+      engineVersion: 'fake-0',
+      gameSeed: seed,
+      createdAt: new Date().toISOString(),
+      time: { season: 1, day: 1 },
+      phase: 'MATCHDAY',
+      seq: 0,
+      settings: { tier: opts.tier ?? 'T3', tacCap: opts.tacCap ?? 0.35, devMode: opts.devMode ?? true },
+      userClubId: USER_CLUB,
+      actorUserId: OWNER_ID,
+      clubs,
+      players,
+      fixtures: genFixtures(1, clubIds, rng),
+      summaries: {},
+      records: {},
+      plans: {},
+      finances,
+      memberships: [
+        { clubId: USER_CLUB, userId: OWNER_ID, seat: 'OWNER', joinedAt: { season: 1, day: 1, seq: 0 }, hasOwnClub: true },
+        { clubId: USER_CLUB, userId: COACH_ID, seat: 'COACH', roleLabel: 'TAC', joinedAt: { season: 0, day: 1, seq: 0 }, hasOwnClub: false },
+      ],
+      proposals: {},
+      seasonHistory: [],
+      actionLog: [],
+    };
+    for (const id of clubIds) {
+      this.ledger(s, id, 'SEASON_BUDGET', ECON.budget);
+      this.paySalary(s, id);
+    }
+    this.reports = {};
+    this.replays = {};
+    this.commit(s);
+    return s;
+  }
+
+  loadGame(): GameSnapshot | null {
+    if (this.state) return this.state;
+    if (!this.persist) return null;
+    try {
+      const raw = globalThis.localStorage?.getItem(FAKE_SAVE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as FakeSave;
+      if (parsed?.state?.schemaVersion !== 1) return null;
+      this.reports = parsed.reports ?? {};
+      this.replays = parsed.replays ?? {};
+      this.state = parsed.state;
+      for (const l of this.listeners) l();
+      return this.state;
+    } catch {
+      return null;
+    }
+  }
+  resetGame(): void {
+    this.state = null;
+    this.reports = {};
+    this.replays = {};
+    try {
+      globalThis.localStorage?.removeItem(FAKE_SAVE_KEY);
+    } catch {
+      /* noop */
+    }
+    for (const l of this.listeners) l();
+  }
+  exportSave(): string {
+    const payload: FakeSave = { state: this.req(), reports: this.reports, replays: this.replays };
+    return JSON.stringify(payload);
+  }
+  importSave(json: string): GameSnapshot {
+    let parsed: FakeSave;
+    try {
+      parsed = JSON.parse(json) as FakeSave;
+    } catch {
+      throw new GameError('SAVE_INCOMPATIBLE', 'JSON 형식이 아닙니다');
+    }
+    const st = (parsed as Partial<FakeSave>).state ?? (parsed as unknown as GameState);
+    if (!st || st.schemaVersion !== 1 || !st.clubs) throw new GameError('SAVE_INCOMPATIBLE', '호환되지 않는 세이브입니다');
+    this.reports = parsed.reports ?? {};
+    this.replays = parsed.replays ?? {};
+    this.commit(st);
+    return st;
+  }
+
+  // ── 역할 ──────────────────────────────────────────────────────────
+  getActor(): Membership {
+    const s = this.req();
+    const m = s.memberships.find((x) => x.userId === s.actorUserId);
+    if (!m) throw new GameError('NOT_FOUND', '멤버십 없음');
+    return m;
+  }
+  switchRole(seat: 'OWNER' | 'COACH'): Membership {
+    const s = clone(this.req());
+    s.actorUserId = seat === 'OWNER' ? OWNER_ID : COACH_ID;
+    this.log(s, 'ROLE_SWITCHED', { seat });
+    this.commit(s);
+    return this.getActor();
+  }
+
+  // ── 조회 ──────────────────────────────────────────────────────────
+  getCatalog(): Catalog {
+    return CATALOG;
+  }
+  getSquad(clubId?: ClubId): Player[] {
+    const s = this.req();
+    return this.squadOf(s, clubId ?? s.userClubId);
+  }
+  getPlayer(playerId: PlayerId): Player {
+    const p = this.req().players[playerId];
+    if (!p) throw new GameError('NOT_FOUND', `선수 없음: ${playerId}`);
+    return p;
+  }
+  getStandings(): StandingRow[] {
+    return this.standingsOf(this.req());
+  }
+  private standingsOf(s: GameState): StandingRow[] {
+    const rows: Record<ClubId, StandingRow> = {};
+    for (const id of Object.keys(s.clubs)) {
+      rows[id] = { position: 0, clubId: id, played: 0, won: 0, drawn: 0, lost: 0, goalsFor: 0, goalsAgainst: 0, goalDiff: 0, points: 0, xgFor: 0, xgAgainst: 0, xPts: 0, form: [], zone: 'NONE' };
+    }
+    const sums = Object.values(s.summaries)
+      .filter((m) => m.season === s.time.season)
+      .sort((a, b) => a.day - b.day);
+    for (const m of sums) {
+      for (const [me, op] of [[m.home, m.away], [m.away, m.home]] as const) {
+        const r = rows[me.clubId];
+        if (!r) continue;
+        r.played++;
+        r.goalsFor += me.goals;
+        r.goalsAgainst += op.goals;
+        r.xgFor = round2(r.xgFor + me.xg);
+        r.xgAgainst = round2(r.xgAgainst + op.xg);
+        r.xPts = round2(r.xPts + me.xPts);
+        const res: FormLetter = me.goals > op.goals ? 'W' : me.goals === op.goals ? 'D' : 'L';
+        if (res === 'W') {
+          r.won++;
+          r.points += 3;
+        } else if (res === 'D') {
+          r.drawn++;
+          r.points += 1;
+        } else r.lost++;
+        r.form = [...r.form, res].slice(-5);
+      }
+    }
+    const list = Object.values(rows);
+    for (const r of list) r.goalDiff = r.goalsFor - r.goalsAgainst;
+    list.sort(
+      (a, b) =>
+        b.points - a.points ||
+        b.goalDiff - a.goalDiff ||
+        b.goalsFor - a.goalsFor ||
+        (s.clubs[a.clubId]?.name ?? '').localeCompare(s.clubs[b.clubId]?.name ?? ''),
+    );
+    list.forEach((r, i) => {
+      r.position = i + 1;
+      r.zone = i < 2 ? 'PROMOTION' : i >= list.length - 3 ? 'RELEGATION' : 'NONE';
+    });
+    return list;
+  }
+  getFixtures(filter: FixtureFilter = {}): Fixture[] {
+    return this.req().fixtures.filter(
+      (f) =>
+        (filter.clubId === undefined || f.homeId === filter.clubId || f.awayId === filter.clubId) &&
+        (filter.day === undefined || f.day === filter.day) &&
+        (filter.played === undefined || f.played === filter.played),
+    );
+  }
+  getNextMatch(): Fixture | null {
+    return this.nextFixture(this.req());
+  }
+  getOpponentScout(clubId: ClubId): OpponentScout {
+    const s = this.req();
+    const club = s.clubs[clubId];
+    if (!club) throw new GameError('NOT_FOUND', clubId);
+    const last5 = Object.values(s.summaries)
+      .filter((m) => m.season === s.time.season && (m.home.clubId === clubId || m.away.clubId === clubId))
+      .sort((a, b) => b.day - a.day)
+      .slice(0, 5)
+      .map((m) => {
+        const me = m.home.clubId === clubId ? m.home : m.away;
+        const op = m.home.clubId === clubId ? m.away : m.home;
+        return { matchId: m.matchId, day: m.day, opponentId: op.clubId, goalsFor: me.goals, goalsAgainst: op.goals, formation: me.formation, instructionsSummary: describeInstr(me.instructions) };
+      });
+    const weaknessByStyle: Record<string, string> = {
+      POSSESSION: '전방 압박을 받으면 빌드업 실수가 잦아요 (R1)',
+      COUNTER: '공격 성향을 낮추면 역습 공간이 사라져요 (R5)',
+      HIGH_PRESS: '긴 패스로 압박을 넘기면 뒷공간이 열려요 (R2)',
+      LOW_BLOCK: '측면 폭을 넓힌 크로스에 약해요 (R3·R4)',
+      WIDE: '중원 숫자를 늘리면 주도권을 잡기 쉬워요 (R7)',
+    };
+    return { clubId, botStyle: club.botStyle, last5, weakness: club.botStyle ? (weaknessByStyle[club.botStyle] ?? '') : '특이점 없음' };
+  }
+  getFinance(clubId?: ClubId): FinanceSummary {
+    const s = this.req();
+    const id = clubId ?? s.userClubId;
+    const fin = s.finances[id];
+    if (!fin) throw new GameError('NOT_FOUND', id);
+    const salaryTotal = this.squadOf(s, id).reduce((a, p) => a + p.contract.salary, 0);
+    const season = fin.ledger.filter((l) => l.season === s.time.season);
+    const remaining = Math.max(0, 28 - s.time.day);
+    const cap = Math.round(ECON.budget * 0.2);
+    const bal = fin.balance;
+    return {
+      clubId: id,
+      tier: s.settings.tier,
+      balance: bal,
+      transferOnlyBudget: fin.transferOnlyBudget,
+      spendable: Math.round(bal - (salaryTotal * remaining) / 28),
+      salaryTotal,
+      salaryCap: ECON.cap,
+      capUsage: salaryTotal / ECON.cap,
+      seasonIncome: season.filter((l) => l.amount > 0).reduce((a, l) => a + l.amount, 0),
+      seasonExpense: season.filter((l) => l.amount < 0).reduce((a, l) => a + l.amount, 0),
+      projectedCarry: { total: bal, cap, carried: Math.max(0, Math.min(bal, cap)), excess: Math.max(0, bal - cap) },
+      recent: [...fin.ledger].reverse().slice(0, 30),
+    };
+  }
+
+  // ── 전술·플랜 ──────────────────────────────────────────────────────
+  updateTacticSlot(slot: SlotKey, next: TacticSlotInput): TacticUpdateResult {
+    const s = clone(this.req());
+    this.requireOwner(s);
+    const club = s.clubs[s.userClubId];
+    if (!club) throw new GameError('NO_GAME', '구단 없음');
+    const prev = club.tactics[slot];
+    const f = formationOf(next.formation);
+    if (next.roles.length !== 11) throw new GameError('INVALID_TACTIC', '역할은 11개여야 합니다');
+    next.roles.forEach((r, i) => {
+      if (!f.slots[i]?.allowedRoles.includes(r)) throw new GameError('INVALID_TACTIC', `${i + 1}번 자리에 허용되지 않는 역할`);
+    });
+    if (next.instructions.offsideTrap && next.instructions.line < 1) {
+      throw new GameError('INVALID_TACTIC', '오프사이드 트랩은 수비 라인 +1 이상에서만 켤 수 있습니다');
+    }
+    const halved = prev.formation !== next.formation;
+    const updated: TacticSlot = { ...clone(next), key: slot, familiarity: halved ? Math.round(prev.familiarity * 0.5) : prev.familiarity };
+    club.tactics[slot] = updated;
+    this.log(s, 'TACTIC_CHANGED', { slot, formation: next.formation, halved });
+    this.commit(s);
+    return { slot: updated, familiarityHalved: halved };
+  }
+  getPlanState(): PlanState {
+    const s = this.req();
+    const fx = this.nextFixture(s);
+    const ps = s.plans[s.userClubId] ?? {};
+    const club = s.clubs[s.userClubId];
+    return {
+      clubId: s.userClubId,
+      matchId: fx?.id ?? null,
+      opponentId: fx ? (fx.homeId === s.userClubId ? fx.awayId : fx.homeId) : null,
+      day: s.time.day,
+      draft: ps.draft,
+      confirmed: ps.confirmed,
+      defaultPlan: club?.defaultPlan,
+      preview: fx ? this.resolve(s, s.userClubId, fx) : null,
+    };
+  }
+  validatePlan(plan: MatchPlan): PlanValidationIssue[] {
+    const s = this.req();
+    const issues: PlanValidationIssue[] = [];
+    const { starters, bench } = plan.lineup;
+    if (starters.length !== 11) issues.push({ severity: 'ERROR', code: 'STARTERS_COUNT', message: `선발은 11명이어야 합니다 (현재 ${starters.length})` });
+    if (bench.length > 7) issues.push({ severity: 'ERROR', code: 'BENCH_COUNT', message: '벤치는 최대 7명입니다' });
+    const all = [...starters, ...bench];
+    if (new Set(all).size !== all.length) issues.push({ severity: 'ERROR', code: 'DUPLICATE', message: '같은 선수가 두 번 들어가 있습니다' });
+    const club = s.clubs[plan.clubId];
+    const f = club ? formationOf(club.tactics[plan.startSlot].formation) : undefined;
+    starters.forEach((id, i) => {
+      const p = s.players[id];
+      if (!p) {
+        issues.push({ severity: 'ERROR', code: 'UNKNOWN_PLAYER', message: `알 수 없는 선수 ${id}` });
+        return;
+      }
+      if (!available(p)) issues.push({ severity: 'WARNING', code: 'UNAVAILABLE', message: `${p.name}: 출전 불가 (마감 시 자동 대체)`, playerId: id });
+      const pos = f?.slots[i]?.position;
+      if (pos === 'GK' && p.primary !== 'GK') issues.push({ severity: 'ERROR', code: 'NO_GK', message: '골키퍼 자리에 골키퍼가 아닙니다', playerId: id });
+      else if (pos && fitOf(p, pos) === 'UNSUITED') issues.push({ severity: 'WARNING', code: 'UNSUITED', message: `${p.name}: ${pos} 부적합`, playerId: id });
+      if (p.condition < 70) issues.push({ severity: 'WARNING', code: 'LOW_CONDITION', message: `${p.name}: 컨디션 ${Math.round(p.condition)}`, playerId: id });
+    });
+    if (plan.conditionals.length > 3) issues.push({ severity: 'ERROR', code: 'COND_COUNT', message: '조건부 지시는 최대 3개입니다' });
+    for (const c of plan.conditionals) {
+      if (c.conditions.length === 0 || c.conditions.length > 2) issues.push({ severity: 'ERROR', code: 'COND_SHAPE', message: '조건은 1~2개여야 합니다' });
+      if (c.action.kind === 'HT_ADJUST' && !c.conditions.some((k) => k.kind === 'TIME' && k.after === 'HT')) {
+        issues.push({ severity: 'ERROR', code: 'HT_ONLY', message: '하프타임 조정은 하프타임 조건과만 쓸 수 있습니다' });
+      }
+    }
+    return issues;
+  }
+  private checkPlan(s: GameState, plan: MatchPlan): void {
+    const errs = this.validatePlan(plan).filter((i) => i.severity === 'ERROR');
+    if (errs.length) throw new GameError('INVALID_PLAN', errs[0]?.message ?? '플랜 오류', errs.map((e) => e.message));
+    if (plan.clubId !== s.userClubId) throw new GameError('PERMISSION_DENIED', '다른 구단 플랜');
+  }
+  saveDraft(plan: MatchPlan): PlanRecord {
+    const s = clone(this.req());
+    this.requireOwner(s);
+    if (s.phase !== 'MATCHDAY') throw new GameError('INVALID_PHASE', '경기일이 아닙니다');
+    const rec: PlanRecord = { plan: clone(plan), status: 'DRAFT', updatedBy: s.actorUserId, updatedAt: this.ts(s) };
+    s.plans[s.userClubId] = { ...(s.plans[s.userClubId] ?? {}), draft: rec };
+    this.log(s, 'PLAN_DRAFT_SAVED');
+    this.commit(s);
+    return rec;
+  }
+  submitPlan(plan: MatchPlan): PlanRecord {
+    const s = clone(this.req());
+    this.requireOwner(s);
+    if (s.phase !== 'MATCHDAY') throw new GameError('INVALID_PHASE', '경기일이 아닙니다');
+    this.checkPlan(s, plan);
+    const rec: PlanRecord = { plan: clone(plan), status: 'CONFIRMED', updatedBy: s.actorUserId, updatedAt: this.ts(s) };
+    s.plans[s.userClubId] = { draft: undefined, confirmed: rec };
+    this.log(s, 'PLAN_SUBMITTED');
+    this.commit(s);
+    return rec;
+  }
+  setDefaultPlan(plan: MatchPlan): void {
+    const s = clone(this.req());
+    this.requireOwner(s);
+    this.checkPlan(s, plan);
+    const p = clone(plan);
+    delete p.opponentOrders;
+    p.matchId = null;
+    const club = s.clubs[s.userClubId];
+    if (club) club.defaultPlan = p;
+    this.log(s, 'DEFAULT_PLAN_SET');
+    this.commit(s);
+  }
+  recommendPlan(): MatchPlan {
+    const s = this.req();
+    const fx = this.nextFixture(s);
+    const r = this.resolve(s, s.userClubId, fx);
+    const plan = clone(r.plan);
+    delete plan.opponentOrders;
+    return plan;
+  }
+  previewResolvedPlan(): ResolvedPlan | null {
+    const s = this.req();
+    const fx = this.nextFixture(s);
+    return fx ? this.resolve(s, s.userClubId, fx) : null;
+  }
+
+  // ── 진행 ──────────────────────────────────────────────────────────
+  advanceDay(): DayResult {
+    const s = clone(this.req());
+    const r = this.step(s);
+    this.commit(s);
+    return r;
+  }
+  advanceDays(n: number): DayResult[] {
+    const s = clone(this.req());
+    const out: DayResult[] = [];
+    for (let i = 0; i < n && s.phase !== 'SEASON_OVER'; i++) out.push(this.step(s));
+    this.commit(s);
+    return out;
+  }
+  advanceToSeasonEnd(): DayResult[] {
+    const s = clone(this.req());
+    const out: DayResult[] = [];
+    while (s.phase !== 'SEASON_OVER') out.push(this.step(s));
+    this.commit(s);
+    return out;
+  }
+  startNewSeason(): GameSnapshot {
+    const s = clone(this.req());
+    if (s.phase !== 'SEASON_OVER') throw new GameError('INVALID_PHASE', '시즌이 끝나지 않았습니다');
+    if (s.pendingOutcome) s.seasonHistory.push(s.pendingOutcome);
+    s.pendingOutcome = undefined;
+    s.summaries = {};
+    s.records = {};
+    this.reports = {};
+    this.replays = {};
+    s.time = { season: s.time.season + 1, day: 1 };
+    s.phase = 'MATCHDAY';
+    for (const p of Object.values(s.players)) {
+      p.age += 1;
+      p.contract.seasonsLeft = Math.max(1, p.contract.seasonsLeft - 1);
+      p.season = { apps: 0, starts: 0, minutes: 0, goals: 0, shots: 0, keyPasses: 0, tackles: 0, redCards: 0 };
+      p.condition = 100;
+    }
+    s.fixtures = genFixtures(s.time.season, Object.keys(s.clubs), mulberry32(s.gameSeed + s.time.season));
+    s.plans = {};
+    for (const id of Object.keys(s.clubs)) {
+      this.ledger(s, id, 'SEASON_BUDGET', ECON.budget);
+      this.paySalary(s, id);
+    }
+    this.log(s, 'SEASON_STARTED', { season: s.time.season });
+    this.commit(s);
+    return s;
+  }
+  getSeasonOutcome(season?: SeasonNo): SeasonOutcome | null {
+    const s = this.req();
+    if (season === undefined) return s.pendingOutcome ?? s.seasonHistory[s.seasonHistory.length - 1] ?? null;
+    if (s.pendingOutcome?.season === season) return s.pendingOutcome;
+    return s.seasonHistory.find((o) => o.season === season) ?? null;
+  }
+
+  private ledger(s: GameState, clubId: ClubId, kind: LedgerKind, amount: number): LedgerEntry {
+    const fin = s.finances[clubId];
+    const e: LedgerEntry = { season: s.time.season, day: s.time.day, kind, amount, memo: LEDGER_MEMO[kind] };
+    if (fin) {
+      fin.balance += amount;
+      fin.ledger.push(e);
+      if (fin.ledger.length > 200) fin.ledger.splice(0, fin.ledger.length - 200);
+    }
+    return e;
+  }
+  private paySalary(s: GameState, clubId: ClubId): LedgerEntry {
+    const total = this.squadOf(s, clubId).reduce((a, p) => a + p.contract.salary, 0);
+    return this.ledger(s, clubId, 'SALARY', -Math.round(total / 28));
+  }
+
+  /** 하루 진행 (s 를 제자리 수정) */
+  private step(s: GameState): DayResult {
+    if (s.phase === 'SEASON_OVER') throw new GameError('INVALID_PHASE', '시즌이 끝났습니다. 새 시즌을 시작하세요');
+    const from = { ...s.time };
+    const userLedger: LedgerEntry[] = [];
+    const matches: MatchSummary[] = [];
+    const expired: ProposalId[] = [];
+    const notices: string[] = [];
+    let userMatchId: MatchId | undefined;
+    let userResolvedPlan: ResolvedPlan | undefined;
+    let seasonOutcome: SeasonOutcome | undefined;
+
+    if (s.phase === 'MATCHDAY') {
+      const day = s.time.day;
+      for (const p of Object.values(s.proposals)) {
+        if (p.status === 'OPEN' && p.expiresAt.season === s.time.season && p.expiresAt.day === day) {
+          p.status = 'EXPIRED';
+          expired.push(p.id);
+          this.log(s, 'PROPOSAL_EXPIRED', { id: p.id });
+        }
+      }
+      const todays = s.fixtures.filter((f) => f.day === day && f.season === s.time.season && !f.played).sort((a, b) => a.id.localeCompare(b.id));
+      for (const fx of todays) {
+        const rh = this.resolve(s, fx.homeId, fx);
+        const ra = this.resolve(s, fx.awayId, fx);
+        const sim = this.simulate(s, fx, rh, ra);
+        matches.push(sim.summary);
+        s.summaries[fx.id] = sim.summary;
+        fx.played = true;
+        for (const [side, other, rp] of [[sim.summary.home, sim.summary.away, rh], [sim.summary.away, sim.summary.home, ra]] as const) {
+          const kind: LedgerKind = side.goals > other.goals ? 'MATCH_WIN' : side.goals === other.goals ? 'MATCH_DRAW' : 'MATCH_LOSS';
+          const amt = kind === 'MATCH_WIN' ? ECON.win : kind === 'MATCH_DRAW' ? ECON.draw : ECON.loss;
+          const e = this.ledger(s, side.clubId, kind, amt);
+          if (side.clubId === s.userClubId) userLedger.push(e);
+          const club = s.clubs[side.clubId];
+          if (club) {
+            const used = rp.plan;
+            club.tactics[used.startSlot].familiarity = clamp(club.tactics[used.startSlot].familiarity + 6, 0, 100);
+            const lu = clone(used);
+            delete lu.opponentOrders;
+            club.lastUsedPlan = lu;
+            for (const pid of club.playerIds) {
+              const pl = s.players[pid];
+              if (!pl) continue;
+              pl.morale = clampStep(pl.morale + (kind === 'MATCH_WIN' ? 1 : kind === 'MATCH_LOSS' ? -1 : 0) * (Math.random() < 0.5 ? 1 : 0));
+            }
+          }
+          s.plans[side.clubId] = {};
+        }
+        if (fx.homeId === s.userClubId || fx.awayId === s.userClubId) {
+          userMatchId = fx.id;
+          userResolvedPlan = fx.homeId === s.userClubId ? rh : ra;
+          this.reports[fx.id] = sim.report;
+          this.replays[fx.id] = sim.replay;
+          const us = fx.homeId === s.userClubId ? sim.summary.home : sim.summary.away;
+          const them = fx.homeId === s.userClubId ? sim.summary.away : sim.summary.home;
+          notices.push(`${us.goals}:${them.goals} ${us.goals > them.goals ? '승' : us.goals === them.goals ? '무' : '패'} vs ${s.clubs[them.clubId]?.name ?? ''}`);
+          for (const p of Object.values(s.proposals)) {
+            if (p.status === 'OPEN' && p.payload.matchId === fx.id) {
+              p.status = 'EXPIRED';
+              expired.push(p.id);
+            }
+          }
+        }
+      }
+      if (day === 26) {
+        seasonOutcome = this.judge(s);
+        s.pendingOutcome = seasonOutcome;
+      }
+      s.time = { season: s.time.season, day: day + 1 };
+      this.daily(s, userLedger);
+      if (s.time.day === 27) {
+        s.phase = 'OFFSEASON';
+        const out = s.pendingOutcome;
+        if (out) {
+          for (const [cid, amt] of Object.entries(out.prizes)) {
+            const e = this.ledger(s, cid, 'PRIZE', amt);
+            if (cid === s.userClubId) userLedger.push(e);
+          }
+          const e = this.ledger(s, out.championId, 'CHAMPION_BONUS', Math.round(ECON.budget * 0.1));
+          if (out.championId === s.userClubId) userLedger.push(e);
+        }
+      }
+    } else if (s.phase === 'OFFSEASON') {
+      if (s.time.day === 27) {
+        s.time = { season: s.time.season, day: 28 };
+        this.daily(s, userLedger);
+        for (const fin of Object.values(s.finances)) {
+          const cap = Math.round(ECON.budget * 0.2);
+          const excess = Math.max(0, fin.balance - cap);
+          fin.transferOnlyBudget = excess;
+          if (fin.clubId === s.userClubId && excess > 0) {
+            notices.push(`이월 상한 초과분 ${(excess / 1e6).toFixed(1)}M 은 이적 한정 예산으로 분리됩니다`);
+          }
+        }
+      } else {
+        s.phase = 'SEASON_OVER';
+        seasonOutcome = s.pendingOutcome;
+        notices.push('시즌이 끝났습니다. 리그 화면에서 결산을 확인하세요');
+      }
+    }
+    const processedAt = this.ts(s);
+    this.log(s, 'DAY_ADVANCED', { from, to: s.time });
+    return {
+      from,
+      to: { ...s.time },
+      phaseAfter: s.phase,
+      matches,
+      userMatchId,
+      userResolvedPlan,
+      ledger: userLedger,
+      expiredProposals: expired,
+      seasonOutcome,
+      notices,
+      processedAt,
+    };
+  }
+
+  private daily(s: GameState, userLedger: LedgerEntry[]): void {
+    for (const p of Object.values(s.players)) {
+      p.condition = clamp(p.condition + 14 + p.attrs.stamina * 0.3, 0, 100);
+      if (p.availability.injuryDays > 0) p.availability.injuryDays -= 1;
+    }
+    for (const club of Object.values(s.clubs)) {
+      for (const k of ['A', 'B'] as const) {
+        const used = club.lastUsedPlan?.startSlot === k;
+        if (!used) club.tactics[k].familiarity = clamp(club.tactics[k].familiarity - 2, 0, 100);
+      }
+      const e = this.paySalary(s, club.id);
+      if (club.id === s.userClubId) userLedger.push(e);
+    }
+  }
+
+  private judge(s: GameState): SeasonOutcome {
+    const table = this.standingsOf(s);
+    const labels: SeasonOutcome['labels'] = {};
+    const prizes: SeasonOutcome['prizes'] = {};
+    for (const r of table) {
+      labels[r.clubId] = r.zone === 'PROMOTION' ? 'PROMOTED' : r.zone === 'RELEGATION' ? 'RELEGATED' : 'STAYED';
+      const rate = r.position === 1 ? 0.2 : r.position <= 3 ? 0.15 : r.position <= 6 ? 0.1 : r.position <= 10 ? 0.06 : 0.03;
+      prizes[r.clubId] = Math.round(ECON.budget * rate);
+    }
+    return { season: s.time.season, tier: s.settings.tier, finalTable: table, championId: table[0]?.clubId ?? '', labels, prizes };
+  }
+
+  private strengthOf(s: GameState, rp: ResolvedPlan): number {
+    const club = s.clubs[rp.plan.clubId];
+    if (!club) return 50;
+    const f = formationOf(club.tactics[rp.plan.startSlot].formation);
+    const vals = rp.plan.lineup.starters.map((id, i) => {
+      const p = s.players[id];
+      if (!p) return 30;
+      return p.ovr * FIT_MULT[fitOf(p, f.slots[i]?.position ?? 'CM')] * condEff(p.condition);
+    });
+    const fam = club.tactics[rp.plan.startSlot].familiarity;
+    return (vals.reduce((a, b) => a + b, 0) / Math.max(1, vals.length)) * (0.95 + fam / 2000);
+  }
+
+  private simulate(s: GameState, fx: Fixture, rh: ResolvedPlan, ra: ResolvedPlan) {
+    const rng = mulberry32(hashString(`${s.gameSeed}|${fx.id}`));
+    const home = s.clubs[fx.homeId];
+    const away = s.clubs[fx.awayId];
+    if (!home || !away) throw new GameError('NOT_FOUND', fx.id);
+    const ih = home.tactics[rh.plan.startSlot].instructions;
+    const ia = away.tactics[ra.plan.startSlot].instructions;
+    const sh = this.strengthOf(s, rh);
+    const sa = this.strengthOf(s, ra);
+    // 가짜 상성: 간단한 규칙 몇 개
+    const tac = (me: TeamInstructions, op: TeamInstructions) =>
+      (me.press >= 1 && op.directness <= 0 ? 0.08 : 0) +
+      (me.directness >= 1 && op.line >= 1 ? 0.08 : 0) +
+      (me.width >= 1 && op.width <= -1 ? 0.06 : 0) +
+      (me.counter && op.mentality >= 1 ? 0.1 : 0) -
+      (me.line >= 2 && op.directness >= 1 ? 0.06 : 0);
+    const th = tac(ih, ia);
+    const ta = tac(ia, ih);
+    const lamH = clamp(1.3 * Math.exp((sh - sa) / 18 + th) + 0.12 + ih.mentality * 0.08, 0.2, 4);
+    const lamA = clamp(1.3 * Math.exp((sa - sh) / 18 + ta) + away.tactics[ra.plan.startSlot].instructions.mentality * 0.08, 0.2, 4);
+    const gh = poisson(rng, lamH);
+    const ga = poisson(rng, lamA);
+    const xgH = round2(lamH * (0.75 + rng() * 0.5));
+    const xgA = round2(lamA * (0.75 + rng() * 0.5));
+    const shotsH = Math.max(gh, Math.round(xgH * 7 + rng() * 4) + 2);
+    const shotsA = Math.max(ga, Math.round(xgA * 7 + rng() * 4) + 2);
+    const possH = round2(clamp(0.5 + (sh - sa) / 150 - 0.03 * (ih.directness - ia.directness) + (rng() - 0.5) * 0.08, 0.3, 0.7));
+
+    const scorerOf = (rp: ResolvedPlan): PlayerId => {
+      const club = s.clubs[rp.plan.clubId];
+      const f = club ? formationOf(club.tactics[rp.plan.startSlot].formation) : undefined;
+      const w: number[] = rp.plan.lineup.starters.map((_, i) => {
+        const pos = f?.slots[i]?.position ?? 'CM';
+        return pos === 'ST' ? 5 : pos === 'W' || pos === 'AM' ? 3 : pos === 'CM' ? 1.5 : pos === 'GK' ? 0 : 0.6;
+      });
+      let r = rng() * w.reduce((a, b) => a + b, 0);
+      for (let i = 0; i < w.length; i++) {
+        r -= w[i] ?? 0;
+        if (r <= 0) return rp.plan.lineup.starters[i] ?? '';
+      }
+      return rp.plan.lineup.starters[0] ?? '';
+    };
+    const chances: ChanceType[] = ['CROSS', 'THROUGH', 'CUTBACK', 'LONG', 'SOLO', 'COUNTER', 'CORNER'];
+    const goals: { minute: number; clubId: ClubId; playerId: PlayerId; chance: ChanceType }[] = [];
+    for (let i = 0; i < gh; i++) goals.push({ minute: 1 + Math.floor(rng() * 90), clubId: fx.homeId, playerId: scorerOf(rh), chance: chances[Math.floor(rng() * chances.length)] ?? 'CROSS' });
+    for (let i = 0; i < ga; i++) goals.push({ minute: 1 + Math.floor(rng() * 90), clubId: fx.awayId, playerId: scorerOf(ra), chance: chances[Math.floor(rng() * chances.length)] ?? 'CROSS' });
+    goals.sort((a, b) => a.minute - b.minute);
+    const scoreAt = (minute: number): [number, number] => [
+      goals.filter((g) => g.minute <= minute && g.clubId === fx.homeId).length,
+      goals.filter((g) => g.minute <= minute && g.clubId === fx.awayId).length,
+    ];
+
+    // 조건부 지시 발동
+    const triggers: { minute: number; clubId: ClubId; text: string }[] = [];
+    for (const [rp, isHome] of [[rh, true], [ra, false]] as const) {
+      for (const c of rp.plan.conditionals) {
+        if (!c.enabled) continue;
+        for (const m of [45, 50, 55, 60, 65, 70, 75, 80, 85]) {
+          const [h, a] = scoreAt(m);
+          const diff = isHome ? h - a : a - h;
+          const ok = c.conditions.every((k) =>
+            k.kind === 'TIME'
+              ? m >= (k.after === 'HT' ? 45 : k.after) && (k.after !== 'HT' || m === 45)
+              : k.state === 'LEAD'
+                ? diff >= (k.minDiff ?? 1)
+                : k.state === 'TRAIL'
+                  ? -diff >= (k.minDiff ?? 1)
+                  : diff === 0,
+          );
+          if (ok) {
+            triggers.push({ minute: m, clubId: rp.plan.clubId, text: conditionalText(c) });
+            break;
+          }
+        }
+      }
+    }
+
+    // 선수 상태
+    const subs: { minute: number; clubId: ClubId; out: PlayerId; in: PlayerId }[] = [];
+    const injuries: { minute: number; clubId: ClubId; playerId: PlayerId; days: number }[] = [];
+    for (const [rp, instr] of [[rh, ih], [ra, ia]] as const) {
+      const drain = 26 + instr.press * 2 + instr.tempo;
+      const starters = rp.plan.lineup.starters;
+      const nSubs = 2 + Math.floor(rng() * 2);
+      const byCond = [...starters].filter((id) => s.players[id]?.primary !== 'GK').sort((a, b) => (s.players[a]?.condition ?? 0) - (s.players[b]?.condition ?? 0));
+      const benchAvail = rp.plan.lineup.bench.filter((id) => s.players[id]?.primary !== 'GK');
+      for (let i = 0; i < nSubs && i < benchAvail.length; i++) {
+        const out = byCond[i];
+        const inn = benchAvail[i];
+        if (out && inn) subs.push({ minute: 58 + Math.floor(rng() * 25), clubId: rp.plan.clubId, out, in: inn });
+      }
+      for (const id of starters) {
+        const p = s.players[id];
+        if (!p) continue;
+        const sub = subs.find((x) => x.out === id);
+        const mins = sub ? sub.minute : 90;
+        p.condition = clamp(p.condition - drain * (mins / 90) - rng() * 6 + p.attrs.stamina * 0.15, 20, 100);
+        p.season.apps++;
+        p.season.starts++;
+        p.season.minutes += mins;
+        if (rng() < 0.012) {
+          const days = 1 + Math.floor(rng() * 7);
+          p.availability.injuryDays = days;
+          injuries.push({ minute: 1 + Math.floor(rng() * 89), clubId: rp.plan.clubId, playerId: id, days });
+        }
+      }
+      for (const sb of subs.filter((x) => x.clubId === rp.plan.clubId)) {
+        const p = s.players[sb.in];
+        if (!p) continue;
+        const mins = 90 - sb.minute;
+        p.condition = clamp(p.condition - drain * (mins / 90), 20, 100);
+        p.season.apps++;
+        p.season.minutes += mins;
+      }
+      for (const id of rp.plan.lineup.bench) {
+        const p = s.players[id];
+        if (p && p.availability.suspendedMatches > 0) p.availability.suspendedMatches--;
+      }
+    }
+    for (const g of goals) {
+      const p = s.players[g.playerId];
+      if (p) {
+        p.season.goals++;
+        p.season.shots++;
+      }
+    }
+
+    const lite = (clubId: ClubId, rp: ResolvedPlan, g: number, xg: number, shots: number, poss: number, xgOpp: number): TeamSummaryLite => {
+      const club = s.clubs[clubId];
+      const slot = club?.tactics[rp.plan.startSlot];
+      const z = (a: number, r: number) => ({ attempts: a, successes: Math.round(a * r) });
+      return {
+        clubId,
+        goals: g,
+        xg,
+        shots,
+        possession: poss,
+        formation: slot?.formation ?? '4-4-2',
+        instructions: slot ? clone(slot.instructions) : PRESET_INSTR.BALANCED,
+        zonePass: { z0: z(50 + Math.round(rng() * 20), 0.75 + rng() * 0.15), z1: z(35 + Math.round(rng() * 15), 0.55 + rng() * 0.15), z2: z(18 + Math.round(rng() * 10), 0.3 + rng() * 0.15) },
+        ruleFires: { R1: Math.round(rng() * 8), R2: Math.round(rng() * 4), R5: Math.round(rng() * 3) },
+        xPts: xPoints(xg, xgOpp),
+      };
+    };
+    const summary: MatchSummary = {
+      matchId: fx.id,
+      season: fx.season,
+      day: fx.day,
+      home: lite(fx.homeId, rh, gh, xgH, shotsH, possH, xgA),
+      away: lite(fx.awayId, ra, ga, xgA, shotsA, round2(1 - possH), xgH),
+      engineVersion: 'fake-0',
+      seed: hashString(fx.id),
+    };
+
+    // 리포트·중계 (사용자 경기만 쓰이지만 계산은 단순해서 모두 만든다)
+    const userIsHome = fx.homeId === s.userClubId;
+    const usId = userIsHome ? fx.homeId : fx.awayId;
+    const themId = userIsHome ? fx.awayId : fx.homeId;
+    const us = userIsHome ? summary.home : summary.away;
+    const them = userIsHome ? summary.away : summary.home;
+    const nameOf = (id: PlayerId) => s.players[id]?.name ?? '선수';
+    const clubName = (id: ClubId) => s.clubs[id]?.shortName ?? id;
+
+    const ruleIds: RuleId[] = ['R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R10', 'TEMPO'];
+    const ruleXg: Partial<Record<RuleId, number>> = {};
+    for (const r of ruleIds) ruleXg[r] = round2((rng() - 0.5) * 0.6);
+    const factorText: Record<string, (b: 'US' | 'THEM', n: number) => string> = {
+      R1: (b, n) => (b === 'US' ? `전방 압박으로 상대 빌드업 ${n}회 차단` : `상대 압박에 빌드업 ${n}회 끊김`),
+      R2: (b, n) => (b === 'US' ? `롱볼로 압박을 넘겨 ${n}회 전진` : `상대 롱볼에 뒷공간 ${n}회 노출`),
+      R3: (b, n) => (b === 'US' ? `낮은 블록으로 상대 슈팅 ${n}회 억제` : `상대 밀집 수비에 막혀 ${n}회 무산`),
+      R4: (b, n) => (b === 'US' ? `넓은 폭으로 크로스 찬스 ${n}회` : `측면에서 크로스 ${n}회 허용`),
+      R5: (b, n) => (b === 'US' ? `역습으로 ${n}회 찬스 창출` : `공격 가담 뒤 역습 ${n}회 허용`),
+      R6: (b, n) => (b === 'US' ? `오프사이드 트랩 → 상대 오프사이드 ${n}회` : `상대 트랩에 오프사이드 ${n}회`),
+      R7: (b, n) => (b === 'US' ? `중원 수적 우위로 점유 ${n}회 유지` : `중원 수적 열세로 ${n}회 턴오버`),
+      R10: (b, n) => (b === 'US' ? `공략 측면 돌파 ${n}회` : `약한 측면을 ${n}회 공략당함`),
+      TEMPO: (b, n) => (b === 'US' ? `템포 조절로 턴오버 ${n}회 감소` : `빠른 템포로 턴오버 ${n}회`),
+    };
+    const keyFactors: FactorCard[] = ruleIds
+      .map((r) => ({ r, x: ruleXg[r] ?? 0 }))
+      .sort((a, b) => Math.abs(b.x) - Math.abs(a.x))
+      .slice(0, 3)
+      .map(({ r, x }) => {
+        const beneficiary = x >= 0 ? 'US' : 'THEM';
+        const count = 1 + Math.floor(rng() * 7);
+        return { ruleId: r, beneficiary, count, leagueAvgCount: round2(2 + rng() * 3), xg: x, text: (factorText[r] ?? (() => r))(beneficiary, count) };
+      });
+    const tacticsSum = round2(keyFactors.reduce((a, k) => a + k.xg, 0));
+    const luckDelta = round2(us.goals - them.goals - (us.xg - them.xg));
+    const timeline: TimelineItem[] = [
+      ...goals.map((g) => ({ minute: g.minute, kind: 'GOAL' as const, clubId: g.clubId, text: `${nameOf(g.playerId)} 골 (${clubName(g.clubId)})` })),
+      ...triggers.map((t) => ({ minute: t.minute, kind: 'TRIGGER' as const, clubId: t.clubId, text: `지시 발동: ${t.text}` })),
+      ...subs.map((x) => ({ minute: x.minute, kind: 'SUB' as const, clubId: x.clubId, text: `${nameOf(x.out)} ↔ ${nameOf(x.in)}` })),
+      ...injuries.map((x) => ({ minute: x.minute, kind: 'INJURY' as const, clubId: x.clubId, text: `${nameOf(x.playerId)} 부상 (${x.days}일)` })),
+    ].sort((a, b) => a.minute - b.minute);
+    const worst = keyFactors.filter((k) => k.beneficiary === 'THEM');
+    const patchFor: Partial<Record<RuleId, Partial<TeamInstructions>>> = {
+      R1: { directness: 2 }, R5: { mentality: 0 }, R3: { width: 2 }, R6: { tempo: -1 }, R2: { line: -1 }, R4: { width: 1 },
+    };
+    const suggestions: Suggestion[] = worst.slice(0, 2).map((k) => ({
+      ruleId: k.ruleId,
+      text: RULES.find((r) => r.id === k.ruleId)?.counter ?? '',
+      instructionPatch: patchFor[k.ruleId],
+    }));
+    const prevPts = Object.values(s.summaries)
+      .filter((m) => m.season === fx.season && (m.home.clubId === usId || m.away.clubId === usId))
+      .reduce(
+        (acc, m) => {
+          const me = m.home.clubId === usId ? m.home : m.away;
+          const op = m.home.clubId === usId ? m.away : m.home;
+          return { expected: acc.expected + me.xPts, actual: acc.actual + (me.goals > op.goals ? 3 : me.goals === op.goals ? 1 : 0) };
+        },
+        { expected: 0, actual: 0 },
+      );
+    const report: MatchReport = {
+      matchId: fx.id,
+      clubId: usId,
+      opponentId: themId,
+      summary: { goalsFor: us.goals, goalsAgainst: them.goals, xgFor: us.xg, xgAgainst: them.xg, possession: us.possession, shotsFor: us.shots, shotsAgainst: them.shots, isHome: userIsHome },
+      luck: {
+        level: luckDelta <= -1 ? 'UNLUCKY' : luckDelta >= 1 ? 'LUCKY' : 'NEUTRAL',
+        delta: luckDelta,
+        text: luckDelta <= -1 ? '기대보다 결과가 나빴어요. 경기 내용은 괜찮았습니다' : luckDelta >= 1 ? '기대 이상으로 운이 따랐어요' : '경기 내용대로의 결과입니다',
+      },
+      keyFactors,
+      factorBars: { strength: round2(((userIsHome ? sh - sa : sa - sh) / 20) * 1.2), prep: round2((rng() - 0.5) * 0.3), tactics: tacticsSum, luck: luckDelta },
+      zoneFlow: [
+        { zone: 0, label: '빌드업 (Z0→Z1)', passRate: us.zonePass.z0.successes / Math.max(1, us.zonePass.z0.attempts), leagueAvg: 0.8 },
+        { zone: 1, label: '전진 (Z1→Z2)', passRate: us.zonePass.z1.successes / Math.max(1, us.zonePass.z1.attempts), leagueAvg: 0.62 },
+        { zone: 2, label: '마무리 (Z2→슈팅)', passRate: us.zonePass.z2.successes / Math.max(1, us.zonePass.z2.attempts), leagueAvg: 0.37 },
+      ],
+      timeline,
+      suggestions,
+      seasonPoints: {
+        expected: round2(prevPts.expected + us.xPts),
+        actual: prevPts.actual + (us.goals > them.goals ? 3 : us.goals === them.goals ? 1 : 0),
+      },
+      debug: { ruleXg, conservationError: 0 },
+    };
+
+    const lines: CommentaryLine[] = [];
+    const neutral = [
+      (c: string) => `${c}, 후방에서 천천히 공을 돌립니다`,
+      (c: string) => `${c}의 측면 돌파 시도 — 수비에 막힙니다`,
+      (c: string) => `${c}, 중원에서 공을 끊어냅니다`,
+      (c: string) => `${c}의 크로스, 골키퍼가 잡아냅니다`,
+      (c: string) => `${c}, 스루패스를 노렸지만 조금 길었습니다`,
+    ];
+    lines.push({ minute: 0, kind: 'PERIOD', text: '킥오프!', score: [0, 0] });
+    for (let m = 3; m < 90; m += 3 + Math.floor(rng() * 4)) {
+      const c = rng() < possH ? fx.homeId : fx.awayId;
+      const tpl = neutral[Math.floor(rng() * neutral.length)] ?? neutral[0];
+      const chance = rng() < 0.25;
+      lines.push({ minute: m, kind: chance ? 'CHANCE' : 'NEUTRAL', clubId: c, text: tpl ? tpl(clubName(c)) : '', score: scoreAt(m) });
+      if (m < 45 && m + 4 >= 45) lines.push({ minute: 45, kind: 'PERIOD', text: '전반 종료', score: scoreAt(45) });
+    }
+    for (const g of goals) lines.push({ minute: g.minute, kind: 'GOAL', clubId: g.clubId, text: `골! ${nameOf(g.playerId)} (${clubName(g.clubId)})`, score: scoreAt(g.minute) });
+    for (const t of triggers) lines.push({ minute: t.minute, kind: 'TACTIC', clubId: t.clubId, text: `[전술] ${clubName(t.clubId)} 지시 발동: ${t.text}`, score: scoreAt(t.minute) });
+    for (const x of subs) lines.push({ minute: x.minute, kind: 'SUB', clubId: x.clubId, text: `교체: ${nameOf(x.out)} → ${nameOf(x.in)}`, score: scoreAt(x.minute) });
+    for (const x of injuries) lines.push({ minute: x.minute, kind: 'CARD', clubId: x.clubId, text: `${nameOf(x.playerId)} 부상으로 쓰러집니다`, score: scoreAt(x.minute) });
+    lines.push({ minute: 90, kind: 'PERIOD', text: `경기 종료 ${gh} : ${ga}`, score: [gh, ga] });
+    const order: Record<string, number> = { PERIOD: 0, GOAL: 1 };
+    lines.sort((a, b) => a.minute - b.minute || (order[a.kind] ?? 2) - (order[b.kind] ?? 2));
+    const momentum = Array.from({ length: 18 }, () => round2(clamp((possH - 0.5) * 2 + (rng() - 0.5) * 1.2, -1, 1)));
+    const zoneBars = Array.from({ length: 18 }, () => {
+      const a = rng() + 0.3;
+      const b = rng() + 0.3;
+      const c = rng() * 0.8 + 0.1;
+      const t = a + b + c;
+      return [round2(a / t), round2(b / t), round2(c / t)] as [number, number, number];
+    });
+    const replay: MatchReplay = { matchId: fx.id, homeId: fx.homeId, awayId: fx.awayId, lines, momentum, zoneBars };
+    return { summary, report, replay };
+  }
+
+  // ── 리포트 ─────────────────────────────────────────────────────────
+  getReport(matchId: MatchId): MatchReport {
+    this.req();
+    const r = this.reports[matchId];
+    if (!r) throw new GameError('NOT_FOUND', '리포트가 없습니다 (사용자 구단 경기만 제공)');
+    return r;
+  }
+  getMatchReplay(matchId: MatchId): MatchReplay {
+    this.req();
+    const r = this.replays[matchId];
+    if (!r) throw new GameError('NOT_FOUND', '중계 데이터가 없습니다');
+    return r;
+  }
+
+  // ── 코치 제안 ──────────────────────────────────────────────────────
+  private baseBundlePlan(s: GameState): MatchPlan {
+    const ps = s.plans[s.userClubId] ?? {};
+    return clone(ps.confirmed?.plan ?? ps.draft?.plan ?? this.recommendPlan());
+  }
+  private diffOf(s: GameState, base: MatchPlan, patch: PlanChangePatch): ProposalDiffItem[] {
+    const out: ProposalDiffItem[] = [];
+    const nm = (id?: PlayerId) => (id ? (s.players[id]?.name ?? id) : '없음');
+    if (patch.lineup) {
+      patch.lineup.starters.forEach((id, i) => {
+        const b = base.lineup.starters[i];
+        if (b !== id) out.push({ path: `lineup.starters[${i}]`, label: `선발 ${i + 1}번 자리`, before: nm(b), after: nm(id) });
+      });
+      const bb = base.lineup.bench.join(',');
+      if (bb !== patch.lineup.bench.join(',')) out.push({ path: 'lineup.bench', label: '벤치', before: `${base.lineup.bench.length}명`, after: `${patch.lineup.bench.length}명 (변경)` });
+    }
+    if (patch.startSlot && patch.startSlot !== base.startSlot) out.push({ path: 'startSlot', label: '시작 슬롯', before: base.startSlot, after: patch.startSlot });
+    if (patch.instructions) {
+      const club = s.clubs[s.userClubId];
+      const cur = club?.tactics[patch.instructions.slot].instructions;
+      const labels: Record<string, string> = { mentality: '공격 성향', press: '압박 강도', line: '수비 라인', width: '경기 폭', tempo: '템포', directness: '패스 방식', counter: '역습', offsideTrap: '오프사이드 트랩' };
+      for (const [k, v] of Object.entries(patch.instructions.patch)) {
+        const before = cur ? String(cur[k as keyof TeamInstructions]) : '?';
+        if (before !== String(v)) out.push({ path: `instructions.${patch.instructions.slot}.${k}`, label: `[${patch.instructions.slot}] ${labels[k] ?? k}`, before, after: String(v) });
+      }
+    }
+    if (patch.conditionals) out.push({ path: 'conditionals', label: '조건부 지시', before: `${base.conditionals.length}개`, after: patch.conditionals.map(conditionalText).join(' / ') || '없음' });
+    if (patch.opponentOrders !== undefined) out.push({ path: 'opponentOrders', label: '상대 맞춤 지시', before: base.opponentOrders ? '있음' : '없음', after: patch.opponentOrders ? '변경' : '제거' });
+    return out;
+  }
+  propose(input: ProposalInput): Proposal {
+    const s = clone(this.req());
+    this.requireCoach(s);
+    const reason = input.reason.trim();
+    if (reason.length < 1 || reason.length > 80) throw new GameError('PROPOSAL_INVALID', '사유는 1~80자로 입력하세요');
+    const mine = Object.values(s.proposals).filter((p) => p.authorId === s.actorUserId && p.status === 'OPEN');
+    if (mine.length >= 5) throw new GameError('PROPOSAL_LIMIT', '동시에 열린 제안은 최대 5개입니다');
+    const fx = this.nextFixture(s);
+    if (!fx) throw new GameError('INVALID_PHASE', '다음 경기가 없습니다');
+    const diff = this.diffOf(s, this.baseBundlePlan(s), input.payload.patch);
+    if (diff.length === 0) throw new GameError('PROPOSAL_INVALID', '바뀐 내용이 없습니다');
+    const paths = diff.map((d) => d.path).sort().join('|');
+    if (mine.some((p) => p.diff.map((d) => d.path).sort().join('|') === paths)) throw new GameError('PROPOSAL_DUPLICATE', '같은 항목을 바꾸는 제안이 이미 있습니다');
+    const id = `pr-${s.seq + 1}`;
+    const prop: Proposal = {
+      id,
+      clubId: s.userClubId,
+      authorId: s.actorUserId,
+      authorRole: 'TAC',
+      kind: 'PLAN_CHANGE',
+      payload: { kind: 'PLAN_CHANGE', matchId: fx.id, patch: clone(input.payload.patch) },
+      reason,
+      diff,
+      reactions: [],
+      createdAt: this.ts(s),
+      expiresAt: { season: fx.season, day: fx.day },
+      status: 'OPEN',
+    };
+    s.proposals[id] = prop;
+    this.log(s, 'PROPOSAL_CREATED', { id });
+    this.commit(s);
+    return prop;
+  }
+  react(proposalId: ProposalId, choice: 'FOR' | 'AGAINST', reason?: string): Proposal {
+    const s = clone(this.req());
+    this.requireCoach(s);
+    const p = s.proposals[proposalId];
+    if (!p) throw new GameError('NOT_FOUND', proposalId);
+    if (p.status !== 'OPEN') throw new GameError('PROPOSAL_NOT_OPEN', '열린 제안이 아닙니다');
+    p.reactions = [...p.reactions.filter((r) => r.userId !== s.actorUserId), { userId: s.actorUserId, choice, reason }];
+    this.log(s, 'PROPOSAL_REACTED', { id: proposalId, choice });
+    this.commit(s);
+    return p;
+  }
+  approve(proposalId: ProposalId, edits?: PlanChangePatch): ApproveResult {
+    const s = clone(this.req());
+    this.requireOwner(s);
+    const p = s.proposals[proposalId];
+    if (!p) throw new GameError('NOT_FOUND', proposalId);
+    if (p.status !== 'OPEN') throw new GameError('PROPOSAL_NOT_OPEN', '열린 제안이 아닙니다');
+    const patch = edits ?? p.payload.patch;
+    const plan = this.baseBundlePlan(s);
+    if (patch.lineup) plan.lineup = clone(patch.lineup);
+    if (patch.startSlot) plan.startSlot = patch.startSlot;
+    if (patch.conditionals) plan.conditionals = clone(patch.conditionals);
+    if (patch.opponentOrders === null) delete plan.opponentOrders;
+    else if (patch.opponentOrders) plan.opponentOrders = clone(patch.opponentOrders);
+    const details = [
+      ...this.validatePlan(plan).filter((i) => i.severity === 'ERROR').map((i) => i.message),
+      ...plan.lineup.starters.filter((id) => !available(s.players[id])).map((id) => `${s.players[id]?.name ?? id} 출전 불가`),
+    ];
+    const ts = this.ts(s);
+    if (details.length) {
+      p.status = 'STALE';
+      p.resolvedAt = ts;
+      p.resolvedBy = s.actorUserId;
+      this.commit(s);
+      return { ok: false, proposal: p, reason: 'STALE', details };
+    }
+    const club = s.clubs[s.userClubId];
+    if (patch.instructions && club) {
+      const slot = club.tactics[patch.instructions.slot];
+      slot.instructions = { ...slot.instructions, ...patch.instructions.patch };
+      if (slot.instructions.line < 1) slot.instructions.offsideTrap = false;
+    }
+    s.plans[s.userClubId] = { confirmed: { plan, status: 'CONFIRMED', updatedBy: s.actorUserId, updatedAt: ts, sourceProposalId: p.id } };
+    p.status = 'APPROVED';
+    p.resolvedBy = s.actorUserId;
+    p.resolvedAt = ts;
+    const myPaths = new Set(p.diff.map((d) => d.path));
+    const superseded: ProposalId[] = [];
+    for (const o of Object.values(s.proposals)) {
+      if (o.id !== p.id && o.status === 'OPEN' && o.diff.some((d) => myPaths.has(d.path))) {
+        o.status = 'SUPERSEDED';
+        o.supersededBy = p.id;
+        superseded.push(o.id);
+      }
+    }
+    this.log(s, 'PROPOSAL_APPROVED', { id: p.id, edited: !!edits });
+    this.commit(s);
+    return { ok: true, proposal: p, superseded };
+  }
+  reject(proposalId: ProposalId, note?: string): Proposal {
+    const s = clone(this.req());
+    this.requireOwner(s);
+    const p = s.proposals[proposalId];
+    if (!p) throw new GameError('NOT_FOUND', proposalId);
+    if (p.status !== 'OPEN') throw new GameError('PROPOSAL_NOT_OPEN', '열린 제안이 아닙니다');
+    p.status = 'REJECTED';
+    p.resolutionNote = note;
+    p.resolvedBy = s.actorUserId;
+    p.resolvedAt = this.ts(s);
+    this.log(s, 'PROPOSAL_REJECTED', { id: p.id });
+    this.commit(s);
+    return p;
+  }
+  listProposals(filter: { status?: ProposalStatus } = {}): Proposal[] {
+    return Object.values(this.req().proposals)
+      .filter((p) => !filter.status || p.status === filter.status)
+      .sort((a, b) => b.createdAt.seq - a.createdAt.seq);
+  }
+
+  // ── 로그 ──────────────────────────────────────────────────────────
+  logEvent(kind: UiLogKind, data?: Record<string, unknown>): void {
+    if (!this.state) return;
+    // 가짜 구현: 리렌더를 피하려고 스냅샷 교체 없이 로그만 덧붙인다
+    this.log(this.state, kind, data);
+    this.save();
+  }
+  exportActionLog(): string {
+    return JSON.stringify(this.req().actionLog, null, 2);
+  }
+
+  // ── 개발자 ────────────────────────────────────────────────────────
+  setTacCap(cap: TacticCap): void {
+    const s = clone(this.req());
+    s.settings.tacCap = cap;
+    this.commit(s);
+  }
+  resimulate(matchId: MatchId, overrides: ResimulateOverrides = {}): MatchReport {
+    const base = this.getReport(matchId);
+    const r = clone(base);
+    const factor = overrides.tacticsEnabled === false ? 0 : (overrides.tacCap ?? this.req().settings.tacCap) / 0.35;
+    const disabled = new Set(overrides.disabledRules ?? []);
+    const ruleXg: Partial<Record<RuleId, number>> = {};
+    for (const [k, v] of Object.entries(base.debug?.ruleXg ?? {}) as [RuleId, number][]) ruleXg[k] = disabled.has(k) ? 0 : round2(v * factor);
+    r.debug = { ruleXg, conservationError: 0 };
+    r.keyFactors = r.keyFactors.filter((k) => !disabled.has(k.ruleId)).map((k) => ({ ...k, xg: round2(k.xg * factor) }));
+    r.factorBars = { ...r.factorBars, tactics: round2(r.keyFactors.reduce((a, k) => a + k.xg, 0)) };
+    return r;
+  }
+  runCalibration(opts: CalibrationOptions, onProgress?: (p: CalibrationProgress) => void): Promise<CalibrationReport> {
+    const scenarios = opts.scenarios ?? ['BASELINE', 'COUNTER_SPREAD', 'OVR_DIFF_10', 'OVR_DIFF_10_COUNTER', 'OVR_DIFF_25', 'TEMPO_VARIANCE', 'RULE_ISOLATION'];
+    const started = Date.now();
+    const rng = mulberry32(opts.seed);
+    return new Promise((resolve) => {
+      let i = 0;
+      const tick = () => {
+        const sc = scenarios[i];
+        if (!sc) {
+          const all: CalibrationTarget[] = [
+            { id: 'goals', scenario: 'BASELINE', label: '평균 총 득점', min: 2.5, max: 2.9, actual: round2(2.4 + rng() * 0.6), pass: false, unit: 'goals' },
+            { id: 'draws', scenario: 'BASELINE', label: '무승부 비율', min: 22, max: 28, actual: round2(20 + rng() * 10), pass: false, unit: '%' },
+            { id: 'spread', scenario: 'COUNTER_SPREAD', label: '카운터 승률 차', min: 10, max: 15, actual: round2(8 + rng() * 8), pass: false, unit: '%p' },
+            { id: 'ovr10', scenario: 'OVR_DIFF_10', label: '강팀 승률 (10점 차)', min: 60, max: 68, actual: round2(58 + rng() * 12), pass: false, unit: '%' },
+            { id: 'ovr25', scenario: 'OVR_DIFF_25', label: '강팀 승률 (25점 차)', min: 85, actual: round2(80 + rng() * 15), pass: false, unit: '%' },
+            { id: 'p95', scenario: 'RULE_ISOLATION', label: '규칙 합 기여 P95', max: 0.6, actual: round2(0.4 + rng() * 0.3), pass: false, unit: 'xG' },
+          ];
+          const targets = all
+            .filter((t) => scenarios.includes(t.scenario))
+            .map((t) => ({ ...t, pass: (t.min === undefined || t.actual >= t.min) && (t.max === undefined || t.actual <= t.max) }));
+          resolve({ engineVersion: 'fake-0', tacCap: opts.tacCap, matchesPerScenario: opts.matchesPerScenario, seed: opts.seed, targets, allPass: targets.every((t) => t.pass), durationMs: Date.now() - started });
+          return;
+        }
+        onProgress?.({ scenario: sc, done: i + 1, total: scenarios.length });
+        i++;
+        setTimeout(tick, 250);
+      };
+      setTimeout(tick, 100);
+    });
+  }
+}
+
+export function createFakeGameService(opts?: { persist?: boolean }): GameService {
+  return new FakeGameService(opts);
+}

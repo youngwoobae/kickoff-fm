@@ -1,0 +1,123 @@
+/** 플랜 저장·제출(구단주) / 제안하기(코치) 하단 CTA (소유: B) */
+import { useState } from 'react';
+import type { PlanChangePatch } from '../../types';
+import { Sheet, StickyActions } from '../components/kit';
+import { seatLabel } from '../format';
+import { useAction, useIsOwner, useSnapshot } from '../service/ServiceContext';
+import { diffPatch, isEmptyPatch, usePlanEditor } from './PlanEditor';
+
+export function PlanStatusLine() {
+  const { planState, dirty } = usePlanEditor();
+  const snap = useSnapshot();
+  if (!planState?.matchId) return <span className="muted">다음 경기가 없습니다</span>;
+  const c = planState.confirmed;
+  const d = planState.draft;
+  return (
+    <span className="plan-status">
+      {c ? (
+        <>
+          <span className="badge badge-good">✓ 확정 제출</span> Day {c.updatedAt.day} · {snap ? seatLabel(snap.memberships, c.updatedBy) : c.updatedBy}
+          {c.sourceProposalId && ' (코치 제안 반영)'}
+        </>
+      ) : d ? (
+        <>
+          <span className="badge badge-warn">초안</span> 마감 때 초안은 쓰이지 않아요
+        </>
+      ) : (
+        <>
+          <span className="badge badge-bad">미제출</span> 마감 시 {planState.preview ? '4.7 규칙 플랜' : '기본 플랜'} 적용
+        </>
+      )}
+      {dirty && <span className="badge badge-accent">편집 중</span>}
+    </span>
+  );
+}
+
+export function ProposeSheet({ open, onClose, patch, title = '코치 제안 보내기' }: { open: boolean; onClose: () => void; patch: PlanChangePatch; title?: string }) {
+  const run = useAction();
+  const { planState } = usePlanEditor();
+  const [reason, setReason] = useState('');
+  const submit = () => {
+    if (!planState?.matchId) return;
+    const r = run((s) => s.propose({ payload: { kind: 'PLAN_CHANGE', matchId: planState.matchId as string, patch }, reason }), '제안을 보냈어요. 구단주 승인을 기다립니다');
+    if (r) {
+      setReason('');
+      onClose();
+    }
+  };
+  return (
+    <Sheet
+      open={open}
+      title={title}
+      onClose={onClose}
+      footer={
+        <button type="button" className="btn btn-primary btn-block" disabled={reason.trim().length === 0} onClick={submit}>
+          제안 보내기
+        </button>
+      }
+    >
+      <p className="muted">바꾼 항목: {Object.keys(patch).map((k) => PATCH_LABEL[k] ?? k).join(', ') || '없음'}</p>
+      <label className="field">
+        <span>이유 (필수, 최대 80자)</span>
+        <input value={reason} maxLength={80} onChange={(e) => setReason(e.target.value)} placeholder="예: 상대 왼쪽 풀백이 느려요. 뒷공간 노림" />
+        <small className="muted">{reason.length}/80</small>
+      </label>
+    </Sheet>
+  );
+}
+
+const PATCH_LABEL: Record<string, string> = {
+  lineup: '선발·벤치',
+  startSlot: '시작 슬롯',
+  instructions: '팀 지시',
+  conditionals: '조건부 지시',
+  opponentOrders: '상대 맞춤 지시',
+};
+
+export function PlanActions() {
+  const isOwner = useIsOwner();
+  const run = useAction();
+  const { plan, base, dirty, planState, markSaved, reset } = usePlanEditor();
+  const [proposeOpen, setProposeOpen] = useState(false);
+  if (!plan || !planState?.matchId) return null;
+
+  if (!isOwner) {
+    const patch = base ? diffPatch(base, plan) : {};
+    return (
+      <>
+        <StickyActions note={<PlanStatusLine />}>
+          <button type="button" className="btn btn-secondary" disabled={!dirty} onClick={reset}>
+            되돌리기
+          </button>
+          <button type="button" className="btn btn-primary" disabled={isEmptyPatch(patch)} onClick={() => setProposeOpen(true)}>
+            제안하기
+          </button>
+        </StickyActions>
+        <ProposeSheet open={proposeOpen} onClose={() => setProposeOpen(false)} patch={patch} />
+      </>
+    );
+  }
+
+  return (
+    <StickyActions note={<PlanStatusLine />}>
+      <button
+        type="button"
+        className="btn btn-secondary"
+        onClick={() => {
+          if (run((s) => s.saveDraft(plan), '초안을 저장했어요 (확정 제출해야 적용돼요)')) markSaved();
+        }}
+      >
+        초안 저장
+      </button>
+      <button
+        type="button"
+        className="btn btn-primary"
+        onClick={() => {
+          if (run((s) => s.submitPlan(plan), '확정 제출 완료 · 넘기기 전까지 수정 가능')) markSaved();
+        }}
+      >
+        확정 제출
+      </button>
+    </StickyActions>
+  );
+}
