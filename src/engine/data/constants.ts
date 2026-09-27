@@ -5,11 +5,11 @@
  */
 import type { BinaryDP, ChanceType, DP, FitLevel, OpenPlayChance, RuleId } from '../../types';
 
-export const ENGINE_VERSION = '0.2.0';
+export const ENGINE_VERSION = '0.3.0';
 
 /** 8.4 */
 export const K = 0.017;
-export const DEFAULT_TAC_CAP = 0.35;
+export const DEFAULT_TAC_CAP = 0.5;
 export const P_MIN = 0.05;
 export const P_MAX = 0.95;
 export const HOME_MOD = 0.04;
@@ -126,17 +126,17 @@ export const SUB_WINDOWS = 3;
 
 /** 8.6 규칙 수치 */
 export const RULES = {
-  R1: { perPressStep: -0.2, max: -0.35, dp6CounterBonus: 0.2 },
-  R2: { perDirectStep: 0.2, max: 0.35, dp3Through: 0.3, sweeperMult: 0.5 },
-  R3: { dp4: -0.35, dp3LongCross: 0.3, targetManCross: 0.2 },
-  R4: { dp4: 0.3, dp3: 0.3 },
-  R5: { dp6: 0.5, dp7: 0.35, paceScale: 10, anchorMult: 0.6 },
-  R6: { dp4Through: -0.35, dp4ThroughSkilled: -0.2, skilledThreshold: 15, dp5Bonus: 0.15 },
-  R7: { perMid: 0.05, max: 0.1, dp8Reset: 0.08 },
-  R9: { perMarkFit: -0.2, minUnitWeight: 0.15, markerOtherUnitMult: 0.8 },
-  R10: { dp4: 0.25, tanhScale: 10 },
-  TEMPO: { dp8PerStep: 0.05 },
-  LINE_FIT: { penalty: -0.2, paceDRequired: 60 },
+  R1: { perPressStep: -0.5, max: -1.0, dp8PerPress: -0.24, dp6CounterBonus: 0.6 },
+  R2: { perDirectStep: 0.5, max: 1.0, dp3Through: 0.8, sweeperMult: 0.5, paceScale: 20, deepBlockPerStep: -0.16 },
+  R3: { dp4: -1.0, dp3LongCross: 0.8, targetManCross: 0.5, dp2PerDeepLine: 0.16 },
+  R4: { dp4: 0.9, dp3: 0.8 },
+  R5: { dp6: 1.4, dp7: 1.0, paceScale: 10, anchorMult: 0.6, dp4PerMentality: 0.24 },
+  R6: { dp4Through: -1.0, dp4ThroughSkilled: -0.6, skilledThreshold: 15, dp5Bonus: 0.4 },
+  R7: { perMid: 0.16, max: 0.32, dp8Reset: 0.2 },
+  R9: { perMarkFit: -0.6, minUnitWeight: 0.15, markerOtherUnitMult: 0.8 },
+  R10: { dp4: 0.7, tanhScale: 10 },
+  TEMPO: { dp8PerStep: 0.1 },
+  LINE_FIT: { penalty: -0.6, paceDRequired: 60 },
 } as const;
 
 /** 8.3-4 스쿼드-전술 적합도 요구치 */
@@ -150,13 +150,13 @@ export const FIT_REQUIREMENTS = {
 /** DP 별로 어떤 규칙이 개입할 수 있는가 (8.2 표) — rules.ts 구현과 테스트의 기준 */
 export const RULES_BY_DP: Record<DP, RuleId[]> = {
   DP1: ['R1', 'R2'],
-  DP2: ['R7', 'R9'],
+  DP2: ['R2', 'R3', 'R7', 'R9'],
   DP3: ['R2', 'R3', 'R4'],
-  DP4: ['R3', 'R4', 'R6', 'R9', 'R10', 'LINE_FIT'],
+  DP4: ['R3', 'R4', 'R5', 'R6', 'R9', 'R10', 'LINE_FIT'],
   DP5: ['R6', 'R9'],
   DP6: ['R1', 'R5'],
   DP7: ['R5', 'LINE_FIT'],
-  DP8: ['R7', 'TEMPO'],
+  DP8: ['R1', 'R7', 'TEMPO'],
 };
 
 export const TAC_CAP_OPTIONS = [0.25, 0.35, 0.5] as const;

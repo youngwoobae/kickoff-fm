@@ -28,6 +28,8 @@ export function tacticEdge(us: TacticShape, them: TacticShape): Partial<Record<R
   // R2: 롱볼 우회 vs 높은 라인
   if (u.directness >= 1 && t.line >= 1) add('R2', 0.1 * u.directness);
   if (t.directness >= 1 && u.line >= 1) add('R2', -0.1 * t.directness);
+  if (u.directness >= 1 && t.line <= -1) add('R2', -0.08 * u.directness * -t.line);
+  if (t.directness >= 1 && u.line <= -1) add('R2', 0.08 * t.directness * -u.line);
   // R3: 낮은 블록 vs 점유
   if (t.line <= -1 && t.mentality <= 0 && u.directness <= -1) add('R3', -0.2);
   if (u.line <= -1 && u.mentality <= 0 && t.directness <= -1) add('R3', 0.2);
@@ -37,6 +39,8 @@ export function tacticEdge(us: TacticShape, them: TacticShape): Partial<Record<R
   // R5: 공격 성향 과잉 vs 역습
   if (u.mentality >= 1 && t.counter) add('R5', -0.2);
   if (t.mentality >= 1 && u.counter) add('R5', 0.2);
+  if (u.mentality >= 1) add('R5', 0.12 * u.mentality);
+  if (t.mentality >= 1) add('R5', -0.12 * t.mentality);
   // R6: 오프사이드 트랩 vs 침투형
   if (t.offsideTrap && has(us, 'ST_POACHER')) add('R6', -0.15);
   if (u.offsideTrap && has(them, 'ST_POACHER')) add('R6', 0.15);

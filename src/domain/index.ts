@@ -50,6 +50,7 @@ export {
   buildValueTable,
   PACKAGES,
   SPREAD_PACKAGES,
+  TARGETS as CALIBRATION_TARGETS,
   type CalibrationDetails,
   type PackageId,
   type TacticPackage,

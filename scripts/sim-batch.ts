@@ -1,6 +1,6 @@
 /**
  * 8.1 보정 목표 배치 검증 CLI (소유: A).
- *   npm run sim:batch -- --n 2000 --cap 0.35 --seed 42 [--scenario BASELINE,OVR_DIFF_10] [--json sim-out/report.json] [--strict]
+ *   npm run sim:batch -- --n 2000 --cap 0.5 --seed 42 [--scenario BASELINE,OVR_DIFF_10] [--json sim-out/report.json] [--strict]
  *   npm run sim:batch -- --build-values [--n 20000]   (VALUE 테이블 생성 → engine/data/valueTable.ts 에 반영)
  * --strict: 목표 하나라도 실패하면 exit 1 (CI 게이트용).
  */
@@ -13,7 +13,7 @@ import type { ScenarioId, TacticCap } from '../src/types';
 const { values } = parseArgs({
   options: {
     n: { type: 'string', default: '1000' },
-    cap: { type: 'string', default: '0.35' },
+    cap: { type: 'string', default: '0.5' },
     seed: { type: 'string', default: '20260926' },
     scenario: { type: 'string' },
     json: { type: 'string' },
@@ -80,6 +80,7 @@ if (details.counterMatrix) {
     return row;
   });
   console.table(rows);
+  console.log(`  단순 최대−최소 평균 ${f1(details.counterRawSpread ?? 0)}%p / 교차검증 평균 ${f1(details.counterCvSpread ?? 0)}%p`);
   for (const [s, b] of Object.entries(details.counterBest ?? {})) {
     console.log(`  vs ${PACKAGES[s as keyof typeof PACKAGES].label}: 최선 ${PACKAGES[b.best].label}, 최악 ${PACKAGES[b.worst].label}, 교차검증 승률 차 ${f1(b.spread)}%p, 유리측 무승부 제외 ${f1(b.favNonDraw)}%`);
   }
@@ -88,7 +89,7 @@ if (details.ovr10) console.log(`\n[OVR_DIFF_10] 65 vs 55 강팀 승 ${f1(details
 if (details.ovr10Counter) {
   const c = details.ovr10Counter;
   console.log(`[OVR_DIFF_10_COUNTER] 약팀 ${PACKAGES[c.weakPackage].label}: 강팀 승 ${f1(c.strongWin)}% 무 ${f1(c.draw)}% 약팀 승 ${f1(c.weakWin)}%`);
-  if (details.noTactics) console.log(`  (같은 대진, 전술 효과 끔 tacticsEnabled=false: 강팀 승 ${f1(details.noTactics.strongWin)}%)`);
+  if (details.noTactics) console.log(`  (같은 대진, 전술 효과 끔 tacticsEnabled=false: 강팀 승 ${f1(details.noTactics.strongWin)}% 약팀 승 ${f1(details.noTactics.weakWin)}%)`);
 }
 if (details.ovr25) console.log(`[OVR_DIFF_25] 72.5 vs 47.5 강팀 승 ${f1(details.ovr25.strongWin)}% 무 ${f1(details.ovr25.draw)}% 약팀 승 ${f1(details.ovr25.weakWin)}%`);
 if (details.tempo) console.log(`[TEMPO_VARIANCE] 약팀 승률 템포+2 ${f1(details.tempo.weakWinFast)}% / 템포−2 ${f1(details.tempo.weakWinSlow)}% (Δ ${f1(details.tempo.diff)}%p)`);

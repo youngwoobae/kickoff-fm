@@ -217,7 +217,7 @@ export function createInitialState(
     time: { season: 1, day: 1 },
     phase: 'MATCHDAY',
     seq: 0,
-    settings: { tier, tacCap: opts.tacCap ?? 0.35, devMode: opts.devMode },
+    settings: { tier, tacCap: opts.tacCap ?? 0.5, devMode: opts.devMode },
     userClubId: userId,
     actorUserId: OWNER_ID,
     clubs,

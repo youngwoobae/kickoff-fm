@@ -180,17 +180,18 @@ describe('simulateMatch', () => {
     }
   });
 
-  it('R1 은 수비 press ≥ 1 & 공격 BU < 수비 PRS 일 때만 음수로 발동', () => {
+  it('R1 은 수비 press ≥ 1 & 공격 패스 ≤ 0 일 때만 음수로 발동 (롱볼은 압박을 우회)', () => {
     let fired = 0;
     for (let seed = 0; seed < 10; seed++) {
-      const r = play(seed, C.input, A.input);
-      for (const l of binary(r.log).filter((x) => x.dp === 'DP1' && x.actor === C.input.clubId && x.raw.R1 !== undefined)) {
-        expect(l.a).toBeLessThan(l.d);
+      const r = play(seed, C.input, A.input); // 점유(패스 −2) vs 전방압박(압박 +2)
+      for (const l of binary(r.log).filter((x) => (x.dp === 'DP1' || x.dp === 'DP8') && x.actor === C.input.clubId && x.raw.R1 !== undefined)) {
         expect(l.raw.R1).toBeLessThan(0);
         fired += 1;
       }
+      const r2 = play(seed, B.input, A.input); // 역습(패스 +2) vs 전방압박
+      expect(binary(r2.log).some((x) => x.dp === 'DP1' && x.actor === B.input.clubId && x.raw.R1 !== undefined)).toBe(false);
     }
-    expect(fired).toBeGreaterThanOrEqual(0);
+    expect(fired).toBeGreaterThan(0);
   });
 });
 
@@ -272,9 +273,19 @@ describe('calibration (1,000경기+ 배치)', () => {
     expect(rep.targets[0]!.actual).toBeGreaterThanOrEqual(85);
   });
 
-  it('RULE_ISOLATION: 규칙별 단독 기여 P95 ≤ 0.35, 합 P95 ≤ 0.6', () => {
-    const rep = runCalibration({ matchesPerScenario: 200, tacCap: 0.35, seed: 3, scenarios: ['RULE_ISOLATION'] });
+  it('RULE_ISOLATION: 규칙별 단독 기여 P95 ≤ 0.5, 합 P95 ≤ 0.8 (엔진 0.3.0 목표)', () => {
+    const rep = runCalibration({ matchesPerScenario: 200, tacCap: 0.5, seed: 3, scenarios: ['RULE_ISOLATION'] });
     for (const t of rep.targets) expect(t.pass, `${t.label} = ${t.actual}`).toBe(true);
+  });
+
+  it('COUNTER_SPREAD (cap 0.5, 12,500경기): 교차검증 최선−최악 15~30%p, 유리 측 무승부 제외 60~70%', () => {
+    const rep = runCalibration({ matchesPerScenario: 1000, tacCap: 0.5, seed: 20260926, scenarios: ['COUNTER_SPREAD'] });
+    for (const t of rep.targets) expect(t.pass, `${t.label} = ${t.actual}`).toBe(true);
+  });
+
+  it('전력 10점 차 + 약팀 최선 카운터: 강팀 승률 50~60%, 강팀 여전히 우세, 전력 우위 ≥ 전술 최대 효과', () => {
+    const rep = runCalibration({ matchesPerScenario: 1000, tacCap: 0.5, seed: 20260926, scenarios: ['COUNTER_SPREAD', 'OVR_DIFF_10_COUNTER'] });
+    for (const t of rep.targets.filter((x) => x.scenario === 'OVR_DIFF_10_COUNTER')) expect(t.pass, `${t.label} = ${t.actual}`).toBe(true);
   });
 
   it('1,000경기 시뮬 < 5초', () => {

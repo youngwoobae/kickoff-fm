@@ -89,7 +89,24 @@ function shortPassFit(t: TeamView): number {
 }
 
 function r2Active(att: TeamView, def: TeamView): boolean {
-  return att.instr.directness >= 1 && att.units.PACE_A > def.units.PACE_D && def.instr.line >= 1;
+  return att.instr.directness >= 1 && def.instr.line >= 1;
+}
+
+/** R2 속도 배수: 1 + (PACE_A − PACE_D)/20, [0.5, 1.5] */
+function r2PaceMult(att: TeamView, def: TeamView): number {
+  return clamp(1 + (att.units.PACE_A - def.units.PACE_D) / RULES.R2.paceScale, 0.5, 1.5);
+}
+
+/** R2 역효과: 롱볼이 깊게 내려선 블록(라인 ≤ −1)에 막힌다 */
+function r2Blocked(att: TeamView, def: TeamView): boolean {
+  return att.instr.directness >= 1 && def.instr.line <= -1;
+}
+
+/** R1: 수비 압박 ≥ 1 & 공격이 짧은 빌드업(패스 ≤ 0). 크기 = 압박 단계 × BU/PRS 격차 배수 × 적합도 */
+function r1Value(att: TeamView, def: TeamView, perStep: number): number {
+  if (def.instr.press < 1 || att.instr.directness > 0) return 0;
+  const gap = clamp(0.5 + (def.units.PRS - att.units.BU) / 20, 0.25, 1);
+  return Math.max(perStep * def.instr.press, RULES.R1.max) * gap * pressFit(def);
 }
 
 function r3Active(att: TeamView, def: TeamView): boolean {
@@ -150,11 +167,11 @@ export function evalBinaryRules(dp: BinaryDP, actor: TeamView, opp: TeamView, ct
     case 'DP1': {
       const att = actor;
       const def = opp;
-      if (def.instr.press >= 1 && att.units.BU < def.units.PRS) {
-        put('R1', Math.max(R.R1.perPressStep * def.instr.press, R.R1.max) * pressFit(def));
-      }
+      put('R1', r1Value(att, def, R.R1.perPressStep));
       if (r2Active(att, def)) {
-        put('R2', Math.min(R.R2.perDirectStep * att.instr.directness, R.R2.max) * sweeperMult(def));
+        put('R2', Math.min(R.R2.perDirectStep * att.instr.directness, R.R2.max) * sweeperMult(def) * r2PaceMult(att, def));
+      } else if (r2Blocked(att, def)) {
+        put('R2', R.R2.deepBlockPerStep * att.instr.directness * -def.instr.line);
       }
       break;
     }
@@ -162,6 +179,8 @@ export function evalBinaryRules(dp: BinaryDP, actor: TeamView, opp: TeamView, ct
       const diff = actor.formation.centralMidfielders - opp.formation.centralMidfielders;
       if (diff !== 0) put('R7', clamp(R.R7.perMid * diff, -R.R7.max, R.R7.max));
       put('R9', r9Value(actor, opp, 'PRG'));
+      if (opp.instr.line <= -1) put('R3', R.R3.dp2PerDeepLine * -opp.instr.line);
+      if (r2Blocked(actor, opp)) put('R2', R.R2.deepBlockPerStep * actor.instr.directness * -opp.instr.line);
       break;
     }
     case 'DP4': {
@@ -182,6 +201,7 @@ export function evalBinaryRules(dp: BinaryDP, actor: TeamView, opp: TeamView, ct
         put('R10', R.R10.dp4 * Math.tanh((a - d) / R.R10.tanhScale));
       }
       if (c === 'THROUGH' && lineFitActive(def)) put('LINE_FIT', -R.LINE_FIT.penalty);
+      if (att.instr.mentality >= 1) put('R5', R.R5.dp4PerMentality * att.instr.mentality);
       break;
     }
     case 'DP5': {
@@ -213,6 +233,7 @@ export function evalBinaryRules(dp: BinaryDP, actor: TeamView, opp: TeamView, ct
     case 'DP8': {
       const diff = actor.formation.centralMidfielders - opp.formation.centralMidfielders;
       if (diff !== 0) put('R7', R.R7.dp8Reset * Math.sign(diff) * shortPassFit(actor));
+      put('R1', r1Value(actor, opp, R.R1.dp8PerPress));
       put('TEMPO', -R.TEMPO.dp8PerStep * actor.instr.tempo);
       break;
     }
@@ -233,7 +254,7 @@ export function evalChoiceRules(att: TeamView, def: TeamView, config: EngineConf
     out[t][id] = (out[t][id] ?? 0) + v;
   };
   const R = RULES;
-  if (r2Active(att, def)) put('THROUGH', 'R2', R.R2.dp3Through * sweeperMult(def));
+  if (r2Active(att, def)) put('THROUGH', 'R2', R.R2.dp3Through * sweeperMult(def) * r2PaceMult(att, def));
   if (r3Active(att, def)) {
     put('LONG', 'R3', R.R3.dp3LongCross);
     put('CROSS', 'R3', R.R3.dp3LongCross);

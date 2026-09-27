@@ -69,6 +69,21 @@ export const SPREAD_PACKAGES: PackageId[] = ['BALANCED', 'POSSESSION', 'COUNTER'
 
 export const BASE_OVR = 60;
 
+/**
+ * 보정 목표 (엔진 0.3.0, 2026-09-27 사용자 결정: 동일 전력 전술 영향 15~30%p).
+ * 근거는 docs/시뮬레이션_검증.md 1장. 기획서 8.1 표와 같은 값이어야 한다.
+ */
+export const TARGETS = {
+  counterSpread: [15, 30],
+  /** 무승부 ≈ 24%, 최선−최악 15~30%p 이면 유리 측 무승부 제외 승률 ≈ 60~70% */
+  favNonDraw: [60, 70],
+  ovr10: [60, 68],
+  /** 전력 10점 차(≈ +27%p) 에서 최선 카운터(≈ −10%p)를 빼면 50~60% */
+  ovr10Counter: [50, 60],
+  ruleP95: 0.5,
+  allRulesP95: 0.8,
+} as const;
+
 // ───────────────────────────────────────────── 합성 팀
 
 interface SquadEntry {
@@ -236,7 +251,9 @@ export interface CalibrationDetails {
   tempo?: { weakWinFast: number; weakWinSlow: number; diff: number; n: number };
   ruleIsolation?: { rule: RuleId; p95: number; mean: number; n: number }[];
   ruleTotalP95?: number;
-  noTactics?: { strongWin: number; n: number };
+  noTactics?: { strongWin: number; weakWin: number; n: number };
+  counterRawSpread?: number;
+  counterCvSpread?: number;
 }
 
 const ALL: ScenarioId[] = ['BASELINE', 'COUNTER_SPREAD', 'OVR_DIFF_10', 'OVR_DIFF_10_COUNTER', 'OVR_DIFF_25', 'TEMPO_VARIANCE', 'RULE_ISOLATION'];
@@ -354,9 +371,16 @@ export function runCalibrationDetailed(
     }
     details.counterMatrix = cells;
     details.counterBest = best;
+    // 참고: 교차검증 없는 단순 최대 − 최소 (잡음으로 위쪽 편향)
+    const raw = opponents.map((s) => {
+      const col = cells.filter((c) => c.them === s).map((c) => c.winPct);
+      return Math.max(...col) - Math.min(...col);
+    });
+    details.counterRawSpread = raw.reduce((a, b) => a + b, 0) / raw.length;
+    details.counterCvSpread = spreadSum / opponents.length;
     if (full) {
-      targets.push(target('COUNTER_SPREAD', 'spread', '최선 카운터 − 최악 매치업 승률 차 (교차검증)', spreadSum / opponents.length, '%p', 10, 15));
-      targets.push(target('COUNTER_SPREAD', 'favNonDraw', '유리 상성 측 무승부 제외 승률', favSum / opponents.length, '%', 55, 62));
+      targets.push(target('COUNTER_SPREAD', 'spread', '최선 카운터 − 최악 매치업 승률 차 (교차검증)', spreadSum / opponents.length, '%p', TARGETS.counterSpread[0], TARGETS.counterSpread[1]));
+      targets.push(target('COUNTER_SPREAD', 'favNonDraw', '유리 상성 측 무승부 제외 승률', favSum / opponents.length, '%', TARGETS.favNonDraw[0], TARGETS.favNonDraw[1]));
     }
   }
 
@@ -372,15 +396,22 @@ export function runCalibrationDetailed(
 
   if (scenarios.includes('OVR_DIFF_10')) {
     details.ovr10 = strongVsWeak('OVR_DIFF_10', 65, 55, B);
-    targets.push(target('OVR_DIFF_10', 'strongWin', '전력 10점 차 강팀 승률', details.ovr10.strongWin, '%', 60, 68));
+    targets.push(target('OVR_DIFF_10', 'strongWin', '전력 10점 차 강팀 승률', details.ovr10.strongWin, '%', TARGETS.ovr10[0], TARGETS.ovr10[1]));
   }
   if (scenarios.includes('OVR_DIFF_10_COUNTER')) {
     const pkg = bestVsBalanced ?? 'COUNTER';
     const res = strongVsWeak('OVR_DIFF_10_COUNTER', 65, 55, PACKAGES[pkg]);
     details.ovr10Counter = { ...res, weakPackage: pkg };
-    targets.push(target('OVR_DIFF_10_COUNTER', 'strongWin', `전력 10점 차 + 약팀 최선 카운터(${PACKAGES[pkg].label}) 강팀 승률`, res.strongWin, '%', 50, 58));
-    // 참고: 전술 효과를 끈 경우 (전력만)
-    details.noTactics = { strongWin: strongVsWeak('OVR_DIFF_10_COUNTER', 65, 55, PACKAGES[pkg], { tacticsEnabled: false }).strongWin, n };
+    targets.push(target('OVR_DIFF_10_COUNTER', 'strongWin', `전력 10점 차 + 약팀 최선 카운터(${PACKAGES[pkg].label}) 강팀 승률`, res.strongWin, '%', TARGETS.ovr10Counter[0], TARGETS.ovr10Counter[1]));
+    targets.push(target('OVR_DIFF_10_COUNTER', 'strongStillAhead', '약팀 최선 카운터에도 강팀 승 − 약팀 승', res.strongWin - res.weakWin, '%p', 0));
+    // 전술 효과를 끈 같은 대진 (전력만)
+    const nt = strongVsWeak('OVR_DIFF_10_COUNTER', 65, 55, PACKAGES[pkg], { tacticsEnabled: false });
+    details.noTactics = { strongWin: nt.strongWin, weakWin: nt.weakWin, n };
+    if (details.counterCvSpread !== undefined) {
+      // "전술만으로 결과가 결정되지 않는다": 전력 10점 차 우위(강팀 승 − 약팀 승, 전술 끔) ≥ 전술 최대 효과(교차검증 승률 차)
+      const power = nt.strongWin - nt.weakWin;
+      targets.push(target('OVR_DIFF_10_COUNTER', 'powerOverTactics', '전력 10점 차 우위 ÷ 전술 최선−최악 승률 차 (×100)', (100 * power) / Math.max(1e-9, details.counterCvSpread), '%', 100));
+    }
   }
   if (scenarios.includes('OVR_DIFF_25')) {
     details.ovr25 = strongVsWeak('OVR_DIFF_25', 72.5, 47.5, B);
@@ -427,7 +458,7 @@ export function runCalibrationDetailed(
         progress('RULE_ISOLATION', done, total);
       }
       iso.push({ rule, p95: p95(xs), mean: xs.reduce((a, b) => a + b, 0) / xs.length, n: xs.length });
-      targets.push(target('RULE_ISOLATION', `p95-${rule}`, `${rule} 단독 기여 P95`, p95(xs), 'xG', undefined, 0.35));
+      targets.push(target('RULE_ISOLATION', `p95-${rule}`, `${rule} 단독 기여 P95`, p95(xs), 'xG', undefined, TARGETS.ruleP95));
     }
     // 모든 규칙 켠 상태에서 경기별 전술 순 xG 합 |Σ| 의 P95 (다양한 프리셋 조합)
     const all: number[] = [];
@@ -443,7 +474,7 @@ export function runCalibrationDetailed(
     }
     details.ruleIsolation = iso;
     details.ruleTotalP95 = p95(all);
-    targets.push(target('RULE_ISOLATION', 'p95-all', '모든 규칙 합 P95', p95(all), 'xG', undefined, 0.6));
+    targets.push(target('RULE_ISOLATION', 'p95-all', '모든 규칙 합 P95', p95(all), 'xG', undefined, TARGETS.allRulesP95));
   }
 
   const report: CalibrationReport = {
@@ -468,7 +499,7 @@ export function runCalibration(opts: CalibrationOptions, onProgress?: (p: Calibr
  * 8.8-2: 결정 성공/실패 뒤 "이번 시퀀스 나머지 + 다음 시퀀스" 의 순 xG(행동 팀 관점) 평균 차.
  * 다음 시퀀스를 포함하는 이유: Z0 턴오버는 상대가 Z2 에서 시작하게 만든다(미러링, 8.4).
  */
-export function buildValueTable(matches: number, seed: number, cap: TacticCap = 0.35): ValueTable {
+export function buildValueTable(matches: number, seed: number, cap: TacticCap = 0.5): ValueTable {
   const R: Runner = { factory: new TeamFactory(seed), cap, seed };
   type Acc = { s: number; sn: number; f: number; fn: number };
   const acc = new Map<string, Acc>();
