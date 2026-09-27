@@ -74,8 +74,8 @@ export function explainMatch(result: MatchResult, values: ValueTable): MatchExpl
   const homeId = result.home.clubId;
   const awayId = result.away.clubId;
   const acc: Record<ClubId, Acc> = {
-    [homeId]: { rules: new Map(), bars: { strength: 0, prep: 0, tactics: 0, luck: 0 }, conservationError: 0 },
-    [awayId]: { rules: new Map(), bars: { strength: 0, prep: 0, tactics: 0, luck: 0 }, conservationError: 0 },
+    [homeId]: { rules: new Map(), bars: { strength: 0, prep: 0, state: 0, tactics: 0, luck: 0 }, conservationError: 0 },
+    [awayId]: { rules: new Map(), bars: { strength: 0, prep: 0, state: 0, tactics: 0, luck: 0 }, conservationError: 0 },
   };
   const other = (id: ClubId) => (id === homeId ? awayId : homeId);
   const rule = (team: ClubId, id: RuleId): RuleContribution => {
@@ -120,6 +120,9 @@ export function explainMatch(result: MatchResult, values: ValueTable): MatchExpl
       acc[Y]!.bars.strength -= (ps - pb) * V;
       acc[X]!.bars.prep += (pp - ps) * V;
       acc[Y]!.bars.prep -= (pp - ps) * V;
+      const pst = sigmoid(L.logitNoTac);
+      acc[X]!.bars.state! += (pst - pp) * V;
+      acc[Y]!.bars.state! -= (pst - pp) * V;
     } else {
       const types = Object.keys(L.baseLogits) as OpenPlayChance[];
       const pWith = softmax(types.map((t) => L.baseLogits[t] + L.tacByType[t]));

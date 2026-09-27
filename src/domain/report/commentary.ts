@@ -74,7 +74,7 @@ export function buildReplay(result: MatchResult, names: ReplayNames = {}): Match
         push(e.minute, 'GOAL', `골!!! ${club(e.clubId)} ${player(e.playerId)} (${chanceLabel(e.chance)}) — ${score[0]} : ${score[1]}`, e.clubId);
         break;
       case 'OFFSIDE':
-        push(e.minute, 'TACTIC', `오프사이드! ${club(e.clubId)} 의 침투가 트랩에 걸렸다`, e.clubId);
+        push(e.minute, 'TACTIC', `오프사이드! ${club(e.clubId)} 의 침투가 한발 빨랐다`, e.clubId);
         break;
       case 'LONG_BALL_ADVANCE':
         if (hashString(`${result.matchId}|lb|${e.minute}`) % 3 === 0) push(e.minute, 'TACTIC', `${club(e.clubId)} 의 롱볼이 압박을 뛰어넘는다`, e.clubId);
@@ -93,6 +93,9 @@ export function buildReplay(result: MatchResult, names: ReplayNames = {}): Match
         break;
       case 'RED_CARD':
         push(e.minute, 'CARD', `레드카드! ${club(e.clubId)} ${player(e.playerId)} 퇴장`, e.clubId);
+        break;
+      case 'YELLOW_CARD':
+        push(e.minute, 'CARD', `경고! ${club(e.clubId)} ${player(e.playerId)}`, e.clubId);
         break;
       case 'CONDITION_DROP':
         break;

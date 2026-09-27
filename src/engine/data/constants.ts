@@ -5,14 +5,14 @@
  */
 import type { BinaryDP, ChanceType, DP, FitLevel, OpenPlayChance, RuleId } from '../../types';
 
-export const ENGINE_VERSION = '0.3.0';
+export const ENGINE_VERSION = '0.4.0';
 
 /** 8.4 */
 export const K = 0.017;
 export const DEFAULT_TAC_CAP = 0.5;
 export const P_MIN = 0.05;
 export const P_MAX = 0.95;
-export const HOME_MOD = 0.04;
+export const HOME_MOD = 0.11;
 
 export const BASE: Record<Exclude<BinaryDP, 'DP5' | 'DP8'>, number> = {
   DP1: 1.1,
@@ -34,7 +34,16 @@ export const FAM_COEF_MIN = 0.5;
 /** 8.2 경기 구조 */
 export const SEGMENTS = 18;
 export const SEGMENT_MINUTES = 5;
-export const BASE_SEQUENCES = 100;
+/** 0.4.0: 추가시간(+8.9%)과 전술 규칙 증가분을 흡수해 100 → 77 */
+export const BASE_SEQUENCES = 77;
+/**
+ * 0.4.0 추가시간: 세그먼트 9(40-45)·18(85-90)의 시퀀스 배수 (1 + 추가 분/5). 이벤트는 "45+2", "90+4" 로 표기
+ */
+export const STOPPAGE: Record<number, number> = { 8: 1 + 2.5 / 5, 17: 1 + 5.5 / 5 };
+/** 0.4.0 후반 개방도: 세그먼트 s(1-based) ≥ 10 에서 DP4·DP7 BASE + perSeg × (s − 9) */
+export const LATE_DRIFT = { fromSeg: 10, perSeg: 0.03 } as const;
+/** 0.4.0 경기 흐름: 60분 이후 지는 팀 공격 DP +trail, 상대 역습(DP6·7) +trail, 이기는 팀 공격 DP +lead. 2골 차 이상 × multiGoal */
+export const STATE_MOD = { fromMinute: 60, trail: 0.06, counterVsTrail: 0.06, lead: -0.04, multiGoal: 0.5 } as const;
 /** 템포 평균 −2..+2 → 0.85..1.15 */
 export const TEMPO_FACTOR_PER_STEP = 0.075;
 export const SEQUENCE_JITTER = 0.08;
@@ -48,24 +57,43 @@ export const CHANCE_BASE_WEIGHT: Record<OpenPlayChance, number> = {
   SOLO: 0.15,
 };
 export const CHANCE_XG: Record<ChanceType, number> = {
-  CROSS: 0.068,
-  THROUGH: 0.235,
-  CUTBACK: 0.155,
-  LONG: 0.032,
-  SOLO: 0.1,
-  COUNTER: 0.19,
-  CORNER: 0.032,
-  FK: 0.05,
-  PK: 0.76,
+  CROSS: 0.06,
+  THROUGH: 0.207,
+  CUTBACK: 0.136,
+  LONG: 0.028,
+  SOLO: 0.088,
+  COUNTER: 0.167,
+  CORNER: 0.07,
+  FK: 0.09,
+  PK: 0.72,
 };
 /** 중거리 DP4 BASE 보정 */
 export const LONG_SHOT_DP4_BONUS = 0.6;
 /** 박스 내 찬스 중 PK 비율 */
-export const PK_SHARE_IN_BOX = 0.025;
+export const PK_SHARE_IN_BOX = 0.028;
 /** DP5: logit(xG) + FIN_GK_K × (FIN − GK) */
 export const FIN_GK_K = 0.015;
 export const GOAL_P_MIN = 0.01;
 export const GOAL_P_MAX = 0.85;
+
+/** 0.4.0 표시 판정 (별도 RNG, 결과 불변): 비골 슈팅의 유효슈팅 확률 */
+export const SOT_Q: Record<ChanceType, number> = {
+  CROSS: 0.22,
+  THROUGH: 0.38,
+  CUTBACK: 0.3,
+  LONG: 0.26,
+  SOLO: 0.3,
+  COUNTER: 0.34,
+  CORNER: 0.18,
+  FK: 0.28,
+  PK: 0.9,
+};
+/** 표시 판정: 빗나간 슈팅이 코너가 되는 확률, 실패한 스루·역습의 오프사이드 표기 확률 */
+export const DISPLAY = { blockedCorner: 0.25, throughOffside: 0.35, counterOffside: 0.2 } as const;
+/** 표시 판정: 시간 가중 점유 = 1 + reset × 리셋 + advance × 성공 전진, 패스 길게 × (1 − direct × directness), 짧게 × (1 + short × |directness|) */
+export const POSSESSION_WEIGHT = { reset: 3, advance: 0.5, direct: 0.2, short: 0.15, mentality: 0.12 } as const;
+/** 0.4.0 경고: 파울 기회(수비 성공한 DP1·DP2·DP4·DP7)마다 p = base × 역할 경고 배수 × (1 + press × max(압박,0)) × 지는 팀(60분+) × 원정 */
+export const CARD = { base: 0.034, perPress: 0.15, trailing: 1.2, away: 1.1, booked: 0.3, spread: 0.4 } as const;
 
 /** Z2(DP4) 실패 분기: 코너 / 프리킥 / 턴오버 (크로스 유형은 코너 ↑) */
 export const Z2_FAIL_BRANCH: Record<'DEFAULT' | 'CROSS', { corner: number; freeKick: number; turnover: number }> = {
@@ -89,6 +117,10 @@ export const FIT_MULT: Record<FitLevel, number> = {
 export const CONDITION = {
   fullMatchDrain: 30,
   pressDrainPerStep: 3,
+  /** 0.4.0 스타일 체력 공식: + tempo × max(템포,0) − lowPress × max(−압박,0) − lowLine × max(−라인,0) */
+  tempoDrainPerStep: 1,
+  lowPressRelief: 1,
+  lowLineRelief: 1,
   roleDrainB2B: 3,
   markerExtraDrain: 4,
   dailyRecoveryBase: 14,
@@ -108,7 +140,7 @@ export const CONDITION = {
   injuryDaysMin: 1,
   injuryDaysMax: 7,
   /** [PH] 기획서 미정의: 팀당 경기당 퇴장 확률 */
-  redCardPerTeamMatch: 0.06,
+  redCardPerTeamMatch: 0.035,
   /** [PH] 퇴장 시 해당 팀 모든 유닛 배수 */
   tenMenUnitMult: 0.9,
 } as const;
@@ -124,38 +156,43 @@ export const FAMILIARITY = {
 export const MAX_SUBS = 5;
 export const SUB_WINDOWS = 3;
 
-/** 8.6 규칙 수치 */
+/** 8.6 규칙 수치 (0.4.0, 실축구_전술설계 2.2) */
 export const RULES = {
-  R1: { perPressStep: -0.5, max: -1.0, dp8PerPress: -0.24, dp6CounterBonus: 0.6 },
-  R2: { perDirectStep: 0.5, max: 1.0, dp3Through: 0.8, sweeperMult: 0.5, paceScale: 20, deepBlockPerStep: -0.16 },
-  R3: { dp4: -1.0, dp3LongCross: 0.8, targetManCross: 0.5, dp2PerDeepLine: 0.16 },
-  R4: { dp4: 0.9, dp3: 0.8 },
-  R5: { dp6: 1.4, dp7: 1.0, paceScale: 10, anchorMult: 0.6, dp4PerMentality: 0.24 },
-  R6: { dp4Through: -1.0, dp4ThroughSkilled: -0.6, skilledThreshold: 15, dp5Bonus: 0.4 },
-  R7: { perMid: 0.16, max: 0.32, dp8Reset: 0.2 },
+  R1: { perPressStep: -0.274, max: -1.0, dp8PerPress: -0.09, dp6CounterBonus: 0.193, resistPer: 0.25, resistMax: 3, threeBackMult: 0.7, pressingFwdPrs: 3, pressingFwdDp6: 0.1 },
+  R2: { perDirectStep: 0.5, max: 1.0, dp3Through: 0.8, paceScale: 4, paceMin: 0.3, paceMax: 1.6, sweeperFast: 0.5, sweeperSlow: 0.75, sweeperFastPace: 10, threeBackMult: 0.566, deepBlockPerStep: -0.04 },
+  R3: { dp4: -0.943, compBase: 0.6, compScale: 25, compMin: 0.4, compMax: 1.2, dp3LongCross: 0.927, crossAer: 0.236, aerScale: 10, dp5Long: 0.3, dp2PerDeepLine: 0.284 },
+  R4: { dp3: 0.174, dp4: 0.996, negMult: 0.5, threshold: 0.2, widthStep: 0.4, narrowStep: 0.25 },
+  R5: { dp6: 0.45, dp7: 1.02, paceScale: 2.5, dp4PerMentality: 0.034, anchor: 0.4, ballWinner: 0.2, inverted: 0.15, rdMin: 0.4 },
+  R6: { dp4Through: -1, dp5Bonus: 0.4, dp5Pace: 15, deepMult: 0.6, slowCbMult: 0.5, cbPaceOk: 13 },
+  R7: { dp2: 0.3, dp8: 0.09, scale: 1.137, coverShadow: 0.433, coverShadowPress: 0.7, narrowWideMid: 0.5, compression: 0.431, fitBU: 65 },
   R9: { perMarkFit: -0.6, minUnitWeight: 0.15, markerOtherUnitMult: 0.8 },
   R10: { dp4: 0.7, tanhScale: 10 },
+  R11: { dp2: 0.093, dp3: 0.2, dp4: 0.133, offset: 0.874, fiveBack: 0.692, threeBack: 2.683, cfScale: 60, cfMin: 0.5 },
+  R12: { dp7: 0.66, dp4: 0.193, d1Scale: 3, wbDefHigh: 0.4 },
+  R13: { dp1: 0.232, dp2: 0.194, scale: 10, vsPress: 1.25, sbPerRole: 5, threeBackMult: 0.676 },
   TEMPO: { dp8PerStep: 0.1 },
-  LINE_FIT: { penalty: -0.6, paceDRequired: 60 },
+  LINE_FIT: { penalty: -0.434, paceDRequired: 60, cbPaceRequired: 11 },
 } as const;
 
-/** 8.3-4 스쿼드-전술 적합도 요구치 */
+/** 8.3-4 스쿼드-전술 적합도 요구치 (StyleDef.requirements 와 같은 값) */
 export const FIT_REQUIREMENTS = {
   pressPlus2PRS: 65,
   linePlus2PACE_D: 60,
   passShortBU: 60,
   widthPlus2Side: 60,
+  positionalBU: 65,
+  lowBlockBOX: 65,
 } as const;
 
-/** DP 별로 어떤 규칙이 개입할 수 있는가 (8.2 표) — rules.ts 구현과 테스트의 기준 */
+/** DP 별로 어떤 규칙이 개입할 수 있는가 (0.4.0) — rules.ts 구현과 테스트의 기준 */
 export const RULES_BY_DP: Record<DP, RuleId[]> = {
-  DP1: ['R1', 'R2'],
-  DP2: ['R2', 'R3', 'R7', 'R9'],
-  DP3: ['R2', 'R3', 'R4'],
-  DP4: ['R3', 'R4', 'R5', 'R6', 'R9', 'R10', 'LINE_FIT'],
-  DP5: ['R6', 'R9'],
+  DP1: ['R1', 'R2', 'R13'],
+  DP2: ['R2', 'R3', 'R7', 'R9', 'R11', 'R13'],
+  DP3: ['R2', 'R3', 'R4', 'R11'],
+  DP4: ['R3', 'R4', 'R5', 'R6', 'R9', 'R10', 'R11', 'R12', 'LINE_FIT'],
+  DP5: ['R3', 'R6', 'R9'],
   DP6: ['R1', 'R5'],
-  DP7: ['R5', 'LINE_FIT'],
+  DP7: ['R5', 'R12', 'LINE_FIT'],
   DP8: ['R1', 'R7', 'TEMPO'],
 };
 

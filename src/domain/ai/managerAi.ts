@@ -3,7 +3,6 @@
  * 강도 파라미터(mode)만 다르다. 소유: A.
  */
 import type {
-  BotStyleTag,
   Club,
   ConditionalOrder,
   FormationId,
@@ -13,6 +12,7 @@ import type {
   Position,
   RoleId,
   SlotKey,
+  StyleId,
   TacticSlot,
   TeamInstructions,
 } from '../../types';
@@ -21,6 +21,7 @@ import {
   FORMATIONS,
   PRESETS,
   ROLES,
+  STYLES,
   conditionEfficiency,
   defaultRoles,
   fitOf,
@@ -50,41 +51,15 @@ function slot(key: SlotKey, formation: FormationId, instructions: TeamInstructio
 const PROTECT: TeamInstructions = { mentality: -1, press: 0, line: -1, width: 0, tempo: -1, directness: 0, counter: true, offsideTrap: false };
 const CHASE: TeamInstructions = { mentality: 2, press: 1, line: 1, width: 1, tempo: 1, directness: 1, counter: false, offsideTrap: false };
 
-/** 성향별 기본 전술 슬롯 A/B (A = 주 전술, B = 리드 지키기 또는 추격) */
-export function styleTactics(style: BotStyleTag): { A: TacticSlot; B: TacticSlot } {
-  switch (style) {
-    case 'POSSESSION':
-      return {
-        A: slot('A', '4-3-3', PRESETS.POSSESSION.instructions, 80, { 9: 'ST_FALSE_NINE' }),
-        B: slot('B', '4-2-3-1', PROTECT, 55),
-      };
-    case 'COUNTER':
-      return {
-        A: slot('A', '4-4-2', PRESETS.COUNTER.instructions, 80, { 9: 'ST_TARGET', 10: 'ST_POACHER' }),
-        B: slot('B', '4-4-2', CHASE, 55),
-      };
-    case 'HIGH_PRESS':
-      return {
-        A: slot('A', '4-3-3', PRESETS.HIGH_PRESS.instructions, 80, { 0: 'GK_SWEEPER' }),
-        B: slot('B', '4-2-3-1', PROTECT, 55),
-      };
-    case 'LOW_BLOCK':
-      return {
-        A: slot('A', '5-3-2', PRESETS.LOW_BLOCK.instructions, 80),
-        B: slot('B', '4-4-2', CHASE, 55),
-      };
-    case 'WIDE':
-      return {
-        A: slot(
-          'A',
-          '4-4-2',
-          { mentality: 1, press: 0, line: 0, width: 2, tempo: 0, directness: 1, counter: false, offsideTrap: false },
-          80,
-          { 1: 'FB_OVERLAPPING', 4: 'FB_OVERLAPPING' },
-        ),
-        B: slot('B', '5-3-2', PROTECT, 55),
-      };
-  }
+/**
+ * 스타일별 기본 전술 슬롯 A/B (A = 스타일 그대로: 권장 포메이션·역할·지시, B = 같은 포메이션의 리드 지키기 또는 추격).
+ * 봇 성향 8종과 사람 구단 스타일 적용이 같은 데이터(STYLES)를 쓴다.
+ */
+export function styleTactics(style: StyleId): { A: TacticSlot; B: TacticSlot } {
+  const d = STYLES[style];
+  const A: TacticSlot = { key: 'A', formation: d.formation, roles: [...d.roles], instructions: { ...d.instructions }, familiarity: 80 };
+  const B: TacticSlot = { key: 'B', formation: d.formation, roles: [...d.roles], instructions: { ...(d.instructions.mentality <= -1 ? CHASE : PROTECT) }, familiarity: 55 };
+  return { A, B };
 }
 
 /** 사람 구단 창단 기본 전술: A 4-2-3-1 균형, B 4-4-2 지키기 */

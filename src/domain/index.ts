@@ -3,7 +3,7 @@ export { makeMatchId, parseMatchId, generateDoubleRoundRobin } from './league/sc
 export { computeStandings } from './league/standings';
 export { judgeSeason } from './league/promotion';
 export { expectedPoints } from './league/xpts';
-export { buildOpponentScout, summarizeInstructions, lastTacticOf } from './league/scout';
+export { buildOpponentScout, summarizeInstructions, lastTacticOf, botStyleOf } from './league/scout';
 export {
   generatePlayer,
   generateSquad,
@@ -41,7 +41,8 @@ export {
   type ManagerAiContext,
   type ManagerAiMode,
 } from './ai/managerAi';
-export { tacticEdge, tacticEdgeTotal, type TacticShape } from './ai/matchup';
+export { tacticEdge, tacticEdgeTotal, staticView, matchupPreview, styleFitOf, type TacticShape } from './ai/matchup';
+export { migrateSave } from './save/migrate';
 export { buildReport, computeLeagueAverages, chanceLabel, DEFAULT_LEAGUE_AVERAGES, type LeagueAverages } from './report/buildReport';
 export { buildReplay, type ReplayNames } from './report/commentary';
 export {
@@ -50,6 +51,11 @@ export {
   buildValueTable,
   PACKAGES,
   SPREAD_PACKAGES,
+  styleShort,
+  styleMatrixMatch,
+  STYLE_FIT_MODS,
+  type RealismSummary,
+  type RoleSignatureRow,
   TARGETS as CALIBRATION_TARGETS,
   type CalibrationDetails,
   type PackageId,

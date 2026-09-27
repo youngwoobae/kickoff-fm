@@ -1,12 +1,13 @@
 /** 엔진 테스트 (소유: A). 기준은 docs/아키텍처.md 12장 */
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { EngineConstants, VALUE_TABLE, computeUnits, conditionEfficiency, decomposeBinary, explainMatch, simulateMatch } from '../../src/engine';
+import { EngineConstants, ROLE_SHAPE, VALUE_TABLE, computeUnits, conditionEfficiency, decomposeBinary, explainMatch, simulateMatch } from '../../src/engine';
 import { runCalibration } from '../../src/domain';
 import type { BinaryDecisionLog, ConditionalOrder, DecisionLog, EngineTeamInput, RoleId, RuleId } from '../../src/types';
 import { config, makeTeam, play } from '../helpers';
 
 const { RULES_BY_DP, P_MIN, P_MAX, GOAL_P_MIN, GOAL_P_MAX } = EngineConstants;
+const ROLE_EXTRA_DRAIN: Partial<Record<RoleId, number>> = Object.fromEntries(Object.entries(ROLE_SHAPE).map(([k, v]) => [k, v.drain]));
 const binary = (log: DecisionLog[]) => log.filter((l): l is BinaryDecisionLog => l.kind === 'BINARY');
 const hash = (x: unknown) => createHash('sha256').update(JSON.stringify(x)).digest('hex');
 
@@ -59,7 +60,7 @@ describe('simulateMatch', () => {
   it('DP 별 raw 키는 RULES_BY_DP 의 부분집합, onlyRules 는 해당 규칙만 남긴다', () => {
     const seen = new Set<RuleId>();
     for (let seed = 0; seed < 40; seed++) {
-      const r = play(seed, [A, B, C, L][seed % 4]!.input, [L, C, B, A][seed % 4]!.input);
+      const r = play(seed, [A, B, C, L][seed % 4]!.input, [B, L, A, C][seed % 4]!.input);
       for (const l of r.log) {
         const allowed = RULES_BY_DP[l.dp];
         const keys = l.kind === 'BINARY' ? Object.keys(l.raw) : Object.values(l.rawByType).flatMap((m) => Object.keys(m));
@@ -74,7 +75,7 @@ describe('simulateMatch', () => {
     for (const r of ['R1', 'R3', 'R5', 'TEMPO'] as RuleId[]) expect(seen.has(r), r).toBe(true);
   });
 
-  it('R6 이 켜진 DP4 실패마다 OFFSIDE 이벤트 1개, R2 가 켜진 DP1 성공마다 LONG_BALL_ADVANCE 1개', () => {
+  it('OFFSIDE 이벤트 수 = offsides 통계 ≥ R6 이 켜진 DP4 실패 수 (나머지는 표시 오프사이드), R2 가 켜진 DP1 성공마다 LONG_BALL_ADVANCE 1개', () => {
     let total = 0;
     for (let seed = 0; seed < 40; seed++) {
       const r = play(seed, B.input, A.input); // 역습(침투형·롱볼) vs 전방압박(트랩·높은 라인)
@@ -82,9 +83,10 @@ describe('simulateMatch', () => {
         const logs = binary(r.log).filter((l) => l.actor === side.clubId);
         const offsides = logs.filter((l) => l.dp === 'DP4' && !l.success && l.raw.R6 !== undefined).length;
         const longBalls = logs.filter((l) => l.dp === 'DP1' && l.success && l.raw.R2 !== undefined).length;
-        expect(r.events.filter((e) => e.type === 'OFFSIDE' && e.clubId === side.clubId).length).toBe(offsides);
+        const offEvents = r.events.filter((e) => e.type === 'OFFSIDE' && e.clubId === side.clubId).length;
+        expect(offEvents).toBe(side.offsides);
+        expect(offEvents).toBeGreaterThanOrEqual(offsides);
         expect(r.events.filter((e) => e.type === 'LONG_BALL_ADVANCE' && e.clubId === side.clubId).length).toBe(longBalls);
-        expect(side.offsides).toBe(offsides);
         expect(side.longBallAdvances).toBe(longBalls);
         total += offsides + longBalls;
       }
@@ -92,7 +94,7 @@ describe('simulateMatch', () => {
     expect(total).toBeGreaterThan(0);
   });
 
-  it('시퀀스 수 = round(100 × tempoFactor × jitter), tempoFactor ∈ [0.85, 1.15]', () => {
+  it('시퀀스 수 = round(90 × tempoFactor × jitter) + 추가시간(세그먼트 9 × 1.5, 18 × 2.1), tempoFactor ∈ [0.85, 1.15]', () => {
     for (const tempo of [-2, 0, 2] as const) {
       const h = makeTeam(1, 'h', 60, 'BALANCED', { tempo });
       const a = makeTeam(2, 'a', 60, 'BALANCED', { tempo });
@@ -100,13 +102,14 @@ describe('simulateMatch', () => {
       for (let seed = 0; seed < 20; seed++) {
         const r = play(seed, h.input, a.input);
         const seqs = new Set(r.log.map((l) => l.seq)).size;
-        expect(seqs).toBeGreaterThanOrEqual(Math.round(100 * tf * 0.92) - 1);
-        expect(seqs).toBeLessThanOrEqual(Math.round(100 * tf * 1.08) + 1);
+        const stoppage = (16 + 1.5 + 2.1) / 18;
+        expect(seqs).toBeGreaterThanOrEqual(Math.round(90 * tf * 0.92 * stoppage) - 2);
+        expect(seqs).toBeLessThanOrEqual(Math.round(90 * tf * 1.08 * stoppage) + 2);
       }
     }
   });
 
-  it('컨디션: 풀타임 소모 30 (압박 ±3/단계, 박스투박스 +3)', () => {
+  it('컨디션: 풀타임 소모 30 + 3 × 압박(+) − 1 × 압박(−) + 역할 가산 (0.4.0 스타일 체력 공식)', () => {
     const noSub = (t: EngineTeamInput): EngineTeamInput => ({ ...t, autoSubThreshold: 0, bench: [] });
     for (const press of [-2, 0, 2] as const) {
       const h = makeTeam(7, 'h', 60, 'BALANCED', { press });
@@ -117,7 +120,8 @@ describe('simulateMatch', () => {
       for (const l of lines) {
         const idx = h.input.starters.findIndex((p) => p.id === l.playerId);
         const role = h.input.slots.A.roles[idx];
-        expect(l.conditionAfter).toBe(Math.round(100 - (30 + 3 * press + (role === 'CM_BOX_TO_BOX' ? 3 : 0))));
+        const drain = 30 + 3 * Math.max(0, press) - Math.max(0, -press) + (EngineConstants.CONDITION.tempoDrainPerStep * 0) + (ROLE_EXTRA_DRAIN[role!] ?? 0);
+        expect(l.conditionAfter).toBe(Math.round(100 - drain));
       }
     }
   });
@@ -260,8 +264,8 @@ describe('explainMatch (8.8)', () => {
 });
 
 describe('calibration (1,000경기+ 배치)', () => {
-  it('BASELINE 1,000경기: 평균 총 득점 2.5~2.9, 무승부 22~28%, 팀당 슈팅 9~15', () => {
-    const rep = runCalibration({ matchesPerScenario: 1000, tacCap: 0.35, seed: 20260926, scenarios: ['BASELINE'] });
+  it('BASELINE 1,000경기: 평균 총 득점 2.6~3.0, 무승부 22~28%, 팀당 슈팅 11.5~14 (0.4.0)', () => {
+    const rep = runCalibration({ matchesPerScenario: 1000, tacCap: 0.5, seed: 20260926, scenarios: ['BASELINE'] });
     const get = (id: string) => rep.targets.find((t) => t.id === id)!;
     expect(get('goals').pass, `goals ${get('goals').actual}`).toBe(true);
     expect(get('draws').pass, `draws ${get('draws').actual}`).toBe(true);
@@ -273,12 +277,12 @@ describe('calibration (1,000경기+ 배치)', () => {
     expect(rep.targets[0]!.actual).toBeGreaterThanOrEqual(85);
   });
 
-  it('RULE_ISOLATION: 규칙별 단독 기여 P95 ≤ 0.5, 합 P95 ≤ 0.8 (엔진 0.3.0 목표)', () => {
+  it('RULE_ISOLATION: 규칙별 단독 기여 P95 ≤ 0.5 (R7 ≤ 0.30), 합 P95 ≤ 0.8 (엔진 0.4.0 목표)', () => {
     const rep = runCalibration({ matchesPerScenario: 200, tacCap: 0.5, seed: 3, scenarios: ['RULE_ISOLATION'] });
     for (const t of rep.targets) expect(t.pass, `${t.label} = ${t.actual}`).toBe(true);
   });
 
-  it('COUNTER_SPREAD (cap 0.5, 12,500경기): 교차검증 최선−최악 15~30%p, 유리 측 무승부 제외 60~70%', () => {
+  it('COUNTER_SPREAD (9×9 스타일, cap 0.5, 22,500경기): 교차검증 최선−최악 15~30%p, 유리 측 무승부 제외 60~70%', () => {
     const rep = runCalibration({ matchesPerScenario: 1000, tacCap: 0.5, seed: 20260926, scenarios: ['COUNTER_SPREAD'] });
     for (const t of rep.targets) expect(t.pass, `${t.label} = ${t.actual}`).toBe(true);
   });

@@ -2,7 +2,7 @@
 import type {
   AttrKey,
   Attributes,
-  BotStyleTag,
+  BotStyle,
   Club,
   FitLevel,
   Player,
@@ -231,7 +231,7 @@ export function botName(index: number): { name: string; shortName: string } {
   return { name: n[0], shortName: n[1] };
 }
 
-export function createBotClub(rng: Rng, id: string, style: BotStyleTag, players: readonly Player[]): Club {
+export function createBotClub(rng: Rng, id: string, style: BotStyle, players: readonly Player[]): Club {
   const { name, shortName } = botName(Math.floor(rng() * BOT_NAMES.length));
   const t = styleTactics(style);
   return {
@@ -239,7 +239,7 @@ export function createBotClub(rng: Rng, id: string, style: BotStyleTag, players:
     name,
     shortName,
     isHuman: false,
-    botStyle: style,
+    style,
     playerIds: players.map((p) => p.id),
     tactics: t,
   };

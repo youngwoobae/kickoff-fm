@@ -7,8 +7,9 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
-import { buildValueTable, PACKAGES, runCalibrationDetailed } from '../src/domain';
-import type { ScenarioId, TacticCap } from '../src/types';
+import { buildValueTable, PACKAGES, SPREAD_PACKAGES, runCalibrationDetailed, styleShort } from '../src/domain';
+import { STYLE_MATRIX_EXPECTED } from '../src/engine';
+import type { ScenarioId, StyleId, TacticCap } from '../src/types';
 
 const { values } = parseArgs({
   options: {
@@ -67,23 +68,55 @@ if (details.baseline) {
   const b = details.baseline;
   console.log(`\n[BASELINE] n=${b.n} 평균 득점 ${b.goals.toFixed(3)} | 팀당 슈팅 ${f1(b.shotsPerTeam)} | 승/무/패 ${f1(b.w)}/${f1(b.d)}/${f1(b.l)}%`);
 }
+if (details.realHome) {
+  const h = details.realHome;
+  console.log(`[REAL_HOME] n=${h.n} 홈 승/무/원정 승 ${f1(h.homeWin)}/${f1(h.draw)}/${f1(h.awayWin)}% | 홈−원정 득점 ${h.goalDiff.toFixed(3)}`);
+}
+if (details.realism) {
+  const s = details.realism;
+  console.log(`\n[LEAGUE_REALISM] ${s.n}경기 | 득점 ${s.goals.toFixed(2)} | 홈/무/원정 ${f1(s.homeWin)}/${f1(s.draw)}/${f1(s.awayWin)} | 슈팅 ${f1(s.shotsPerTeam)} 유효 ${f1(s.sotPerTeam)} (${f1(s.sotRatio)}%) | xG ${s.xgPerTeam.toFixed(2)}`);
+  if (details.stylePossession) console.log(`  스타일 점유 vs 균형: ${Object.entries(details.stylePossession).map(([k, v]) => `${k} ${f1(v!)}%`).join(', ')}`);
+}
 if (details.counterMatrix) {
-  const us = [...new Set(details.counterMatrix.map((c) => c.us))];
-  const them = [...new Set(details.counterMatrix.map((c) => c.them))];
-  console.log('\n[COUNTER_SPREAD] 동일 전력(OVR 60) 승률 % (행 = 우리 프리셋, 열 = 상대 프리셋, 중립 경기장)');
-  const rows = us.map((u) => {
-    const row: Record<string, string> = { 우리: PACKAGES[u].label };
-    for (const t of them) {
-      const c = details.counterMatrix!.find((x) => x.us === u && x.them === t)!;
-      row[PACKAGES[t].label] = `${f1(c.winPct)} / ${f1(c.drawPct)} / ${f1(c.lossPct)}`;
+  const S = SPREAD_PACKAGES;
+  console.log('\n[STYLE_MATRIX] 동일 전력(OVR 60), 중립. 칸 = 행 팀 (승 − 패)%p [설계 기대 부호], 괄호 = 행 팀 점유율');
+  const rows = S.map((u) => {
+    const row: Record<string, string> = { 행: styleShort(u) };
+    for (const t of S) {
+      const c = details.counterMatrix!.find((x) => x.us === u && x.them === t);
+      if (!c) continue;
+      const e = STYLE_MATRIX_EXPECTED[u][t];
+      const mark = e === 2 ? '++' : e === 1 ? '+' : e === 0 ? '0' : e === -1 ? '−' : '−−';
+      row[styleShort(t)] = u === t ? '·' : `${(c.winPct - c.lossPct).toFixed(0)} [${mark}]`;
     }
     return row;
   });
   console.table(rows);
+  if (details.matrixSign) {
+    const m = details.matrixSign;
+    console.log(`  부호 일치 ${m.matched}/${m.total} (${f1(m.rate)}%) | 스타일 평균(승−패): ${Object.entries(m.styleAvg).map(([k, v]) => `${styleShort(k as StyleId)} ${f1(v)}`).join(', ')}`);
+    console.log(`  +6 이상 상대 수: ${Object.entries(m.plus).map(([k, v]) => `${styleShort(k as StyleId)} ${v}`).join(', ')} | −6 이하: ${Object.entries(m.minus).map(([k, v]) => `${styleShort(k as StyleId)} ${v}`).join(', ')}`);
+  }
   console.log(`  단순 최대−최소 평균 ${f1(details.counterRawSpread ?? 0)}%p / 교차검증 평균 ${f1(details.counterCvSpread ?? 0)}%p`);
   for (const [s, b] of Object.entries(details.counterBest ?? {})) {
-    console.log(`  vs ${PACKAGES[s as keyof typeof PACKAGES].label}: 최선 ${PACKAGES[b.best].label}, 최악 ${PACKAGES[b.worst].label}, 교차검증 승률 차 ${f1(b.spread)}%p, 유리측 무승부 제외 ${f1(b.favNonDraw)}%`);
+    console.log(`  vs ${styleShort(s as StyleId)}: 최선 ${styleShort(b.best)}, 최악 ${styleShort(b.worst)}, 교차검증 승률 차 ${f1(b.spread)}%p, 유리측 무승부 제외 ${f1(b.favNonDraw)}%`);
   }
+}
+if (details.formationParity) {
+  const f = details.formationParity;
+  console.log(`\n[FORMATION_PARITY] 칸당 ${f.n}경기 | 경기당 승점: ${Object.entries(f.ppg).map(([k, v]) => `${k} ${v.toFixed(2)}`).join(', ')} | 4-4-2 vs 4-3-3 |승−패| ${f1(f.f442v433)}%p`);
+}
+if (details.styleFit) {
+  const f = details.styleFit;
+  console.log(`[STYLE_FIT] 적합 이득 ${f1(f.gainFit)} / 부적합 ${f1(f.gainUnfit)} → 차 ${f1(f.diff)}%p | R2 러너17vsCB11 ${f.r2Fast.toFixed(3)} / 러너12vsCB14 ${f.r2Slow.toFixed(3)} (×${f.ratio.toFixed(2)})`);
+}
+if (details.roleSignature) {
+  console.log('\n[ROLE_SIGNATURE]');
+  console.table(details.roleSignature.map((r) => ({ 교체: r.swap, 지표: r.metric, 기준: Number(r.base.toFixed(3)), 교체후: Number(r.value.toFixed(3)), 변화: Number(r.change.toFixed(2)), 기준치: r.min, 방향: r.dirOk ? 'OK' : 'X', 크기: r.sizeOk ? 'OK' : 'X' })));
+}
+if (details.stamina) {
+  const s = details.stamina;
+  console.log(`[STAMINA_CURVE] 후반 xG 비중 GP ${f1(s.gpShare2)}% / BAL ${f1(s.balShare2)}% (차 ${f1(s.diff)}%p) | 경기 후 컨디션 GP ${f1(s.gpCond)} / BAL ${f1(s.balCond)} (차 ${f1(s.condDiff)})`);
 }
 if (details.ovr10) console.log(`\n[OVR_DIFF_10] 65 vs 55 강팀 승 ${f1(details.ovr10.strongWin)}% 무 ${f1(details.ovr10.draw)}% 약팀 승 ${f1(details.ovr10.weakWin)}%`);
 if (details.ovr10Counter) {

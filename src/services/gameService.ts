@@ -23,6 +23,7 @@ import type {
   MatchPlan,
   MatchReplay,
   MatchReport,
+  MatchupPreview,
   Membership,
   OpponentScout,
   PlanChangePatch,
@@ -42,12 +43,14 @@ import type {
   SlotKey,
   StandingRow,
   StoredMatchRecord,
+  StyleFit,
+  StyleId,
+  TacticSlot,
   TacticCap,
   TeamInstructions,
   UiLogKind,
 } from '../types';
 import {
-  ALLOWED_ROLES,
   ENGINE_VERSION,
   EngineConstants,
   FORMATIONS,
@@ -58,9 +61,14 @@ import {
   ROLE_IDS,
   RULE_DEFS,
   RULE_IDS,
+  STYLES,
+  STYLE_IDS,
   VALUE_TABLE,
+  defaultRoles,
   explainMatch,
   hashString,
+  mulberry32,
+  nearestStyle,
   simulateMatch,
 } from '../engine';
 import {
@@ -70,6 +78,7 @@ import {
   TIER_ECONOMY,
   advanceDayState,
   applyPatch,
+  botStyleOf,
   buildOpponentScout,
   buildReplay,
   buildReport,
@@ -82,6 +91,13 @@ import {
   findConflicting,
   isAvailable,
   isDomainError,
+  lastTacticOf,
+  matchupPreview,
+  migrateSave,
+  pickLineup,
+  staticView,
+  styleFitOf,
+  toEnginePlayer,
   pickBasePlan,
   remapLineup as remapLineupDomain,
   resolvePlan,
@@ -100,6 +116,8 @@ import {
   type NewGameOptions,
   type ResimulateOverrides,
   type SubmitPlanOptions,
+  type StyleApplyMode,
+  type StyleApplyResult,
   type TacticSlotInput,
   type TacticUpdateResult,
 } from './api';
@@ -140,6 +158,7 @@ const CATALOG: Catalog = {
   presets: PRESET_IDS.map((id) => PRESETS[id]),
   attributes: ATTRIBUTES,
   rules: RULE_IDS.map((id) => RULE_DEFS[id]),
+  styles: STYLE_IDS.map((id) => STYLES[id]),
 };
 
 function toGameError(e: unknown): unknown {
@@ -158,7 +177,7 @@ function tacticIssues(formation: string, roles: readonly string[], instr: TeamIn
   if (roles.length !== def.slots.length) out.push(`역할은 ${def.slots.length}개여야 합니다`);
   def.slots.forEach((s, i) => {
     const r = roles[i];
-    if (r && !ALLOWED_ROLES[s.position].includes(r as never)) out.push(`${i + 1}번 자리(${s.position})에 ${r} 역할은 쓸 수 없습니다`);
+    if (r && !s.allowedRoles.includes(r as never)) out.push(`${i + 1}번 자리(${s.position})에 ${r} 역할은 쓸 수 없습니다`);
   });
   for (const k of ['mentality', 'press', 'line', 'width', 'tempo', 'directness'] as const) {
     if (!isStep(instr[k])) out.push(`${k} 는 −2~+2 정수여야 합니다`);
@@ -362,7 +381,7 @@ class LocalGameService implements GameService {
     const raw = this.storage.load();
     if (!raw) return null;
     try {
-      const parsed = JSON.parse(raw) as GameState;
+      const parsed = migrateSave(JSON.parse(raw)) as GameState;
       if (saveProblem(parsed) !== null) return null;
       this.preview(parsed); // 손상 세이브면 여기서 throw → null (부팅 크래시 루프 방지)
       this.state = parsed;
@@ -388,7 +407,7 @@ class LocalGameService implements GameService {
   importSave(json: string): GameSnapshot {
     let parsed: GameState;
     try {
-      parsed = JSON.parse(json) as GameState;
+      parsed = migrateSave(JSON.parse(json)) as GameState;
     } catch {
       throw new GameError('SAVE_INCOMPATIBLE', '저장 데이터를 읽을 수 없습니다 (JSON 형식 오류)');
     }
@@ -596,6 +615,61 @@ class LocalGameService implements GameService {
     const r = this.preview(s);
     if (!r) throw new GameError('INVALID_PHASE', '다음 경기가 없습니다');
     return stripOpponentOrders(r.plan);
+  }
+
+  applyStyle(slot: SlotKey, styleId: StyleId, mode: StyleApplyMode): StyleApplyResult {
+    const s = this.require();
+    const d = STYLES[styleId];
+    if (!d) throw new GameError('INVALID_TACTIC', `알 수 없는 스타일: ${String(styleId)}`);
+    if (mode !== 'INSTRUCTIONS_ONLY' && mode !== 'FULL') throw new GameError('INVALID_TACTIC', `적용 방식은 INSTRUCTIONS_ONLY 또는 FULL: ${String(mode)}`);
+    const cur = s.clubs[s.userClubId]!.tactics[slot];
+    if (!cur) throw new GameError('INVALID_TACTIC', `슬롯은 A 또는 B: ${String(slot)}`);
+    const next =
+      mode === 'FULL'
+        ? { formation: d.formation, roles: [...d.roles], instructions: { ...d.instructions } }
+        : { formation: cur.formation, roles: [...cur.roles], instructions: { ...d.instructions } };
+    const r = this.updateTacticSlot(slot, next);
+    return {
+      ...r,
+      styleId,
+      mode,
+      ...(r.familiarityHalved ? { warning: `포메이션이 ${cur.formation} → ${d.formation} 로 바뀌어 전술 숙련도가 절반(${r.slot.familiarity})이 되었습니다. 숙련도가 낮으면 전술 이득이 줄어듭니다` } : {}),
+    };
+  }
+
+  getStyleFits(): StyleFit[] {
+    const s = this.require();
+    const club = s.clubs[s.userClubId]!;
+    return STYLE_IDS.map((id) => {
+      const d = STYLES[id];
+      const tactic: TacticSlot = { key: 'A', formation: d.formation, roles: [...d.roles], instructions: { ...d.instructions }, familiarity: 100 };
+      const lineup = pickLineup({ club, players: s.players, opponentId: null, mode: 'SYSTEM_DEFAULT', rng: mulberry32(1) }, tactic);
+      return styleFitOf(id, lineup.starters.map((pid) => (s.players[pid] ? toEnginePlayer(s.players[pid]) : undefined)));
+    });
+  }
+
+  getMatchupPreview(ourSlot: SlotKey, opponentId: ClubId): MatchupPreview {
+    const s = this.require();
+    const club = s.clubs[s.userClubId]!;
+    const opp = s.clubs[opponentId];
+    if (!opp) throw new GameError('NOT_FOUND', `구단 없음: ${opponentId}`);
+    const ours = club.tactics[ourSlot];
+    if (!ours) throw new GameError('INVALID_TACTIC', `슬롯은 A 또는 B: ${String(ourSlot)}`);
+    const summaries = Object.values(s.summaries);
+    const last = lastTacticOf(s.clubs, summaries, opponentId);
+    const bot = botStyleOf(opp);
+    // 상대 전술: 최근 경기 포메이션·지시 (역할은 같은 포메이션의 구단 슬롯, 없으면 기본), 기록이 없으면 슬롯 A
+    const base = opp.tactics.A;
+    const formation = last?.formation ?? base.formation;
+    const roles = last?.roles ?? (opp.tactics.A.formation === formation ? opp.tactics.A.roles : opp.tactics.B.formation === formation ? opp.tactics.B.roles : undefined);
+    const theirs: TacticSlot = { key: 'A', formation, roles: roles ? [...roles] : defaultRoles(formation), instructions: { ...(last?.instructions ?? base.instructions) }, familiarity: 100 };
+    const lineupOf = (c: typeof club, t: TacticSlot) =>
+      pickLineup({ club: c, players: s.players, opponentId: null, mode: 'SYSTEM_DEFAULT', rng: mulberry32(1) }, t).starters.map((pid) => (s.players[pid] ? toEnginePlayer(s.players[pid]) : undefined));
+    const usView = staticView(club.id, ours, lineupOf(club, ours));
+    const themView = staticView(opp.id, theirs, lineupOf(opp, theirs));
+    const r = matchupPreview(usView, themView);
+    const style: StyleId | undefined = bot ?? (last ? nearestStyle(last.instructions).id : undefined);
+    return { ourSlot, opponentId, ...(style ? { opponentStyle: style } : {}), opponentStyleEstimated: !bot, rules: r.rules, styleEdge: r.styleEdge };
   }
 
   recommendPlan(): MatchPlan {

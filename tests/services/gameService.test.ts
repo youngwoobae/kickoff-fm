@@ -247,8 +247,8 @@ describe('GameService', () => {
     expect(scout.last5).toHaveLength(3);
     expect(scout.weakness.length).toBeGreaterThan(0);
     const cat = s.getCatalog();
-    expect(cat.formations).toHaveLength(6);
-    expect(cat.roles).toHaveLength(14);
+    expect(cat.formations).toHaveLength(9);
+    expect(cat.roles).toHaveLength(28);
     expect(cat.presets).toHaveLength(5);
     expect(cat.attributes).toHaveLength(15);
   });

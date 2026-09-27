@@ -137,7 +137,8 @@ export const ROLE_EXTRA_DRAIN: Partial<Record<RoleId, number>> = Object.fromEntr
 /** R1 압박 저항 역할 (빌드업에서 압박을 푸는 역할) */
 export const PRESS_RESIST_ROLES: readonly RoleId[] = ['GK_SWEEPER', 'CB_BALL_PLAYING', 'DM_REGISTA', 'CM_DEEP_PLAYMAKER', 'FB_INVERTED'];
 /** R12 공격 주체가 되는 측면 역할 */
-export const WIDE_ATTACK_ROLES: readonly RoleId[] = ['W_WINGER', 'W_INSIDE_FORWARD', 'W_INVERTED_WINGER', 'W_WIDE_MIDFIELDER'];
+/** (와이드 미드필더는 1:1 돌파형이 아니라 R12 의 대응 역할이라 제외) */
+export const WIDE_ATTACK_ROLES: readonly RoleId[] = ['W_WINGER', 'W_INSIDE_FORWARD', 'W_INVERTED_WINGER'];
 /** R12 노출: 올라가는 측면 수비 역할 */
 export const ADVANCING_FB_ROLES: readonly RoleId[] = ['WB_WINGBACK', 'FB_OVERLAPPING'];
 /** R7 커버 섀도·R5 잔류 수비에 쓰는 피벗 역할 */

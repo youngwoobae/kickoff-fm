@@ -33,9 +33,11 @@ import {
   BASE,
   BASE_RST,
   BASE_SEQUENCES,
+  CARD,
   CHANCE_BASE_WEIGHT,
   CHANCE_XG,
   CONDITION,
+  DISPLAY,
   FAM_COEF_MIN,
   FAM_MOD_MAX_PENALTY,
   FIN_GK_K,
@@ -44,11 +46,13 @@ import {
   GOAL_P_MIN,
   HOME_MOD,
   K,
+  LATE_DRIFT,
   LONG_SHOT_DP4_BONUS,
   MAX_RESETS_PER_SEQUENCE,
   MAX_SUBS,
   MORALE_STEP_MOD,
   PK_SHARE_IN_BOX,
+  POSSESSION_WEIGHT,
   P_MAX,
   P_MIN,
   SEGMENTS,
@@ -56,6 +60,9 @@ import {
   SEQUENCE_JITTER,
   SIDE_SPLIT_DEFAULT,
   SIDE_SPLIT_TARGETED,
+  SOT_Q,
+  STATE_MOD,
+  STOPPAGE,
   SUB_WINDOWS,
   TEMPO_FACTOR_PER_STEP,
   Z2_FAIL_BRANCH,
@@ -67,6 +74,7 @@ import {
   CHANCE_ROLE_ADJ_MAX,
   ROLES,
   ROLE_EXTRA_DRAIN,
+  ROLE_SHAPE,
   ROLE_UNIT_WEIGHTS,
   SHOOTER_MIX,
   SHOOTER_ROLE_WEIGHT,
@@ -76,7 +84,7 @@ import {
 import { clamp, logit, sigmoid } from './math';
 import { mulberry32, pickWeighted, type Rng } from './rng';
 import { OPEN_CHANCES, evalBinaryRules, evalChoiceRules, type RawMap, type TeamView } from './rules';
-import { computeUnitsFromOccupants, conditionEfficiency, eff, fitOf, mixEff, type Occupant } from './units';
+import { computeShape, computeUnitsFromOccupants, conditionEfficiency, eff, fitOf, mixEff, type Occupant } from './units';
 
 // ─────────────────────────────────────────────────────────────── 상태
 
@@ -92,6 +100,7 @@ interface PState {
   tackles: number;
   injuredDays: number;
   red: boolean;
+  yellows: number;
   dropped: boolean;
 }
 
@@ -106,6 +115,11 @@ interface TeamStats {
   ruleFires: Partial<Record<RuleId, number>>;
   segEntries: number[];
   segXg: number[];
+  sot: number;
+  corners: number;
+  yellows: number;
+  /** 시간 가중 점유 누계 (표시용) */
+  possW: number;
 }
 
 interface Team {
@@ -158,6 +172,7 @@ function newPState(p: EnginePlayer, started: boolean, onMin: number): PState {
     tackles: 0,
     injuredDays: 0,
     red: false,
+    yellows: 0,
     dropped: p.condition < CONDITION.effLinearLowAt,
   };
 }
@@ -178,6 +193,10 @@ function emptyStats(): TeamStats {
     ruleFires: {},
     segEntries: new Array<number>(SEGMENTS).fill(0),
     segXg: new Array<number>(SEGMENTS).fill(0),
+    sot: 0,
+    corners: 0,
+    yellows: 0,
+    possW: 0,
   };
 }
 
@@ -225,6 +244,7 @@ function refreshView(t: Team, opp: Team): void {
     formation: t.formation,
     occ,
     units: computeUnitsFromOccupants(occ, { missing: t.missing, markerId, setPieceTakerId: t.input.setPieceTaker }),
+    shape: computeShape(occ, t.instr, t.formation),
     familiarity: t.input.slots[t.slotKey].familiarity,
     ...(orders?.markTarget ? { markTarget: orders.markTarget } : {}),
     ...(markerId ? { markerId } : {}),
@@ -275,6 +295,14 @@ function keyAttrAvg(p: EnginePlayer, role: RoleId): number {
 
 class Match {
   readonly rng: Rng;
+  /** 표시 판정 전용 스트림 (유효슈팅·코너 추가분·표시 오프사이드). 결과를 바꾸지 않는다 */
+  readonly disp: Rng;
+  /** 경고 판정 스트림 (2경고 퇴장 경로로 결과를 바꾼다) */
+  readonly cardRng: Rng;
+  /** 추가시간 분 (0 이면 정규 시간) */
+  added = 0;
+  private seqResets = 0;
+  private seqAdv = 0;
   readonly log: DecisionLog[] = [];
   readonly events: MatchEvent[] = [];
   readonly home: Team;
@@ -285,6 +313,8 @@ class Match {
 
   constructor(readonly input: SimulateInput) {
     this.rng = mulberry32(input.seed);
+    this.disp = mulberry32((input.seed ^ 0x5bd1e995) >>> 0);
+    this.cardRng = mulberry32((input.seed ^ 0x27d4eb2f) >>> 0);
     this.home = this.makeTeam(input.home, true);
     this.away = this.makeTeam(input.away, false);
     refreshView(this.home, this.away);
@@ -350,7 +380,7 @@ class Match {
       case 'DP4': {
         a = A.CRE;
         d = D.BOX;
-        base = BASE.DP4 + (ctx.chance === 'LONG' ? LONG_SHOT_DP4_BONUS : 0);
+        base = BASE.DP4 + (ctx.chance === 'LONG' ? LONG_SHOT_DP4_BONUS : 0) + this.lateDrift();
         strength = K * (a - d) + this.matchupTerm(ctx.chance, actor, opp);
         break;
       }
@@ -371,7 +401,7 @@ class Match {
       case 'DP7':
         a = A.PACE_A;
         d = D.PACE_D;
-        base = BASE.DP7;
+        base = BASE.DP7 + this.lateDrift();
         strength = K * (a - d);
         break;
       case 'DP8':
@@ -384,7 +414,8 @@ class Match {
     const fam = actor.view.familiarity;
     const prep = MORALE_STEP_MOD * actor.input.morale - FAM_MOD_MAX_PENALTY * (1 - fam / 100);
     const home = cfg.neutralVenue ? 0 : actor.isHome ? HOME_MOD : 0;
-    const logitNoTac = base + strength + prep + home;
+    const state = this.stateMod(dp, actor, opp);
+    const logitNoTac = base + strength + prep + home + state;
 
     let raw: RawMap = {};
     let tac = 0;
@@ -417,6 +448,7 @@ class Match {
       strength,
       prep,
       home,
+      ...(state !== 0 ? { state } : {}),
       logitNoTac,
       raw,
       tac,
@@ -429,6 +461,64 @@ class Match {
     if (ctx.shooter) entry.shooterId = ctx.shooter.player.id;
     this.log.push(entry);
     return { success, raw, p };
+  }
+
+  /** 0.4.0 후반 개방도: 세그먼트(1-based) ≥ 10 에서 DP4·DP7 BASE 가산 */
+  private lateDrift(): number {
+    const s = this.seg + 1;
+    return s >= LATE_DRIFT.fromSeg ? LATE_DRIFT.perSeg * (s - LATE_DRIFT.fromSeg + 1) : 0;
+  }
+
+  /** 0.4.0 경기 흐름 (60분 이후 스코어 기반, 전술 cap 밖) */
+  private stateMod(dp: BinaryDP, actor: Team, opp: Team): number {
+    if (this.minute < STATE_MOD.fromMinute) return 0;
+    const diff = actor.goals - opp.goals;
+    if (diff === 0) return 0;
+    const m = Math.abs(diff) >= 2 ? STATE_MOD.multiGoal : 1;
+    if (dp === 'DP1' || dp === 'DP2' || dp === 'DP4') return (diff < 0 ? STATE_MOD.trail : STATE_MOD.lead) * m;
+    if (dp === 'DP6' || dp === 'DP7') return diff > 0 ? STATE_MOD.counterVsTrail * m : 0;
+    return 0;
+  }
+
+  emit(e: MatchEvent): void {
+    this.events.push(this.added > 0 ? { ...e, addedMinute: this.added } : e);
+  }
+
+  /** 0.4.0 경고: 수비가 막아낸 결정마다 파울 기회. 2경고 = 퇴장 */
+  foul(def: Team, dp: 'DP1' | 'DP2' | 'DP4' | 'DP7'): void {
+    const unit = dp === 'DP1' ? 'PRS' : dp === 'DP2' ? 'MID' : dp === 'DP4' ? 'BOX' : 'PACE_D';
+    const cands: number[] = [];
+    const w: number[] = [];
+    for (let i = 0; i < def.pitch.length; i++) {
+      const ps = def.pitch[i];
+      if (!ps || this.formationPos(def, i) === 'GK') continue;
+      cands.push(i);
+      w.push((ROLE_UNIT_WEIGHTS[def.roles[i]!][unit] ?? 0) + CARD.spread);
+    }
+    if (cands.length === 0) return;
+    const idx = cands[pickWeighted(this.cardRng, w)]!;
+    const cfg = this.input.config;
+    const p =
+      CARD.base *
+      ROLE_SHAPE[def.roles[idx]!].card *
+      (1 + CARD.perPress * Math.max(0, def.instr.press)) *
+      (this.minute >= STATE_MOD.fromMinute && def.goals < this.other(def).goals ? CARD.trailing : 1) *
+      (!cfg.neutralVenue && !def.isHome ? CARD.away : 1) *
+      (def.pitch[idx]!.yellows > 0 ? CARD.booked : 1);
+    if (this.cardRng() >= p) return;
+    const ps = def.pitch[idx]!;
+    ps.yellows += 1;
+    def.stats.yellows += 1;
+    this.emit({ type: 'YELLOW_CARD', minute: this.minute, clubId: def.id, playerId: ps.p.id });
+    if (ps.yellows >= 2) {
+      ps.red = true;
+      ps.offMin = this.minute;
+      def.pitch[idx] = null;
+      def.missing += 1;
+      this.emit({ type: 'RED_CARD', minute: this.minute, clubId: def.id, playerId: ps.p.id });
+      refreshView(def, this.other(def));
+      refreshView(this.other(def), def);
+    }
   }
 
   private countFires(raw: RawMap, actor: Team, opp: Team): void {
@@ -486,7 +576,7 @@ class Match {
       baseLogits[t] = Math.log(CHANCE_BASE_WEIGHT[t]) + adj;
     }
     const rawByType: Record<OpenPlayChance, RawMap> = cfg.tacticsEnabled
-      ? evalChoiceRules(att.view, def.view, cfg)
+      ? evalChoiceRules(att.view, def.view, cfg, side)
       : { CROSS: {}, THROUGH: {}, CUTBACK: {}, LONG: {}, SOLO: {} };
     const tacByType = {} as Record<OpenPlayChance, number>;
     const fc = famCoef(att.view.familiarity);
@@ -595,11 +685,15 @@ class Match {
     const ps = shooter ? this.pState(att, shooter.player.id) : undefined;
     if (ps) ps.shots += 1;
     if (assisted) this.creditRandom(att, assisted, shooter?.player.id, 'keyPasses');
-    this.events.push({ type: 'SHOT', minute: this.minute, clubId: att.id, playerId: sid, chance, xg: r.p, goal: r.success });
+    // 표시 판정 (별도 스트림): 유효슈팅, 빗나간 슈팅의 코너
+    const onTarget = r.success || this.disp() < SOT_Q[chance];
+    if (onTarget) att.stats.sot += 1;
+    else if (chance !== 'PK' && this.disp() < DISPLAY.blockedCorner) att.stats.corners += 1;
+    this.emit({ type: 'SHOT', minute: this.minute, clubId: att.id, playerId: sid, chance, xg: r.p, goal: r.success, onTarget });
     if (r.success) {
       att.goals += 1;
       if (ps) ps.goals += 1;
-      this.events.push({ type: 'GOAL', minute: this.minute, clubId: att.id, playerId: sid, chance, xg: r.p });
+      this.emit({ type: 'GOAL', minute: this.minute, clubId: att.id, playerId: sid, chance, xg: r.p });
     }
     return r.success;
   }
@@ -612,20 +706,39 @@ class Match {
       const d6 = this.decide('DP6', winner, loser, { zone: z });
       if (d6.success) {
         winner.stats.counters += 1;
-        this.events.push({ type: 'COUNTER_ATTACK', minute: this.minute, clubId: winner.id });
+        this.emit({ type: 'COUNTER_ATTACK', minute: this.minute, clubId: winner.id });
         const d7 = this.decide('DP7', winner, loser, { zone: z, chance: 'COUNTER' });
         if (d7.success) {
           winner.stats.segEntries[this.seg]! += 1;
           this.shoot(winner, loser, 'COUNTER', 'PRG');
           return { next: loser, zone: 0 };
         }
+        this.foul(loser, 'DP7');
+        if (this.disp() < DISPLAY.counterOffside) this.displayOffside(winner);
       }
     }
     return { next: winner, zone: start };
   }
 
+  private displayOffside(att: Team): void {
+    att.stats.offsides += 1;
+    const target = att.view.occ.find((o) => o && ROLE_SHAPE[o.role].run === 1) ?? att.view.occ.find((o) => o?.position === 'ST');
+    this.emit({ type: 'OFFSIDE', minute: this.minute, clubId: att.id, ...(target ? { playerId: target.player.id } : {}) });
+  }
+
   // ── 점유 시퀀스 ─────────────────────────────────────────────────
   runSequence(att: Team, def: Team, startZone: Zone): SeqEnd {
+    this.seqResets = 0;
+    this.seqAdv = 0;
+    const end = this.runSequenceInner(att, def, startZone);
+    const P = POSSESSION_WEIGHT;
+    const d = att.instr.directness;
+    const f = d >= 1 ? 1 - P.direct * d : 1 + P.short * -d;
+    att.stats.possW += (1 + P.reset * this.seqResets + P.advance * this.seqAdv) * f * (1 + P.mentality * att.instr.mentality);
+    return end;
+  }
+
+  private runSequenceInner(att: Team, def: Team, startZone: Zone): SeqEnd {
     this.seq += 1;
     att.stats.seqs += 1;
     let zone: Zone = startZone;
@@ -637,15 +750,18 @@ class Match {
       const r = this.decide(dp, att, def, { zone });
       if (r.success) {
         zp.successes += 1;
+        this.seqAdv += 1;
         if (dp === 'DP1' && r.raw.R2 !== undefined && r.raw.R2 !== 0) {
           att.stats.longBalls += 1;
-          this.events.push({ type: 'LONG_BALL_ADVANCE', minute: this.minute, clubId: att.id });
+          this.emit({ type: 'LONG_BALL_ADVANCE', minute: this.minute, clubId: att.id });
         }
         zone = (zone + 1) as Zone;
         continue;
       }
+      this.foul(def, dp);
       if (resets < MAX_RESETS_PER_SEQUENCE && this.decide('DP8', att, def, { zone }).success) {
         resets += 1;
+        this.seqResets += 1;
         zone = Math.max(0, zone - 1) as Zone;
         continue;
       }
@@ -659,6 +775,7 @@ class Match {
     const r4 = this.decide('DP4', att, def, { zone: 2, chance, side });
     if (r4.success) {
       z2.successes += 1;
+      this.seqAdv += 1;
       const inBox = chance === 'CROSS' || chance === 'THROUGH' || chance === 'CUTBACK' || chance === 'SOLO';
       const shotType: ChanceType = inBox && this.rng() < PK_SHARE_IN_BOX ? 'PK' : chance;
       this.shoot(att, def, shotType, shotType === 'SOLO' || shotType === 'PK' ? null : 'CRE');
@@ -666,8 +783,8 @@ class Match {
     }
     if (chance === 'THROUGH' && r4.raw.R6 !== undefined && r4.raw.R6 !== 0) {
       att.stats.offsides += 1;
-      const target = att.view.occ.find((o) => o?.role === 'ST_POACHER');
-      this.events.push({
+      const target = att.view.occ.find((o) => o && ROLE_SHAPE[o.role].run === 1);
+      this.emit({
         type: 'OFFSIDE',
         minute: this.minute,
         clubId: att.id,
@@ -675,9 +792,11 @@ class Match {
       });
       return { next: def, zone: 0 };
     }
+    this.foul(def, 'DP4');
     const br = Z2_FAIL_BRANCH[chance === 'CROSS' ? 'CROSS' : 'DEFAULT'];
     const k = pickWeighted(this.rng, [br.corner, br.freeKick, br.turnover]);
     if (k === 0) {
+      att.stats.corners += 1;
       this.shoot(att, def, 'CORNER', 'CRE');
       return { next: def, zone: 0 };
     }
@@ -685,6 +804,7 @@ class Match {
       this.shoot(att, def, 'FK', null);
       return { next: def, zone: 0 };
     }
+    if (chance === 'THROUGH' && this.disp() < DISPLAY.throughOffside) this.displayOffside(att);
     return this.turnover(att, def, 2);
   }
 
@@ -697,14 +817,17 @@ class Match {
       const role = t.roles[idx]!;
       const drain =
         (CONDITION.fullMatchDrain +
-          CONDITION.pressDrainPerStep * t.instr.press +
+          CONDITION.pressDrainPerStep * Math.max(0, t.instr.press) -
+          CONDITION.lowPressRelief * Math.max(0, -t.instr.press) +
+          CONDITION.tempoDrainPerStep * Math.max(0, t.instr.tempo) -
+          CONDITION.lowLineRelief * Math.max(0, -t.instr.line) +
           (ROLE_EXTRA_DRAIN[role] ?? 0) +
           (ps.p.id === markerId ? CONDITION.markerExtraDrain : 0)) /
         SEGMENTS;
       ps.cond = Math.max(0, ps.cond - drain);
       if (!ps.dropped && ps.cond < CONDITION.effLinearLowAt) {
         ps.dropped = true;
-        this.events.push({ type: 'CONDITION_DROP', minute: this.minute, clubId: t.id, playerId: ps.p.id, condition: Math.round(ps.cond) });
+        this.emit({ type: 'CONDITION_DROP', minute: this.minute, clubId: t.id, playerId: ps.p.id, condition: Math.round(ps.cond) });
       }
     }
   }
@@ -719,7 +842,7 @@ class Match {
       if (this.rng() < rate) {
         const days = CONDITION.injuryDaysMin + Math.floor(this.rng() * (CONDITION.injuryDaysMax - CONDITION.injuryDaysMin + 1));
         ps.injuredDays = days;
-        this.events.push({ type: 'INJURY', minute: this.minute, clubId: t.id, playerId: ps.p.id, days });
+        this.emit({ type: 'INJURY', minute: this.minute, clubId: t.id, playerId: ps.p.id, days });
         injured.push(ps);
       }
     }
@@ -736,7 +859,7 @@ class Match {
         ps.offMin = this.minute;
         t.pitch[idx] = null;
         t.missing += 1;
-        this.events.push({ type: 'RED_CARD', minute: this.minute, clubId: t.id, playerId: ps.p.id });
+        this.emit({ type: 'RED_CARD', minute: this.minute, clubId: t.id, playerId: ps.p.id });
       }
     }
     return injured;
@@ -761,7 +884,7 @@ class Match {
       if (order.conditions.length === 0) continue;
       if (!order.conditions.every((c) => this.conditionHolds(c, t, boundary))) continue;
       t.fired.add(order.id);
-      this.events.push({
+      this.emit({
         type: 'TRIGGER_FIRED',
         minute: boundary,
         clubId: t.id,
@@ -844,7 +967,7 @@ class Match {
           t.subsUsed += 1;
           anySub = true;
           done = true;
-          this.events.push({ type: 'SUBSTITUTION', minute: boundary, clubId: t.id, out: out.p.id, in: inc.p.id, reason: w.reason });
+          this.emit({ type: 'SUBSTITUTION', minute: boundary, clubId: t.id, out: out.p.id, in: inc.p.id, reason: w.reason });
         }
       }
       if (!done && w.reason === 'INJURY') {
@@ -870,6 +993,7 @@ class Match {
       [order[i], order[j]] = [order[j]!, order[i]!];
     }
     for (let r = 0; r < total - SEGMENTS * Math.floor(total / SEGMENTS); r++) perSeg[order[r]!]! += 1;
+    for (const [k, m] of Object.entries(STOPPAGE)) perSeg[Number(k)] = Math.round(perSeg[Number(k)]! * m);
 
     const kickOff = rng() < 0.5 ? home : away;
     let attacker = kickOff;
@@ -878,11 +1002,11 @@ class Match {
     const startInstr = { home: { ...home.instr }, away: { ...away.instr } };
     const momentum: number[] = [];
 
-    this.events.push({ type: 'KICK_OFF', minute: 0 });
+    this.emit({ type: 'KICK_OFF', minute: 0 });
     for (let seg = 0; seg < SEGMENTS; seg++) {
       this.seg = seg;
       if (seg === SEGMENTS / 2) {
-        this.events.push({ type: 'HALF_TIME', minute: 45 });
+        this.emit({ type: 'HALF_TIME', minute: 45 });
         attacker = this.other(kickOff);
         zone = 0;
       }
@@ -890,13 +1014,18 @@ class Match {
       refreshView(away, home);
       const n = perSeg[seg]!;
       for (let s = 0; s < n; s++) {
-        this.minute = Math.min(90, Math.floor(seg * SEGMENT_MINUTES + (s * SEGMENT_MINUTES) / n) + 1);
+        const mult = STOPPAGE[seg] ?? 1;
+        const m = Math.floor(seg * SEGMENT_MINUTES + (s * SEGMENT_MINUTES * mult) / n) + 1;
+        const segEnd = (seg + 1) * SEGMENT_MINUTES;
+        this.added = m > segEnd ? m - segEnd : 0;
+        this.minute = Math.min(segEnd, m);
         const r = this.runSequence(attacker, this.other(attacker), zone);
         attacker = r.next;
         zone = r.zone;
       }
       const boundary = (seg + 1) * SEGMENT_MINUTES;
       this.minute = boundary;
+      this.added = 0;
       this.applyFatigue(home);
       this.applyFatigue(away);
       const injH = this.rollIncidents(home);
@@ -921,9 +1050,10 @@ class Match {
       const ax = away.stats.segXg[seg]!;
       momentum.push(round3(clamp((hE - aE + 3 * (hx - ax)) / Math.max(4, hE + aE), -1, 1)));
     }
-    this.events.push({ type: 'FULL_TIME', minute: 90 });
+    this.emit({ type: 'FULL_TIME', minute: 90 });
 
     const totalSeqs = home.stats.seqs + away.stats.seqs;
+    const possTotal = home.stats.possW + away.stats.possW;
     const teamStats = (t: Team, side: 'home' | 'away'): TeamMatchStats => ({
       clubId: t.id,
       goals: t.goals,
@@ -937,6 +1067,10 @@ class Match {
       ruleFires: t.stats.ruleFires,
       formationStart: startFormations[side],
       instructionsStart: startInstr[side],
+      shotsOnTarget: t.stats.sot,
+      corners: t.stats.corners,
+      yellowCards: t.stats.yellows,
+      possessionTime: possTotal > 0 ? t.stats.possW / possTotal : 0.5,
     });
     const lines = (t: Team): PlayerMatchLine[] =>
       t.appeared.map((ps) => ({
@@ -951,6 +1085,7 @@ class Match {
         conditionAfter: Math.round(ps.cond),
         injuredDays: ps.injuredDays,
         redCard: ps.red,
+        yellowCards: ps.yellows,
       }));
 
     return {

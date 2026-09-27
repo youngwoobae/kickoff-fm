@@ -4,7 +4,7 @@
  * 구현 메모: 입력 상태를 structuredClone 으로 복제한 뒤 복제본만 수정한다(입력 불변 보장).
  */
 import type {
-  BotStyleTag,
+  BotStyle,
   Club,
   ClubId,
   DayResult,
@@ -52,7 +52,8 @@ import { applyDailyRecovery, applyMatchLine, applyMoraleResult } from '../squad/
 import { TIER_REFERENCE_OVR, botName, createBotClub, generateSquad } from '../squad/generator';
 import { OVR_WEIGHTS, computeOvr } from '../squad/ovr';
 
-export const SCHEMA_VERSION = 1;
+/** 세이브 스키마. 2 (엔진 0.4.0): Club.botStyle → Club.style (WIDE → WING_PLAY), 3·5백 FB 공격형 풀백 → 윙백 */
+export const SCHEMA_VERSION = 2;
 export const MATCH_DAYS = 26;
 export const REVIEW_DAY = 27;
 export const SETTLEMENT_DAY = 28;
@@ -62,21 +63,21 @@ export const OWNER_ID = 'u-owner';
 export const COACH_ID = 'u-coach';
 export const SYSTEM_ACTOR = 'system';
 const LEAGUE_SIZE = 14;
-/** 봇 13팀 성향 분포: 점유 3 · 역습 3 · 전방압박 3 · 잠그기 2 · 측면 2 */
-export const BOT_STYLE_DISTRIBUTION: BotStyleTag[] = [
-  'POSSESSION',
+/** 봇 13팀 성향 분포 (8 스타일): 포지셔널·역습·게겐·로우 블록·윙 플레이 2 · 다이렉트·하이 라인·3백 윙백 1 */
+export const BOT_STYLE_DISTRIBUTION: BotStyle[] = [
   'POSSESSION',
   'POSSESSION',
   'COUNTER',
   'COUNTER',
-  'COUNTER',
-  'HIGH_PRESS',
   'HIGH_PRESS',
   'HIGH_PRESS',
   'LOW_BLOCK',
   'LOW_BLOCK',
-  'WIDE',
-  'WIDE',
+  'WING_PLAY',
+  'WING_PLAY',
+  'DIRECT',
+  'HIGH_LINE',
+  'WINGBACK_3',
 ];
 /** 봇 전력 = 사람 팀 주전 평균 OVR × U(0.90, 1.08) [PH] (아키텍처 15장 #2) */
 export const BOT_STRENGTH_RANGE: [number, number] = [0.9, 1.08];

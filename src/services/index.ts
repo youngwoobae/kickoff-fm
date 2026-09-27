@@ -10,6 +10,8 @@ export {
   type FixtureFilter,
   type ResimulateOverrides,
   type SubmitPlanOptions,
+  type StyleApplyMode,
+  type StyleApplyResult,
 } from './api';
 export { GameError, isGameError } from './errors';
 export {

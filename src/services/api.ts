@@ -22,6 +22,7 @@ import type {
   MatchPlan,
   MatchReplay,
   MatchReport,
+  MatchupPreview,
   Membership,
   OpponentScout,
   PlanChangePatch,
@@ -40,13 +41,20 @@ import type {
   SeasonOutcome,
   SlotKey,
   StandingRow,
+  StyleFit,
+  StyleId,
   TacticCap,
   TacticSlot,
   Tier,
   UiLogKind,
 } from '../types';
 
-export const CONTRACT_VERSION = '1.1.0';
+/**
+ * 1.2.0 (엔진 0.4.0, 추가만): 포메이션 3·역할 14·스타일 9(Catalog.styles, StyleDef), RuleId R11~R13,
+ * 경기 통계(유효슈팅·코너·경고·시간 가중 점유·추가시간 분), OpponentScout.style, Club.style,
+ * 선택 메서드 applyStyle / getStyleFits / getMatchupPreview. 세이브 스키마 2.
+ */
+export const CONTRACT_VERSION = '1.2.0';
 
 export interface NewGameOptions {
   /** 미지정 시 Date.now() 기반 */
@@ -71,6 +79,17 @@ export interface TacticUpdateResult {
 export interface SubmitPlanOptions {
   /** 'RECOMMENDED' 면 행동 로그를 PLAN_RECOMMENDED_SUBMITTED 로 남긴다 */
   origin?: 'MANUAL' | 'RECOMMENDED';
+}
+
+/** 1.2.0: 스타일 적용 방식. INSTRUCTIONS_ONLY = 지시만(숙련도 유지), FULL = 포메이션·역할까지(포메이션이 바뀌면 숙련도 × 0.5) */
+export type StyleApplyMode = 'INSTRUCTIONS_ONLY' | 'FULL';
+
+/** 1.2.0: applyStyle 결과 */
+export interface StyleApplyResult extends TacticUpdateResult {
+  styleId: StyleId;
+  mode: StyleApplyMode;
+  /** FULL 로 포메이션이 바뀌어 숙련도가 절반이 되면 경고 문구 */
+  warning?: string;
 }
 
 export interface FixtureFilter {
@@ -130,6 +149,18 @@ export interface GameService {
    * 적합도 최대로 재배치한 플랜을 돌려준다(저장하지 않음). 슬롯 전술 편집 직후에도 쓸 수 있다.
    */
   remapLineup?(plan: MatchPlan, slot: SlotKey): MatchPlan;
+  /**
+   * 1.2.0 (선택 메서드): 스타일을 슬롯에 적용. 'INSTRUCTIONS_ONLY' 는 지시값만 바꾸고 포메이션·역할·숙련도를 유지한다.
+   * 'FULL' 은 권장 포메이션·역할까지 바꾸며, 포메이션이 바뀌면 숙련도 × 0.5 (warning 문구 포함). OWNER 전용.
+   */
+  applyStyle?(slot: SlotKey, styleId: StyleId, mode: StyleApplyMode): StyleApplyResult;
+  /** 1.2.0 (선택 메서드): 사용자 스쿼드(최적 선발 기준)의 스타일 9종 적합도 */
+  getStyleFits?(): StyleFit[];
+  /**
+   * 1.2.0 (선택 메서드): 우리 슬롯 vs 상대(최근 경기 전술 또는 봇 성향)의 정적 상성 힌트. 엔진 규칙을 RNG 없이 평가한다.
+   * 상대 선발은 감독 AI 가 고를 11명으로 추정한다. 없는 구단이면 GameError('NOT_FOUND').
+   */
+  getMatchupPreview?(ourSlot: SlotKey, opponentId: ClubId): MatchupPreview;
   /** 상대 맞춤 지시는 제거된 상태로 저장된다 */
   setDefaultPlan(plan: MatchPlan): void;
   /** "추천대로" = 현재 유효 플랜 + 부상/징계 대체 + 피로 로테이션 (감독 AI). 제출은 하지 않는다 */

@@ -8,6 +8,8 @@ import type {
   EnginePlayer,
   EngineTacticSlot,
   FitLevel,
+  FormationDef,
+  TeamInstructions,
   Lane,
   Position,
   RoleId,
@@ -19,6 +21,9 @@ import { FORMATIONS } from './data/formations';
 import {
   GK_SAVE_MIX,
   GK_UNIT_MIX,
+  PIVOT_ROLES,
+  PRESS_RESIST_ROLES,
+  ROLE_SHAPE,
   ROLE_UNIT_WEIGHTS,
   SET_PIECE,
   UNIT_MIX,
@@ -194,4 +199,166 @@ export function computeUnits(onPitch: readonly EnginePlayer[], slot: EngineTacti
     };
   });
   return computeUnitsFromOccupants(occ, { missing: redCards });
+}
+
+// ───────────────────────────────────────────── 0.4.0 팀 형태 (실축구_전술설계 2.1)
+
+/** 규칙이 쓰는 팀 형태 합계와 핵심 매치업 값. 경기 시작·세그먼트·교체·퇴장 때 다시 계산한다 (엔진 내부) */
+export interface TeamShape {
+  /** 중앙 공격 점유 / 중앙 수비 커버 (역할 형태값 합, 지시 보정 포함) */
+  cA: number;
+  cD: number;
+  /** 측면별 공격·수비 인원 (중앙 레인 선수는 양쪽에 절반) */
+  wA: { L: number; R: number };
+  wD: { L: number; R: number };
+  hs: number;
+  /** 하프스페이스 커버 (5백 +1.5, 3백 +1.0 포함) */
+  hsC: number;
+  /** 러너 중 최고 속도 (1~20 유효값). 러너가 없으면 전방 3명 최고 × 0.9 */
+  pRun: number;
+  /** 가장 느린 CB 속도 (커버 CB 가 있으면 0.3 × 최저 + 0.7 × 커버) */
+  pCb: number;
+  /** CB 최저 속도 (커버 보정 없음) */
+  pCbMin: number;
+  runners: number;
+  /** 2선 침투 역할(또는 폴스9) 존재 */
+  deep: boolean;
+  /** 러너 중 최고 침투 숙련 (위치선정+침착)/2 */
+  runnerSkill: number;
+  /** R1 압박 저항 역할 수 (최대 3) */
+  resist: number;
+  stCount: number;
+  /** 피벗 수: DM 슬롯 선수 + 피벗 역할(앵커·레지스타·볼 위닝). 1 이면 2톱 커버 섀도 대상 */
+  pivots: number;
+  /** 전방 압박 인원: ST + 프레싱 포워드 */
+  frontPress: number;
+  pressingFwds: number;
+  /** 타깃맨 개인 공중 (0~100), 없으면 null */
+  targetAer: number | null;
+  /** 세컨드볼 역할 수 (볼 위닝·박스투박스) */
+  sbRoles: number;
+  /** R5 잔류 수비 배수 */
+  rd: number;
+  backLine: 3 | 4 | 5;
+  /** 스위퍼 키퍼 속도 (없으면 null) */
+  sweeperPace: number | null;
+  /** 측면별 윙 역할 / 측면 수비수 (R12) */
+  wing: { L: Occupant | null; R: Occupant | null };
+  sideBack: { L: Occupant | null; R: Occupant | null };
+  /** 최고 중거리 능력 (MF·AM, 0.6 결정력 + 0.4 침착, 1~20) */
+  longShot: number;
+}
+
+const raw = (o: Occupant, a: AttrKey) => eff(o, a) / 5;
+
+export function computeShape(occ: readonly (Occupant | null)[], instr: TeamInstructions, formation: FormationDef): TeamShape {
+  let cA = 0;
+  let cD = 0;
+  let hs = 0;
+  let hsC = 0;
+  const wA = { L: 0, R: 0 };
+  const wD = { L: 0, R: 0 };
+  let pRun = 0;
+  let runners = 0;
+  let runnerSkill = 0;
+  let deep = false;
+  let resist = 0;
+  let stCount = 0;
+  let pivots = 0;
+  let pressingFwds = 0;
+  let targetAer: number | null = null;
+  let sbRoles = 0;
+  let rd = 1;
+  let sweeperPace: number | null = null;
+  let longShot = 0;
+  const cbPaces: number[] = [];
+  let coverPace: number | null = null;
+  let frontBest = 0;
+  const wing: TeamShape['wing'] = { L: null, R: null };
+  const sideBack: TeamShape['sideBack'] = { L: null, R: null };
+  for (const o of occ) {
+    if (!o) continue;
+    const s = ROLE_SHAPE[o.role];
+    cA += s.cA;
+    cD += o.role === 'W_WIDE_MIDFIELDER' && instr.width <= -1 ? 0.5 : s.cD;
+    hs += s.hs;
+    hsC += s.hsC;
+    const wdv = o.role === 'WB_WINGBACK' && instr.mentality >= 1 ? 0.4 : s.wD;
+    if (o.lane === 'C') {
+      wA.L += s.wA / 2;
+      wA.R += s.wA / 2;
+      wD.L += wdv / 2;
+      wD.R += wdv / 2;
+    } else {
+      wA[o.lane] += s.wA;
+      wD[o.lane] += wdv;
+    }
+    const pace = raw(o, 'pace');
+    if (s.run) {
+      runners += 1;
+      pRun = Math.max(pRun, pace);
+      runnerSkill = Math.max(runnerSkill, (raw(o, 'positioning') + raw(o, 'composure')) / 2);
+    }
+    if (s.deep || o.role === 'ST_FALSE_NINE') deep = true;
+    if (PRESS_RESIST_ROLES.includes(o.role)) resist += 1;
+    if (o.position === 'ST') stCount += 1;
+    if (o.position === 'ST' || o.position === 'W' || (o.position === 'AM' && o.lane !== 'C')) frontBest = Math.max(frontBest, pace);
+    if (o.position === 'DM' || PIVOT_ROLES.includes(o.role)) pivots += 1;
+    if (o.role === 'ST_PRESSING_FORWARD') pressingFwds += 1;
+    if (o.role === 'ST_TARGET') targetAer = Math.max(targetAer ?? 0, 0.7 * eff(o, 'physical') + 0.3 * eff(o, 'positioning'));
+    if (o.role === 'DM_BALL_WINNER' || o.role === 'CM_BOX_TO_BOX') sbRoles += 1;
+    if (o.role === 'DM_ANCHOR') rd -= 0.4;
+    if (o.role === 'DM_BALL_WINNER') rd -= 0.2;
+    if (o.role === 'FB_INVERTED') rd -= 0.15;
+    if (o.role === 'GK_SWEEPER') sweeperPace = raw(o, 'pace');
+    if (o.position === 'CB') {
+      cbPaces.push(pace);
+      if (o.role === 'CB_COVER') coverPace = Math.max(coverPace ?? 0, pace);
+    }
+    if (o.position === 'DM' || o.position === 'CM' || o.position === 'AM') longShot = Math.max(longShot, 0.6 * raw(o, 'finishing') + 0.4 * raw(o, 'composure'));
+    if (o.lane !== 'C') {
+      if (o.position === 'W' || o.position === 'AM') wing[o.lane] = wing[o.lane] ?? o;
+      if (o.position === 'FB') sideBack[o.lane] = o;
+    }
+  }
+  if (runners === 0) pRun = frontBest * 0.9;
+  const pCbMin = cbPaces.length > 0 ? Math.min(...cbPaces) : 10;
+  const pCb = coverPace !== null ? 0.3 * pCbMin + 0.7 * coverPace : pCbMin;
+  if (formation.backLine === 5) hsC += RULES.R11.fiveBack;
+  else if (formation.backLine === 3) hsC += RULES.R11.threeBack;
+  // 공격 폭 단계마다 wA ±0.25, 좁은 수비(폭 ≤ −1)는 wD −0.25 × |폭|
+  wA.L += RULES.R4.widthStep * instr.width;
+  wA.R += RULES.R4.widthStep * instr.width;
+  if (instr.width <= -1) {
+    wD.L -= RULES.R4.narrowStep * -instr.width;
+    wD.R -= RULES.R4.narrowStep * -instr.width;
+  }
+  if (instr.line >= 2) cD += RULES.R7.compression;
+  return {
+    cA,
+    cD,
+    wA,
+    wD,
+    hs,
+    hsC,
+    pRun,
+    pCb,
+    pCbMin,
+    runners,
+    deep,
+    runnerSkill,
+    resist: Math.min(resist, RULES.R1.resistMax),
+    stCount,
+    pivots,
+    frontPress: stCount + pressingFwds,
+    pressingFwds,
+    targetAer,
+    sbRoles,
+    rd: Math.max(RULES.R5.rdMin, rd),
+    backLine: formation.backLine,
+    sweeperPace,
+    wing,
+    sideBack,
+    longShot,
+  };
 }

@@ -1,5 +1,6 @@
 /** 상대 분석 요약 (12.3, 11 H01): 최근 5경기 포메이션·지시 요약 + 약점 한 줄. 소유: A. */
-import type { BotStyleTag, Club, ClubId, MatchSummary, OpponentRecentMatch, OpponentScout, RuleId, TeamInstructions } from '../../types';
+import type { BotStyle, Club, ClubId, MatchSummary, OpponentRecentMatch, OpponentScout, RuleId, StyleId, TeamInstructions } from '../../types';
+import { legacyBotTag, nearestStyle } from '../../engine';
 import type { TacticShape } from '../ai/matchup';
 
 const LABELS: [keyof TeamInstructions, string][] = [
@@ -34,17 +35,33 @@ const WEAKNESS_TEXT: Record<RuleId, string> = {
   R7: '중원 숫자가 부족하다 — 중앙 MF 가 많은 포메이션을 고려하세요',
   R9: '핵심 선수 의존도가 높다 — 집중 마크를 고려하세요',
   R10: '한쪽 측면 수비가 약하다 — 공략 측면 지정을 고려하세요',
+  R11: '하프스페이스 커버가 약하다 — 메짤라·인사이드 포워드로 채널을 공략해 보세요',
+  R12: '측면 수비수가 올라간 뒤 공간이 빈다 — 빠른 윙어로 1:1 을 노려 보세요',
+  R13: '공중전·세컨드볼에 약하다 — 타깃맨과 패스 길게를 고려하세요',
   TEMPO: '빠른 템포에서 턴오버가 잦다 — 압박으로 실수를 유도해 보세요',
   LINE_FIT: '느린 수비수로 높은 라인을 쓴다 — 스루패스·역습을 노려 보세요',
 };
 
-const STYLE_HINT: Record<BotStyleTag, string> = {
-  POSSESSION: '점유형: 짧은 패스로 빌드업한다 — 전방 압박이나 낮은 블록이 통할 수 있다',
-  COUNTER: '역습형: 롱볼과 빠른 전환을 쓴다 — 공격 성향을 낮추고 라인을 내리는 편이 안전하다',
-  HIGH_PRESS: '전방압박형: 라인이 높다 — 롱볼·침투로 뒷공간을 노려 보세요',
-  LOW_BLOCK: '잠그기형: 내려앉아 역습을 노린다 — 폭을 넓히고 공격 성향 과잉은 피하세요',
-  WIDE: '측면형: 크로스가 많다 — 5백이나 수비형 풀백이 도움이 된다',
+const STYLE_HINT: Record<StyleId, string> = {
+  BALANCED: '균형형: 큰 약점이 없다 — 상대 선수 약점(느린 CB, 공중전)을 노려 보세요',
+  POSSESSION: '포지셔널형: 짧은 패스로 점유한다 — 로우 블록이나 전방 압박이 통할 수 있다',
+  COUNTER: '미드 블록 역습형: 빠른 공격수가 뒷공간을 노린다 — 라인을 내리고 공격 성향 과잉은 피하세요',
+  HIGH_PRESS: '게겐프레싱형: 압박이 강하고 라인이 높다 — 롱볼·타깃맨으로 압박을 건너뛰세요',
+  LOW_BLOCK: '로우 블록형: 내려앉아 역습을 노린다 — 폭을 넓혀 크로스, 중거리를 노려 보세요',
+  DIRECT: '다이렉트형: 타깃맨 롱볼과 세컨드볼 — 공중전에 강한 CB 나 3백이 도움이 된다',
+  WING_PLAY: '윙 플레이형: 크로스가 많고 풀백이 올라간다 — 5백·와이드 미드필더, 중앙 수적 우위가 통한다',
+  HIGH_LINE: '하이 라인형: 오프사이드 트랩을 쓴다 — 빠른 러너와 2선 침투(메짤라·섀도)로 뒷공간을 노리세요',
+  WINGBACK_3: '3백 윙백형: 윙백 뒤 공간이 빈다 — 빠른 윙어로 측면 1:1 을 노리세요',
 };
+
+/** 봇 성향 (style 우선, 스키마 1 레거시 botStyle 은 'WIDE' → 'WING_PLAY') */
+export function botStyleOf(club: Club | undefined): BotStyle | undefined {
+  if (!club) return undefined;
+  if (club.style) return club.style;
+  if (club.botStyle) return club.botStyle === 'WIDE' ? 'WING_PLAY' : club.botStyle;
+  return undefined;
+}
+
 
 export function buildOpponentScout(clubs: Readonly<Record<string, Club>>, summaries: readonly MatchSummary[], clubId: ClubId): OpponentScout {
   const club = clubs[clubId];
@@ -72,12 +89,17 @@ export function buildOpponentScout(clubs: Readonly<Record<string, Club>>, summar
     for (const k of Object.keys(op.ruleFires) as RuleId[]) against[k] = (against[k] ?? 0) + (op.ruleFires[k] ?? 0);
   }
   const top = (Object.keys(against) as RuleId[]).filter((k) => k !== 'TEMPO').sort((a, b) => (against[b] ?? 0) - (against[a] ?? 0) || a.localeCompare(b))[0];
-  const weakness = top
-    ? WEAKNESS_TEXT[top]
-    : club?.botStyle
-      ? STYLE_HINT[club.botStyle]
-      : '아직 경기 기록이 없어 분석할 수 없습니다';
-  return { clubId, ...(club?.botStyle ? { botStyle: club.botStyle } : {}), last5, weakness };
+  const bot = botStyleOf(club);
+  const latest = mine[0] ? (mine[0].home.clubId === clubId ? mine[0].home : mine[0].away) : undefined;
+  const style: StyleId | undefined = bot ?? (latest ? nearestStyle(latest.instructions).id : undefined);
+  const weakness = top ? WEAKNESS_TEXT[top] : style ? STYLE_HINT[style] : '아직 경기 기록이 없어 분석할 수 없습니다';
+  return {
+    clubId,
+    ...(bot ? { botStyle: legacyBotTag(bot) } : {}),
+    ...(style ? { style, styleEstimated: !bot } : {}),
+    last5,
+    weakness,
+  };
 }
 
 /** 가장 최근 경기에서 사용한 전술 (봇 슬롯 선택용). 기록이 없으면 구단 슬롯 A */
