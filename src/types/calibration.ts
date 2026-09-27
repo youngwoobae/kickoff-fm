@@ -9,7 +9,15 @@ export type ScenarioId =
   | 'OVR_DIFF_10_COUNTER' // 전력 10점 차 + 약팀 최선 카운터
   | 'OVR_DIFF_25' // 전력 25점 차
   | 'TEMPO_VARIANCE' // 템포 차에 따른 약팀 승률 변화
-  | 'RULE_ISOLATION'; // 규칙별 단독 기여 P95
+  | 'RULE_ISOLATION' // 규칙별 단독 기여 P95
+  // ── 1.2.0 (엔진 0.4.0) ──
+  | 'REAL_HOME' // BASELINE + 홈/원정: 홈 승/무/원정 승, 홈−원정 득점
+  | 'LEAGUE_REALISM' // 20팀 리그 × 시즌: 실제 리그 통계 전 항목
+  | 'STYLE_MATRIX' // 9×9 스타일 상성 행렬: 부호 일치율·절대 우위 없음
+  | 'FORMATION_PARITY' // 9 포메이션 라운드로빈: 경기당 승점
+  | 'STYLE_FIT' // 스타일 적합 vs 부적합 스쿼드의 상성 이득 차
+  | 'ROLE_SIGNATURE' // 역할 교체 서명 지표
+  | 'STAMINA_CURVE'; // 게겐프레싱 체력 곡선
 
 export interface CalibrationOptions {
   matchesPerScenario: number;
@@ -28,7 +36,7 @@ export interface CalibrationTarget {
   max?: number;
   actual: number;
   pass: boolean;
-  unit: '%' | '%p' | 'goals' | 'shots' | 'xG';
+  unit: '%' | '%p' | 'goals' | 'shots' | 'xG' | 'ppg' | 'min' | 'count' | 'x';
 }
 
 export interface CalibrationReport {

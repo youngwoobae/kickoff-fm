@@ -18,8 +18,9 @@ export type ChanceType = OpenPlayChance | 'COUNTER' | 'CORNER' | 'FK' | 'PK';
 /**
  * 전술 가산치 출처. R8 은 v2 에서 삭제.
  * TEMPO: DP8 ±0.05 × tempo, LINE_FIT: 라인 +2 & PACE_D < 60 시 −0.10 (8.3-4)
+ * 1.2.0(엔진 0.4.0): R11 하프스페이스 과부하, R12 측면 1:1(윙백 뒤 공간), R13 타깃맨 롱볼·세컨드볼
  */
-export type RuleId = 'R1' | 'R2' | 'R3' | 'R4' | 'R5' | 'R6' | 'R7' | 'R9' | 'R10' | 'TEMPO' | 'LINE_FIT';
+export type RuleId = 'R1' | 'R2' | 'R3' | 'R4' | 'R5' | 'R6' | 'R7' | 'R9' | 'R10' | 'R11' | 'R12' | 'R13' | 'TEMPO' | 'LINE_FIT';
 
 export type UnitKey =
   | 'BU'
@@ -123,7 +124,9 @@ export interface BinaryDecisionLog {
   strength: number;
   prep: number;
   home: number;
-  /** base + strength + prep + home (전술 제외) */
+  /** 1.2.0(엔진 0.4.0): 경기 흐름 보정(60분 이후 지는 팀 공격 ↑ 등). 없으면 0 */
+  state?: number;
+  /** base + strength + prep + home + state (전술 제외) */
   logitNoTac: number;
   /** 규칙별 원기여 r'_i (숙련도 계수 적용 후, clamp 전) */
   raw: Partial<Record<RuleId, number>>;
@@ -153,11 +156,15 @@ export interface ChoiceDecisionLog {
 
 export type DecisionLog = BinaryDecisionLog | ChoiceDecisionLog;
 
-export type MatchEvent =
+/**
+ * 경기 이벤트. 1.2.0: 추가시간 이벤트는 minute = 45 또는 90 이고 addedMinute 가 붙는다("45+2", "90+4").
+ * YELLOW_CARD 추가, SHOT.onTarget 추가(골은 항상 true).
+ */
+export type MatchEvent = (
   | { type: 'KICK_OFF'; minute: 0 }
   | { type: 'HALF_TIME'; minute: 45 }
   | { type: 'FULL_TIME'; minute: 90 }
-  | { type: 'SHOT'; minute: number; clubId: ClubId; playerId: PlayerId; chance: ChanceType; xg: number; goal: boolean }
+  | { type: 'SHOT'; minute: number; clubId: ClubId; playerId: PlayerId; chance: ChanceType; xg: number; goal: boolean; onTarget?: boolean }
   | { type: 'GOAL'; minute: number; clubId: ClubId; playerId: PlayerId; chance: ChanceType; xg: number }
   | { type: 'OFFSIDE'; minute: number; clubId: ClubId; playerId?: PlayerId }
   | { type: 'LONG_BALL_ADVANCE'; minute: number; clubId: ClubId }
@@ -166,7 +173,9 @@ export type MatchEvent =
   | { type: 'SUBSTITUTION'; minute: number; clubId: ClubId; out: PlayerId; in: PlayerId; reason: 'CONDITION' | 'INJURY' }
   | { type: 'INJURY'; minute: number; clubId: ClubId; playerId: PlayerId; days: number }
   | { type: 'RED_CARD'; minute: number; clubId: ClubId; playerId: PlayerId }
-  | { type: 'CONDITION_DROP'; minute: number; clubId: ClubId; playerId: PlayerId; condition: number };
+  | { type: 'YELLOW_CARD'; minute: number; clubId: ClubId; playerId: PlayerId }
+  | { type: 'CONDITION_DROP'; minute: number; clubId: ClubId; playerId: PlayerId; condition: number }
+) & { addedMinute?: number };
 
 export interface ZonePass {
   attempts: number;
@@ -188,6 +197,14 @@ export interface TeamMatchStats {
   ruleFires: Partial<Record<RuleId, number>>;
   formationStart: FormationId;
   instructionsStart: TeamInstructions;
+  /** 1.2.0: 유효슈팅 (골 포함) */
+  shotsOnTarget?: number;
+  /** 1.2.0: 코너킥 수 (코너 슈팅 + 막힌 슈팅의 코너) */
+  corners?: number;
+  /** 1.2.0: 경고 수 */
+  yellowCards?: number;
+  /** 1.2.0: 시간 가중 점유율 0~1 (표시용). possession 은 시퀀스 비율로 유지 */
+  possessionTime?: number;
 }
 
 export interface PlayerMatchLine {
@@ -202,6 +219,8 @@ export interface PlayerMatchLine {
   conditionAfter: number;
   injuredDays: number;
   redCard: boolean;
+  /** 1.2.0 */
+  yellowCards?: number;
 }
 
 export interface MatchResult {
@@ -248,6 +267,8 @@ export interface FactorBars {
   tactics: number;
   /** (실제 득실 차) − (xG 득실 차) */
   luck: number;
+  /** 1.2.0: 경기 흐름(STATE) 기여. 전력 → 준비 → 경기 흐름 → 전술 순서 */
+  state?: number;
 }
 
 export interface TeamExplanation {
