@@ -279,8 +279,10 @@ export function computeShape(occ: readonly (Occupant | null)[], instr: TeamInstr
   for (const o of occ) {
     if (!o) continue;
     const s = ROLE_SHAPE[o.role];
-    cA += s.cA;
-    cD += o.role === 'W_WIDE_MIDFIELDER' && instr.width <= -1 ? 0.5 : s.cD;
+    // 중앙 유효 인원은 미드필드·전방만 센다 (설계 2.4 계산 예). 수비 라인은 인버티드 풀백만 공격 시 중원에 합류
+    const midfieldLine = o.position !== 'CB' && o.position !== 'FB' && o.position !== 'GK';
+    if (midfieldLine || o.role === 'FB_INVERTED') cA += s.cA;
+    if (midfieldLine) cD += o.role === 'W_WIDE_MIDFIELDER' && instr.width <= -1 ? RULES.R7.narrowWideMid : s.cD;
     hs += s.hs;
     hsC += s.hsC;
     const wdv = o.role === 'WB_WINGBACK' && instr.mentality >= 1 ? 0.4 : s.wD;
