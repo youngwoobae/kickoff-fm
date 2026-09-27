@@ -22,6 +22,7 @@ import type {
   StoredMatchRecord,
   TeamMatchStats,
   TeamSummaryLite,
+  TacticCap,
   Tier,
 } from '../../types';
 import {
@@ -179,7 +180,7 @@ function dayOneProcessing(state: GameState): void {
 
 export function createInitialState(
   seed: number,
-  opts: { clubName: string; tier: Tier; devMode: boolean; tacCap?: 0.25 | 0.35 | 0.5 },
+  opts: { clubName: string; tier: Tier; devMode: boolean; tacCap?: TacticCap },
   nowIso: string,
 ): GameState {
   const gameSeed = seed >>> 0;

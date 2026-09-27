@@ -335,7 +335,11 @@ export function computeShape(occ: readonly (Occupant | null)[], instr: TeamInstr
     wD.L -= RULES.R4.narrowStep * -instr.width;
     wD.R -= RULES.R4.narrowStep * -instr.width;
   }
-  if (instr.line >= 2) cD += RULES.R7.compression;
+  // 라인 +2 압축: 라인 사이 간격이 좁아 중앙·하프스페이스 커버가 사실상 늘어난다
+  if (instr.line >= 2) {
+    cD += RULES.R7.compression;
+    hsC += RULES.R7.compression;
+  }
   return {
     cA,
     cD,

@@ -24,8 +24,8 @@ const { values } = parseArgs({
 });
 
 const cap = Number(values.cap);
-if (cap !== 0.25 && cap !== 0.35 && cap !== 0.5) {
-  console.error(`--cap 은 0.25 / 0.35 / 0.5 중 하나여야 합니다 (입력: ${values.cap})`);
+if (![0.25, 0.35, 0.5, 0.6, 0.7].includes(cap)) {
+  console.error(`--cap 은 0.25 / 0.35 / 0.5 / 0.6 / 0.7 중 하나여야 합니다 (입력: ${values.cap})`);
   process.exit(2);
 }
 

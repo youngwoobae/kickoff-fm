@@ -153,7 +153,7 @@ export interface TacticSlot {
 }
 
 /** 전술 상한 A/B 테스트 값 (8.1, 12.3 개발자 패널) */
-export type TacticCap = 0.25 | 0.35 | 0.5;
+export type TacticCap = 0.25 | 0.35 | 0.5 | 0.6 | 0.7;
 
 /**
  * @deprecated 1.x 표시용 레거시 태그 (5종). 'WIDE' = WING_PLAY.

@@ -908,7 +908,7 @@ class LocalGameService implements GameService {
 
   setTacCap(cap: TacticCap): void {
     const s = this.require();
-    if (!(EngineConstants.TAC_CAP_OPTIONS as readonly number[]).includes(cap)) throw new GameError('INVALID_TACTIC', `tacCap 은 0.25 / 0.35 / 0.5 중 하나: ${cap}`);
+    if (!(EngineConstants.TAC_CAP_OPTIONS as readonly number[]).includes(cap)) throw new GameError('INVALID_TACTIC', `tacCap 은 0.25 / 0.35 / 0.5 / 0.6 / 0.7 중 하나: ${cap}`);
     if (s.settings.tacCap === cap) return;
     this.commit({ ...s, settings: { ...s.settings, tacCap: cap } });
   }

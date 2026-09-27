@@ -158,20 +158,20 @@ export const SUB_WINDOWS = 3;
 
 /** 8.6 규칙 수치 (0.4.0, 실축구_전술설계 2.2) */
 export const RULES = {
-  R1: { perPressStep: -0.603, max: -1.0, dp8PerPress: -0.198, dp6CounterBonus: 0.425, resistPer: 0.25, resistMax: 3, threeBackMult: 0.7, pressingFwdPrs: 3, pressingFwdDp6: 0.1 },
-  R2: { perDirectStep: 0.3, max: 1.0, dp3Through: 0.35, paceScale: 4, paceMin: 0.3, paceMax: 1.6, sweeperFast: 0.5, sweeperSlow: 0.75, sweeperFastPace: 10, threeBackMult: 0.566, deepBlockPerStep: -0.04 },
-  R3: { dp4: -2.075, compBase: 0.6, compScale: 25, compMin: 0.4, compMax: 1.2, dp3LongCross: 2.039, crossAer: 0.519, aerScale: 10, dp5Long: 0.3, dp2PerDeepLine: 0.625 },
-  R4: { dp3: 0.383, dp4: 2.191, negMult: 0.5, threshold: 0.2, widthStep: 0.4, narrowStep: 0.25 },
-  R5: { dp6: 0.99, dp7: 2.244, paceScale: 2.5, dp4PerMentality: 0.075, anchor: 0.4, ballWinner: 0.2, inverted: 0.15, rdMin: 0.4 },
-  R6: { dp4Through: -2.2, dp5Bonus: 0.4, dp5Pace: 15, deepMult: 0.6, slowCbMult: 0.5, cbPaceOk: 13 },
-  R7: { dp2: 0.3, dp8: 0.09, scale: 1.137, coverShadow: 0.433, coverShadowPress: 0.7, narrowWideMid: 0.5, compression: 0.431, fitBU: 65 },
+  R1: { perPressStep: -0.35, max: -1.0, dp8PerPress: -0.12, dp6CounterBonus: 1.02, resistPer: 0.25, resistMax: 3, threeBackMult: 0.7, pressingFwdPrs: 3, pressingFwdDp6: 0.1 },
+  R2: { perDirectStep: 0.72, max: 1.0, dp3Through: 0.84, paceScale: 4, paceMin: 0.3, paceMax: 1.6, sweeperFast: 0.5, sweeperSlow: 0.75, sweeperFastPace: 10, threeBackMult: 0.566, deepBlockPerStep: -0.04 },
+  R3: { dp4: -4.98, compBase: 0.6, compScale: 25, compMin: 0.4, compMax: 1.2, dp3LongCross: 4.894, crossAer: 1.246, aerScale: 10, dp5Long: 0.3, dp2PerDeepLine: 0.2 },
+  R4: { dp3: 0.919, dp4: 5.258, negMult: 0.5, threshold: 0.2, widthStep: 0.4, narrowStep: 0.25 },
+  R5: { dp6: 2.376, dp7: 5.386, paceScale: 2.5, dp4PerMentality: 0.18, anchor: 0.4, ballWinner: 0.2, inverted: 0.15, rdMin: 0.4 },
+  R6: { dp4Through: -5.28, dp5Bonus: 0.4, dp5Pace: 15, deepMult: 0.6, slowCbMult: 0.5, cbPaceOk: 13 },
+  R7: { dp2: 0.72, dp8: 0.09, scale: 1.137, coverShadow: 0.433, coverShadowPress: 0.7, narrowWideMid: 0.5, compression: 0.431, fitBU: 65 },
   R9: { perMarkFit: -0.6, minUnitWeight: 0.15, markerOtherUnitMult: 0.8 },
   R10: { dp4: 0.7, tanhScale: 10 },
-  R11: { dp2: 0.205, dp3: 0.2, dp4: 0.293, offset: 1.0, fiveBack: 0.692, threeBack: 2.683, cfScale: 60, cfMin: 0.5 },
-  R12: { dp7: 1.452, dp4: 0.425, d1Scale: 3, wbDefHigh: 0.4 },
-  R13: { dp1: 0.51, dp2: 0.427, scale: 10, vsPress: 1.25, sbPerRole: 5, threeBackMult: 0.676 },
+  R11: { dp2: 0.492, dp3: 0.2, dp4: 0.703, offset: 1.0, fiveBack: 0.692, threeBack: 2.683, cfScale: 60, cfMin: 0.5 },
+  R12: { dp7: 3.485, dp4: 1.02, d1Scale: 3, wbDefHigh: 0.4 },
+  R13: { dp1: 1.224, dp2: 1.025, scale: 10, vsPress: 1.25, sbPerRole: 5, threeBackMult: 0.676, aerOffset: 8 },
   TEMPO: { dp8PerStep: 0.1 },
-  LINE_FIT: { penalty: -0.955, paceDRequired: 60, cbPaceRequired: 11 },
+  LINE_FIT: { penalty: -2.292, paceDRequired: 60, cbPaceRequired: 11 },
 } as const;
 
 /** 8.3-4 스쿼드-전술 적합도 요구치 (StyleDef.requirements 와 같은 값) */
@@ -196,4 +196,4 @@ export const RULES_BY_DP: Record<DP, RuleId[]> = {
   DP8: ['R1', 'R7', 'TEMPO'],
 };
 
-export const TAC_CAP_OPTIONS = [0.25, 0.35, 0.5] as const;
+export const TAC_CAP_OPTIONS = [0.25, 0.35, 0.5, 0.6, 0.7] as const;

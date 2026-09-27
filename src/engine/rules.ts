@@ -247,7 +247,7 @@ export function evalBinaryRules(dp: BinaryDP, actor: TeamView, opp: TeamView, ct
       if (r2Active(att, def)) put('R2', Math.min(R.R2.perDirectStep * att.instr.directness, R.R2.max) * r2Mult(att, def));
       else if (r2Blocked(att, def)) put('R2', R.R2.deepBlockPerStep * att.instr.directness * -def.instr.line);
       if (r13Active(att)) {
-        put('R13', R.R13.dp1 * tanhS(att.shape.targetAer! - def.units.AER_D, R.R13.scale) * (def.instr.press >= 1 ? R.R13.vsPress : 1) * r13Three(att, def));
+        put('R13', R.R13.dp1 * tanhS(att.shape.targetAer! - def.units.AER_D + R.R13.aerOffset, R.R13.scale) * (def.instr.press >= 1 ? R.R13.vsPress : 1) * r13Three(att, def));
       }
       break;
     }
