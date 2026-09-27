@@ -9,6 +9,7 @@ export {
   type TacticUpdateResult,
   type FixtureFilter,
   type ResimulateOverrides,
+  type SubmitPlanOptions,
 } from './api';
 export { GameError, isGameError } from './errors';
 export {

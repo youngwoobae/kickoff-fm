@@ -4,3 +4,5 @@ coverage/
 *.local
 .vite/
 sim-out/
+
+.tmp/

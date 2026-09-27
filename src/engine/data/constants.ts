@@ -5,10 +5,10 @@
  */
 import type { BinaryDP, ChanceType, DP, FitLevel, OpenPlayChance, RuleId } from '../../types';
 
-export const ENGINE_VERSION = '0.1.0';
+export const ENGINE_VERSION = '0.2.0';
 
 /** 8.4 */
-export const K = 0.045;
+export const K = 0.017;
 export const DEFAULT_TAC_CAP = 0.35;
 export const P_MIN = 0.05;
 export const P_MAX = 0.95;
@@ -16,10 +16,10 @@ export const HOME_MOD = 0.04;
 
 export const BASE: Record<Exclude<BinaryDP, 'DP5' | 'DP8'>, number> = {
   DP1: 1.1,
-  DP2: 0.2,
-  DP4: -0.4,
-  DP6: -1.4,
-  DP7: 0.0,
+  DP2: -0.45,
+  DP4: -1.0,
+  DP6: -1.7,
+  DP7: -0.3,
 };
 /** DP8 리셋 판정 BASE (구역별) */
 export const BASE_RST = { z0: -0.4, z1: -0.62 } as const;
@@ -48,14 +48,14 @@ export const CHANCE_BASE_WEIGHT: Record<OpenPlayChance, number> = {
   SOLO: 0.15,
 };
 export const CHANCE_XG: Record<ChanceType, number> = {
-  CROSS: 0.08,
-  THROUGH: 0.28,
-  CUTBACK: 0.18,
-  LONG: 0.04,
-  SOLO: 0.12,
-  COUNTER: 0.22,
-  CORNER: 0.035,
-  FK: 0.06,
+  CROSS: 0.068,
+  THROUGH: 0.235,
+  CUTBACK: 0.155,
+  LONG: 0.032,
+  SOLO: 0.1,
+  COUNTER: 0.19,
+  CORNER: 0.032,
+  FK: 0.05,
   PK: 0.76,
 };
 /** 중거리 DP4 BASE 보정 */
@@ -63,14 +63,14 @@ export const LONG_SHOT_DP4_BONUS = 0.6;
 /** 박스 내 찬스 중 PK 비율 */
 export const PK_SHARE_IN_BOX = 0.025;
 /** DP5: logit(xG) + FIN_GK_K × (FIN − GK) */
-export const FIN_GK_K = 0.03;
+export const FIN_GK_K = 0.015;
 export const GOAL_P_MIN = 0.01;
 export const GOAL_P_MAX = 0.85;
 
 /** Z2(DP4) 실패 분기: 코너 / 프리킥 / 턴오버 (크로스 유형은 코너 ↑) */
 export const Z2_FAIL_BRANCH: Record<'DEFAULT' | 'CROSS', { corner: number; freeKick: number; turnover: number }> = {
-  DEFAULT: { corner: 0.25, freeKick: 0.08, turnover: 0.67 },
-  CROSS: { corner: 0.4, freeKick: 0.08, turnover: 0.52 },
+  DEFAULT: { corner: 0.15, freeKick: 0.05, turnover: 0.8 },
+  CROSS: { corner: 0.25, freeKick: 0.05, turnover: 0.7 },
 };
 
 /** R10 측면 분배 (좌/중/우) */
@@ -126,17 +126,17 @@ export const SUB_WINDOWS = 3;
 
 /** 8.6 규칙 수치 */
 export const RULES = {
-  R1: { perPressStep: -0.1, max: -0.25, dp6CounterBonus: 0.1 },
-  R2: { perDirectStep: 0.1, max: 0.2, dp3Through: 0.15, sweeperMult: 0.5 },
-  R3: { dp4: -0.2, dp3LongCross: 0.15, targetManCross: 0.1 },
-  R4: { dp4: 0.15, dp3: 0.15 },
-  R5: { dp6: 0.25, dp7: 0.2, paceScale: 10, anchorMult: 0.6 },
-  R6: { dp4Through: -0.3, dp4ThroughSkilled: -0.15, skilledThreshold: 15, dp5Bonus: 0.1 },
-  R7: { perMid: 0.1, max: 0.2, dp8Reset: 0.15 },
-  R9: { perMarkFit: -0.12, minUnitWeight: 0.15, markerOtherUnitMult: 0.8 },
-  R10: { dp4: 0.12, tanhScale: 10 },
+  R1: { perPressStep: -0.2, max: -0.35, dp6CounterBonus: 0.2 },
+  R2: { perDirectStep: 0.2, max: 0.35, dp3Through: 0.3, sweeperMult: 0.5 },
+  R3: { dp4: -0.35, dp3LongCross: 0.3, targetManCross: 0.2 },
+  R4: { dp4: 0.3, dp3: 0.3 },
+  R5: { dp6: 0.5, dp7: 0.35, paceScale: 10, anchorMult: 0.6 },
+  R6: { dp4Through: -0.35, dp4ThroughSkilled: -0.2, skilledThreshold: 15, dp5Bonus: 0.15 },
+  R7: { perMid: 0.05, max: 0.1, dp8Reset: 0.08 },
+  R9: { perMarkFit: -0.2, minUnitWeight: 0.15, markerOtherUnitMult: 0.8 },
+  R10: { dp4: 0.25, tanhScale: 10 },
   TEMPO: { dp8PerStep: 0.05 },
-  LINE_FIT: { penalty: -0.1, paceDRequired: 60 },
+  LINE_FIT: { penalty: -0.2, paceDRequired: 60 },
 } as const;
 
 /** 8.3-4 스쿼드-전술 적합도 요구치 */

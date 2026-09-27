@@ -13,25 +13,51 @@ export const TIER_ECONOMY: Record<Tier, TierEconomy> = {
   T5: { tier: 'T5', seasonBudget: 25.0 * M, salaryCap: 26.0 * M, winBonus: 0.47 * M, drawBonus: 0.17 * M, lossBonus: 0.08 * M, carryRate: 0.2, prizeRates: PRIZE_RATES, championRate: 0.1 },
 };
 
+export const SEASON_DAYS = 28;
+
 /** 일할 연봉 = round(salaryTotal / 28). 28일 합계 오차는 Day 28 에 보정 */
-export function dailySalary(_salaryTotal: Kc, _day: number): Kc {
-  throw new Error('TODO');
+export function dailySalary(salaryTotal: Kc, day: number): Kc {
+  const per = Math.round(salaryTotal / SEASON_DAYS);
+  if (day >= SEASON_DAYS) return salaryTotal - per * (SEASON_DAYS - 1);
+  return per;
 }
 
-export function matchBonus(_econ: TierEconomy, _goalsFor: number, _goalsAgainst: number): Pick<LedgerEntry, 'kind' | 'amount'> {
-  throw new Error('TODO');
+export function matchBonus(econ: TierEconomy, goalsFor: number, goalsAgainst: number): Pick<LedgerEntry, 'kind' | 'amount'> {
+  if (goalsFor > goalsAgainst) return { kind: 'MATCH_WIN', amount: econ.winBonus };
+  if (goalsFor === goalsAgainst) return { kind: 'MATCH_DRAW', amount: econ.drawBonus };
+  return { kind: 'MATCH_LOSS', amount: econ.lossBonus };
 }
 
-export function prizeFor(_econ: TierEconomy, _position: number): { prize: Kc; champion: Kc } {
-  throw new Error('TODO');
+export function prizeRate(econ: TierEconomy, position: number): number {
+  const r = econ.prizeRates;
+  if (position <= 1) return r.p1;
+  if (position <= 3) return r.p2to3;
+  if (position <= 6) return r.p4to6;
+  if (position <= 10) return r.p7to10;
+  return r.p11to14;
+}
+
+export function prizeFor(econ: TierEconomy, position: number): { prize: Kc; champion: Kc } {
+  return {
+    prize: Math.round(econ.seasonBudget * prizeRate(econ, position)),
+    champion: position === 1 ? Math.round(econ.seasonBudget * econ.championRate) : 0,
+  };
 }
 
 /** 6.5 ⑥ 이월 판정: C = 다음 시즌 배정금 × 20% */
-export function carryOver(_finance: Finance, _nextEcon: TierEconomy): CarryOverResult {
-  throw new Error('TODO');
+export function carryOver(finance: Finance, nextEcon: TierEconomy): CarryOverResult {
+  const total = finance.balance;
+  const cap = Math.round(nextEcon.seasonBudget * nextEcon.carryRate);
+  const carried = Math.min(total, cap);
+  return { total, cap, carried, excess: total - carried };
 }
 
 /** 7.2 지출 가능액 B (시즌 중): 잔액 − 예약액 − 잔여 연봉 부채 − 확정 위약금 */
-export function spendable(_balance: Kc, _salaryTotal: Kc, _daysLeft: number): Kc {
-  throw new Error('TODO');
+export function spendable(balance: Kc, salaryTotal: Kc, daysLeft: number): Kc {
+  return balance - Math.round((salaryTotal * Math.max(0, daysLeft)) / SEASON_DAYS);
+}
+
+/** 원장 기록 + 잔액 반영 (순수) */
+export function postLedger(finance: Finance, entry: LedgerEntry): Finance {
+  return { ...finance, balance: finance.balance + entry.amount, ledger: [...finance.ledger, entry] };
 }

@@ -1,10 +1,14 @@
 /**
- * GameService 로컬 구현 (소유: A). 현재는 시그니처 스텁.
+ * GameService 로컬 구현 (소유: A).
  * 구현 원칙: 모든 변경은 (1) checkAction 권한 검사 → (2) 새 GameState 계산(domain 순수 함수)
  * → (3) storage.save → (4) snapshot 교체 → (5) 리스너 통지 순서. 중간 실패 시 이전 상태 유지(원자성).
  */
 import type {
+  ActionKind,
+  ActionLogEntry,
+  ActionLogKind,
   ApproveResult,
+  AttrDef,
   CalibrationOptions,
   CalibrationProgress,
   CalibrationReport,
@@ -14,6 +18,7 @@ import type {
   FinanceSummary,
   Fixture,
   GameSnapshot,
+  GameState,
   MatchId,
   MatchPlan,
   MatchReplay,
@@ -26,6 +31,7 @@ import type {
   PlanValidationIssue,
   Player,
   PlayerId,
+  Position,
   Proposal,
   ProposalId,
   ProposalInput,
@@ -35,18 +41,69 @@ import type {
   SeasonOutcome,
   SlotKey,
   StandingRow,
+  StoredMatchRecord,
   TacticCap,
+  TeamInstructions,
   UiLogKind,
 } from '../types';
+import {
+  ALLOWED_ROLES,
+  ENGINE_VERSION,
+  EngineConstants,
+  FORMATIONS,
+  FORMATION_IDS,
+  PRESETS,
+  PRESET_IDS,
+  ROLES,
+  ROLE_IDS,
+  RULE_DEFS,
+  RULE_IDS,
+  VALUE_TABLE,
+  explainMatch,
+  hashString,
+  simulateMatch,
+} from '../engine';
+import {
+  COACH_ID,
+  OWNER_ID,
+  SCHEMA_VERSION,
+  TIER_ECONOMY,
+  advanceDayState,
+  applyPatch,
+  buildOpponentScout,
+  buildReplay,
+  buildReport,
+  carryOver,
+  checkAction,
+  computeLeagueAverages,
+  computeStandings,
+  createInitialState,
+  createProposal,
+  findConflicting,
+  isAvailable,
+  isDomainError,
+  pickBasePlan,
+  remapLineup as remapLineupDomain,
+  resolvePlan,
+  runCalibration as runCalibrationSync,
+  salaryTotal,
+  spendable,
+  startNewSeasonState,
+  stripOpponentOrders,
+  validatePlan as validatePlanDomain,
+  type PlanBundle,
+} from '../domain';
 import {
   CONTRACT_VERSION,
   type FixtureFilter,
   type GameService,
   type NewGameOptions,
   type ResimulateOverrides,
+  type SubmitPlanOptions,
   type TacticSlotInput,
   type TacticUpdateResult,
 } from './api';
+import { GameError } from './errors';
 import { createMemoryStorage, systemClock, type Clock, type StoragePort } from './ports';
 
 export interface GameServiceDeps {
@@ -54,8 +111,60 @@ export interface GameServiceDeps {
   clock?: Clock;
 }
 
-function todo(): never {
-  throw new Error('TODO');
+/** 행동 로그 보관 상한 (아키텍처 4.4) */
+export const ACTION_LOG_LIMIT = 5000;
+
+const POSITION_ORDER: Position[] = ['GK', 'CB', 'FB', 'DM', 'CM', 'AM', 'W', 'ST'];
+
+const ATTRIBUTES: AttrDef[] = [
+  { key: 'passing', label: '패스', group: 'TECHNICAL' },
+  { key: 'dribbling', label: '드리블', group: 'TECHNICAL' },
+  { key: 'finishing', label: '결정력', group: 'TECHNICAL' },
+  { key: 'crossing', label: '크로스', group: 'TECHNICAL' },
+  { key: 'tackling', label: '태클', group: 'TECHNICAL' },
+  { key: 'vision', label: '시야', group: 'MENTAL' },
+  { key: 'positioning', label: '위치선정', group: 'MENTAL' },
+  { key: 'composure', label: '침착성', group: 'MENTAL' },
+  { key: 'workRate', label: '활동량', group: 'MENTAL' },
+  { key: 'pace', label: '속도', group: 'PHYSICAL' },
+  { key: 'stamina', label: '체력', group: 'PHYSICAL' },
+  { key: 'physical', label: '피지컬', group: 'PHYSICAL' },
+  { key: 'reflexes', label: '선방', group: 'GOALKEEPING' },
+  { key: 'aerialCommand', label: '공중 장악', group: 'GOALKEEPING' },
+  { key: 'kicking', label: '킥', group: 'GOALKEEPING' },
+];
+
+const CATALOG: Catalog = {
+  formations: FORMATION_IDS.map((id) => FORMATIONS[id]),
+  roles: ROLE_IDS.map((id) => ROLES[id]),
+  presets: PRESET_IDS.map((id) => PRESETS[id]),
+  attributes: ATTRIBUTES,
+  rules: RULE_IDS.map((id) => RULE_DEFS[id]),
+};
+
+function toGameError(e: unknown): unknown {
+  if (isDomainError(e)) return new GameError(e.code, e.message, e.details);
+  return e;
+}
+
+function isStep(v: unknown): boolean {
+  return typeof v === 'number' && Number.isInteger(v) && v >= -2 && v <= 2;
+}
+
+function tacticIssues(formation: string, roles: readonly string[], instr: TeamInstructions): string[] {
+  const out: string[] = [];
+  const def = FORMATIONS[formation as keyof typeof FORMATIONS];
+  if (!def) return [`알 수 없는 포메이션: ${formation}`];
+  if (roles.length !== def.slots.length) out.push(`역할은 ${def.slots.length}개여야 합니다`);
+  def.slots.forEach((s, i) => {
+    const r = roles[i];
+    if (r && !ALLOWED_ROLES[s.position].includes(r as never)) out.push(`${i + 1}번 자리(${s.position})에 ${r} 역할은 쓸 수 없습니다`);
+  });
+  for (const k of ['mentality', 'press', 'line', 'width', 'tempo', 'directness'] as const) {
+    if (!isStep(instr[k])) out.push(`${k} 는 −2~+2 정수여야 합니다`);
+  }
+  if (instr.offsideTrap && instr.line < 1) out.push('오프사이드 트랩은 수비 라인 +1 이상에서만 쓸 수 있습니다');
+  return out;
 }
 
 class LocalGameService implements GameService {
@@ -63,15 +172,124 @@ class LocalGameService implements GameService {
   private readonly storage: StoragePort;
   private readonly clock: Clock;
   private readonly listeners = new Set<() => void>();
-  private snapshot: GameSnapshot | null = null;
+  private state: GameState | null = null;
+  private standingsCache: { state: GameState; rows: StandingRow[] } | null = null;
+  private readonly replayCache = new Map<string, MatchReplay>();
 
   constructor(deps: GameServiceDeps) {
     this.storage = deps.storage ?? createMemoryStorage();
     this.clock = deps.clock ?? systemClock;
   }
 
+  // ── 내부 도우미 ────────────────────────────────────────────────
+
+  private require(): GameState {
+    if (!this.state) throw new GameError('NO_GAME', '진행 중인 게임이 없습니다. 새 게임을 시작하세요');
+    return this.state;
+  }
+
+  private notify(): void {
+    for (const l of [...this.listeners]) l();
+  }
+
+  /** 저장 성공 후에만 스냅샷을 교체한다 (원자성) */
+  private commit(next: GameState): void {
+    if (next.actionLog.length > ACTION_LOG_LIMIT) next = { ...next, actionLog: next.actionLog.slice(-ACTION_LOG_LIMIT) };
+    let json: string;
+    try {
+      json = JSON.stringify(next);
+    } catch (e) {
+      throw new GameError('STORAGE_FULL', `상태 직렬화 실패: ${String(e)}`);
+    }
+    try {
+      this.storage.save(json);
+    } catch (e) {
+      if (e instanceof GameError) throw e;
+      throw new GameError('STORAGE_FULL', '저장 공간이 부족해 저장하지 못했습니다. 행동 로그를 내보낸 뒤 새 시즌을 시작하세요');
+    }
+    if (next.schemaVersion !== this.state?.schemaVersion || next.gameSeed !== this.state?.gameSeed) this.replayCache.clear();
+    this.state = next;
+    this.notify();
+  }
+
+  private entry(s: GameState, kind: ActionLogKind, data?: Record<string, unknown>, actor?: string): ActionLogEntry {
+    return { at: this.clock.nowIso(), gameTime: { ...s.time }, actor: actor ?? s.actorUserId, kind, ...(data ? { data } : {}) };
+  }
+
+  private withLog(s: GameState, kind: ActionLogKind, data?: Record<string, unknown>): GameState {
+    return { ...s, seq: s.seq + 1, actionLog: [...s.actionLog, this.entry(s, kind, data)] };
+  }
+
+  private membership(s: GameState): Membership {
+    const m = s.memberships.find((x) => x.userId === s.actorUserId) ?? s.memberships[0];
+    if (!m) throw new GameError('NO_GAME', '멤버십이 없습니다');
+    return m;
+  }
+
+  private guard(s: GameState, action: ActionKind): void {
+    const r = checkAction(this.membership(s), action, { now: s.time, pastDeadline: false, clubId: s.userClubId });
+    if (!r.ok) throw new GameError('PERMISSION_DENIED', r.message, [r.code]);
+  }
+
+  private run<T>(fn: () => T): T {
+    try {
+      return fn();
+    } catch (e) {
+      throw toGameError(e);
+    }
+  }
+
+  private ts(s: GameState) {
+    return { season: s.time.season, day: s.time.day, seq: s.seq + 1 };
+  }
+
+  private nextFixture(s: GameState): Fixture | null {
+    if (s.phase !== 'MATCHDAY') return null;
+    const uid = s.userClubId;
+    const f = s.fixtures
+      .filter((x) => x.season === s.time.season && !x.played && x.day >= s.time.day && (x.homeId === uid || x.awayId === uid))
+      .sort((a, b) => a.day - b.day)[0];
+    return f ?? null;
+  }
+
+  private opponentOf(s: GameState, f: Fixture): ClubId {
+    return f.homeId === s.userClubId ? f.awayId : f.homeId;
+  }
+
+  private preview(s: GameState): ResolvedPlan | null {
+    const f = this.nextFixture(s);
+    if (!f) return null;
+    const club = s.clubs[s.userClubId]!;
+    return resolvePlan({
+      club,
+      fixture: f,
+      planState: s.plans[club.id],
+      players: s.players,
+      opponentPlayerIds: s.clubs[this.opponentOf(s, f)]?.playerIds ?? [],
+    });
+  }
+
+  private normalizePlan(s: GameState, plan: MatchPlan): MatchPlan {
+    const f = this.nextFixture(s);
+    return {
+      ...plan,
+      clubId: s.userClubId,
+      matchId: f?.id ?? plan.matchId ?? null,
+      lineup: { starters: [...plan.lineup.starters], bench: [...plan.lineup.bench] },
+      conditionals: plan.conditionals.map((c) => ({ ...c, conditions: [...c.conditions] })),
+    };
+  }
+
+  private assertValid(s: GameState, plan: MatchPlan): void {
+    const issues = validatePlanDomain(plan, s.clubs[s.userClubId]!, s.players);
+    const errors = issues.filter((i) => i.severity === 'ERROR');
+    if (errors.length > 0) throw new GameError('INVALID_PLAN', errors[0]!.message, errors.map((e) => e.message));
+  }
+
+  // ── 구독 ───────────────────────────────────────────────────────
+
   getSnapshot(): GameSnapshot | null {
-    return this.snapshot;
+    return this.state;
   }
 
   subscribe(listener: () => void): () => void {
@@ -81,141 +299,554 @@ class LocalGameService implements GameService {
     };
   }
 
-  newGame(_opts?: NewGameOptions): GameSnapshot {
-    void this.storage;
-    void this.clock;
-    return todo();
+  // ── 수명 주기 ──────────────────────────────────────────────────
+
+  newGame(opts: NewGameOptions = {}): GameSnapshot {
+    const seed = opts.seed ?? hashString(`${this.clock.nowIso()}|${Date.now()}`);
+    const s0 = createInitialState(
+      seed,
+      { clubName: opts.clubName ?? '킥오프 FC', tier: opts.tier ?? 'T3', devMode: opts.devMode ?? true, tacCap: opts.tacCap ?? 0.35 },
+      this.clock.nowIso(),
+    );
+    const s = { ...s0, actionLog: [this.entry(s0, 'SEASON_STARTED', { season: 1, seed: s0.gameSeed }, OWNER_ID)] };
+    this.replayCache.clear();
+    this.commit(s);
+    return s;
   }
+
   loadGame(): GameSnapshot | null {
-    return todo();
+    const raw = this.storage.load();
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as GameState;
+      if (!parsed || parsed.schemaVersion !== SCHEMA_VERSION || !parsed.clubs || !parsed.players) return null;
+      this.state = parsed;
+      this.replayCache.clear();
+      this.notify();
+      return parsed;
+    } catch {
+      return null;
+    }
   }
+
   resetGame(): void {
-    todo();
+    this.storage.clear();
+    this.state = null;
+    this.replayCache.clear();
+    this.notify();
   }
+
   exportSave(): string {
-    return todo();
+    return JSON.stringify(this.require());
   }
-  importSave(_json: string): GameSnapshot {
-    return todo();
+
+  importSave(json: string): GameSnapshot {
+    let parsed: GameState;
+    try {
+      parsed = JSON.parse(json) as GameState;
+    } catch {
+      throw new GameError('SAVE_INCOMPATIBLE', '저장 데이터를 읽을 수 없습니다 (JSON 형식 오류)');
+    }
+    if (!parsed || typeof parsed !== 'object' || parsed.schemaVersion !== SCHEMA_VERSION || !parsed.clubs || !parsed.players || !parsed.time) {
+      throw new GameError('SAVE_INCOMPATIBLE', `호환되지 않는 저장 데이터입니다 (schemaVersion ${String((parsed as { schemaVersion?: unknown })?.schemaVersion)} ≠ ${SCHEMA_VERSION})`);
+    }
+    this.replayCache.clear();
+    this.commit(parsed);
+    return parsed;
   }
+
+  // ── 역할 ───────────────────────────────────────────────────────
 
   getActor(): Membership {
-    return todo();
+    return this.membership(this.require());
   }
-  switchRole(_seat: 'OWNER' | 'COACH'): Membership {
-    return todo();
+
+  switchRole(seat: 'OWNER' | 'COACH'): Membership {
+    const s = this.require();
+    const m = s.memberships.find((x) => x.seat === seat && x.clubId === s.userClubId);
+    if (!m) throw new GameError('NOT_FOUND', `${seat} 멤버십이 없습니다`);
+    if (m.userId === s.actorUserId) return m;
+    const next = this.withLog({ ...s, actorUserId: m.userId }, 'ROLE_SWITCHED', { seat, userId: m.userId });
+    this.commit(next);
+    return m;
   }
+
+  // ── 조회 ───────────────────────────────────────────────────────
 
   getCatalog(): Catalog {
-    return todo();
-  }
-  getSquad(_clubId?: ClubId): Player[] {
-    return todo();
-  }
-  getPlayer(_playerId: PlayerId): Player {
-    return todo();
-  }
-  getStandings(): StandingRow[] {
-    return todo();
-  }
-  getFixtures(_filter?: FixtureFilter): Fixture[] {
-    return todo();
-  }
-  getNextMatch(): Fixture | null {
-    return todo();
-  }
-  getOpponentScout(_clubId: ClubId): OpponentScout {
-    return todo();
-  }
-  getFinance(_clubId?: ClubId): FinanceSummary {
-    return todo();
+    return CATALOG;
   }
 
-  updateTacticSlot(_slot: SlotKey, _next: TacticSlotInput): TacticUpdateResult {
-    return todo();
+  getSquad(clubId?: ClubId): Player[] {
+    const s = this.require();
+    const club = s.clubs[clubId ?? s.userClubId];
+    if (!club) throw new GameError('NOT_FOUND', `구단 없음: ${clubId}`);
+    return club.playerIds
+      .map((id) => s.players[id])
+      .filter((p): p is Player => !!p)
+      .sort((a, b) => POSITION_ORDER.indexOf(a.primary) - POSITION_ORDER.indexOf(b.primary) || b.ovr - a.ovr || a.id.localeCompare(b.id));
   }
+
+  getPlayer(playerId: PlayerId): Player {
+    const p = this.require().players[playerId];
+    if (!p) throw new GameError('NOT_FOUND', `선수 없음: ${playerId}`);
+    return p;
+  }
+
+  getStandings(): StandingRow[] {
+    const s = this.require();
+    if (this.standingsCache?.state === s) return this.standingsCache.rows;
+    const rows = computeStandings(Object.keys(s.clubs).sort(), Object.values(s.summaries), s.time.season, hashString(`${s.gameSeed}|tiebreak|${s.time.season}`));
+    this.standingsCache = { state: s, rows };
+    return rows;
+  }
+
+  getFixtures(filter: FixtureFilter = {}): Fixture[] {
+    const s = this.require();
+    return s.fixtures
+      .filter(
+        (f) =>
+          (filter.clubId === undefined || f.homeId === filter.clubId || f.awayId === filter.clubId) &&
+          (filter.day === undefined || f.day === filter.day) &&
+          (filter.played === undefined || f.played === filter.played),
+      )
+      .sort((a, b) => a.day - b.day || a.id.localeCompare(b.id));
+  }
+
+  getNextMatch(): Fixture | null {
+    return this.nextFixture(this.require());
+  }
+
+  getOpponentScout(clubId: ClubId): OpponentScout {
+    const s = this.require();
+    if (!s.clubs[clubId]) throw new GameError('NOT_FOUND', `구단 없음: ${clubId}`);
+    return buildOpponentScout(s.clubs, Object.values(s.summaries), clubId);
+  }
+
+  getFinance(clubId?: ClubId): FinanceSummary {
+    const s = this.require();
+    const id = clubId ?? s.userClubId;
+    const f = s.finances[id];
+    if (!f) throw new GameError('NOT_FOUND', `재정 없음: ${id}`);
+    const econ = TIER_ECONOMY[s.settings.tier];
+    const total = salaryTotal(s, id);
+    const daysLeft = Math.max(0, 28 - s.time.day);
+    const B = spendable(f.balance, total, daysLeft);
+    const season = f.ledger.filter((e) => e.season === s.time.season);
+    const income = season.filter((e) => e.amount > 0).reduce((a, e) => a + e.amount, 0);
+    const expense = season.filter((e) => e.amount < 0).reduce((a, e) => a - e.amount, 0);
+    return {
+      clubId: id,
+      tier: s.settings.tier,
+      balance: f.balance,
+      transferOnlyBudget: f.transferOnlyBudget,
+      spendable: B,
+      salaryTotal: total,
+      salaryCap: econ.salaryCap,
+      capUsage: econ.salaryCap > 0 ? total / econ.salaryCap : 0,
+      seasonIncome: income,
+      seasonExpense: expense,
+      projectedCarry: carryOver({ ...f, balance: B }, econ),
+      recent: f.ledger.slice(-12).reverse(),
+    };
+  }
+
+  // ── 전술·플랜 ──────────────────────────────────────────────────
+
+  updateTacticSlot(slot: SlotKey, next: TacticSlotInput): TacticUpdateResult {
+    const s = this.require();
+    this.guard(s, 'EDIT_TACTIC');
+    if (slot !== 'A' && slot !== 'B') throw new GameError('INVALID_TACTIC', `슬롯은 A 또는 B: ${String(slot)}`);
+    const issues = tacticIssues(next.formation, next.roles, next.instructions);
+    if (issues.length > 0) throw new GameError('INVALID_TACTIC', issues[0]!, issues);
+    const club = s.clubs[s.userClubId]!;
+    const prev = club.tactics[slot];
+    const halved = prev.formation !== next.formation;
+    const familiarity = halved ? Math.round(prev.familiarity * EngineConstants.FAMILIARITY.formationChangeMult) : prev.familiarity;
+    const updated = { key: slot, formation: next.formation, roles: [...next.roles], instructions: { ...next.instructions }, familiarity };
+    const nextState = this.withLog(
+      { ...s, clubs: { ...s.clubs, [club.id]: { ...club, tactics: { ...club.tactics, [slot]: updated } } } },
+      'TACTIC_CHANGED',
+      { slot, formation: next.formation, familiarityHalved: halved },
+    );
+    this.commit(nextState);
+    return { slot: updated, familiarityHalved: halved };
+  }
+
   getPlanState(): PlanState {
-    return todo();
+    const s = this.require();
+    this.guard(s, 'VIEW_TODAY_PLAN');
+    const f = this.nextFixture(s);
+    const ps = s.plans[s.userClubId];
+    const club = s.clubs[s.userClubId]!;
+    return {
+      clubId: s.userClubId,
+      matchId: f?.id ?? null,
+      opponentId: f ? this.opponentOf(s, f) : null,
+      day: s.time.day,
+      ...(ps?.draft ? { draft: ps.draft } : {}),
+      ...(ps?.confirmed ? { confirmed: ps.confirmed } : {}),
+      ...(club.defaultPlan ? { defaultPlan: club.defaultPlan } : {}),
+      preview: this.preview(s),
+    };
   }
-  validatePlan(_plan: MatchPlan): PlanValidationIssue[] {
-    return todo();
+
+  validatePlan(plan: MatchPlan): PlanValidationIssue[] {
+    const s = this.require();
+    return validatePlanDomain(this.normalizePlan(s, plan), s.clubs[s.userClubId]!, s.players);
   }
-  saveDraft(_plan: MatchPlan): PlanRecord {
-    return todo();
+
+  saveDraft(plan: MatchPlan): PlanRecord {
+    const s = this.require();
+    this.guard(s, 'EDIT_PLAN');
+    if (plan.clubId && plan.clubId !== s.userClubId) throw new GameError('INVALID_PLAN', '다른 구단의 플랜입니다');
+    const record: PlanRecord = { plan: this.normalizePlan(s, plan), status: 'DRAFT', updatedBy: s.actorUserId, updatedAt: this.ts(s) };
+    const cur = s.plans[s.userClubId] ?? {};
+    this.commit(this.withLog({ ...s, plans: { ...s.plans, [s.userClubId]: { ...cur, draft: record } } }, 'PLAN_DRAFT_SAVED', { matchId: record.plan.matchId }));
+    return record;
   }
-  submitPlan(_plan: MatchPlan): PlanRecord {
-    return todo();
+
+  submitPlan(plan: MatchPlan, opts: SubmitPlanOptions = {}): PlanRecord {
+    const s = this.require();
+    this.guard(s, 'SUBMIT_PLAN');
+    const f = this.nextFixture(s);
+    if (!f) throw new GameError('INVALID_PHASE', '제출할 다음 경기가 없습니다');
+    const p = this.normalizePlan(s, plan);
+    this.assertValid(s, p);
+    const isRecommended = opts.origin === 'RECOMMENDED';
+    const record: PlanRecord = { plan: p, status: 'CONFIRMED', updatedBy: s.actorUserId, updatedAt: this.ts(s) };
+    const cur = s.plans[s.userClubId] ?? {};
+    this.commit(
+      this.withLog(
+        { ...s, plans: { ...s.plans, [s.userClubId]: { ...cur, confirmed: record } } },
+        isRecommended ? 'PLAN_RECOMMENDED_SUBMITTED' : 'PLAN_SUBMITTED',
+        { matchId: f.id, startSlot: p.startSlot },
+      ),
+    );
+    return record;
   }
-  setDefaultPlan(_plan: MatchPlan): void {
-    todo();
+
+  remapLineup(plan: MatchPlan, slot: SlotKey): MatchPlan {
+    const s = this.require();
+    if (slot !== 'A' && slot !== 'B') throw new GameError('INVALID_PLAN', `슬롯은 A 또는 B: ${String(slot)}`);
+    return remapLineupDomain(this.normalizePlan(s, plan), s.clubs[s.userClubId]!, s.players, slot);
   }
+
+  setDefaultPlan(plan: MatchPlan): void {
+    const s = this.require();
+    this.guard(s, 'SET_DEFAULT_PLAN');
+    const p = { ...stripOpponentOrders(this.normalizePlan(s, plan)), matchId: null };
+    this.assertValid(s, p);
+    const club = s.clubs[s.userClubId]!;
+    this.commit(this.withLog({ ...s, clubs: { ...s.clubs, [club.id]: { ...club, defaultPlan: p } } }, 'DEFAULT_PLAN_SET'));
+  }
+
+  private recommendFor(s: GameState): MatchPlan {
+    const r = this.preview(s);
+    if (!r) throw new GameError('INVALID_PHASE', '다음 경기가 없습니다');
+    return stripOpponentOrders(r.plan);
+  }
+
   recommendPlan(): MatchPlan {
-    return todo();
+    const s = this.require();
+    return this.run(() => this.recommendFor(s));
   }
+
   previewResolvedPlan(): ResolvedPlan | null {
-    return todo();
+    const s = this.require();
+    return this.run(() => this.preview(s));
+  }
+
+  // ── 진행 ───────────────────────────────────────────────────────
+
+  private step(s: GameState): { state: GameState; result: DayResult } {
+    const out = this.run(() => advanceDayState(s, this.clock.nowIso()));
+    const state = {
+      ...out.state,
+      actionLog: [...out.state.actionLog, this.entry(out.state, 'DAY_ADVANCED', { from: out.result.from, to: out.result.to, userMatchId: out.result.userMatchId ?? null })],
+    };
+    return { state, result: out.result };
   }
 
   advanceDay(): DayResult {
-    return todo();
+    const s = this.require();
+    this.guard(s, 'ADVANCE_DAY');
+    if (s.phase === 'SEASON_OVER') throw new GameError('INVALID_PHASE', '시즌이 끝났습니다. 새 시즌을 시작하세요');
+    const { state, result } = this.step(s);
+    this.commit(state);
+    return result;
   }
-  advanceDays(_n: number): DayResult[] {
-    return todo();
+
+  advanceDays(n: number): DayResult[] {
+    const s0 = this.require();
+    this.guard(s0, 'ADVANCE_DAY');
+    if (s0.phase === 'SEASON_OVER') throw new GameError('INVALID_PHASE', '시즌이 끝났습니다. 새 시즌을 시작하세요');
+    let s = s0;
+    const results: DayResult[] = [];
+    for (let i = 0; i < Math.max(0, Math.floor(n)) && s.phase !== 'SEASON_OVER'; i++) {
+      const out = this.step(s);
+      s = out.state;
+      results.push(out.result);
+    }
+    if (results.length > 0) this.commit(s);
+    return results;
   }
+
   advanceToSeasonEnd(): DayResult[] {
-    return todo();
+    return this.advanceDays(10_000);
   }
+
   startNewSeason(): GameSnapshot {
-    return todo();
-  }
-  getSeasonOutcome(_season?: SeasonNo): SeasonOutcome | null {
-    return todo();
-  }
-
-  getReport(_matchId: MatchId): MatchReport {
-    return todo();
-  }
-  getMatchReplay(_matchId: MatchId): MatchReplay {
-    return todo();
+    const s = this.require();
+    this.guard(s, 'ADVANCE_DAY');
+    const next = this.run(() => startNewSeasonState(s, this.clock.nowIso()));
+    const logged = { ...next, actionLog: [...next.actionLog, this.entry(next, 'SEASON_STARTED', { season: next.time.season })] };
+    this.replayCache.clear();
+    this.commit(logged);
+    return logged;
   }
 
-  propose(_input: ProposalInput): Proposal {
-    return todo();
-  }
-  react(_proposalId: ProposalId, _choice: 'FOR' | 'AGAINST', _reason?: string): Proposal {
-    return todo();
-  }
-  approve(_proposalId: ProposalId, _edits?: PlanChangePatch): ApproveResult {
-    return todo();
-  }
-  reject(_proposalId: ProposalId, _note?: string): Proposal {
-    return todo();
-  }
-  listProposals(_filter?: { status?: ProposalStatus }): Proposal[] {
-    return todo();
+  getSeasonOutcome(season?: SeasonNo): SeasonOutcome | null {
+    const s = this.require();
+    if (season === undefined) return s.pendingOutcome ?? s.seasonHistory[s.seasonHistory.length - 1] ?? null;
+    if (s.pendingOutcome?.season === season) return s.pendingOutcome;
+    return s.seasonHistory.find((o) => o.season === season) ?? null;
   }
 
-  logEvent(_kind: UiLogKind, _data?: Record<string, unknown>): void {
-    todo();
+  // ── 리포트 ─────────────────────────────────────────────────────
+
+  private record(s: GameState, matchId: MatchId): StoredMatchRecord {
+    const r = s.records[matchId];
+    if (!r) throw new GameError('NOT_FOUND', `리포트가 없습니다 (사용자 구단 경기만 저장): ${matchId}`);
+    return r;
   }
+
+  getReport(matchId: MatchId): MatchReport {
+    return this.record(this.require(), matchId).report;
+  }
+
+  getMatchReplay(matchId: MatchId): MatchReplay {
+    const s = this.require();
+    const rec = this.record(s, matchId);
+    const cached = this.replayCache.get(matchId);
+    if (cached) return cached;
+    if (rec.engineVersion !== ENGINE_VERSION) {
+      throw new GameError('SAVE_INCOMPATIBLE', `엔진 버전이 달라(${rec.engineVersion} → ${ENGINE_VERSION}) 중계를 재생할 수 없습니다. 저장된 리포트만 볼 수 있습니다`);
+    }
+    const result = simulateMatch({
+      matchId,
+      seed: rec.seed,
+      home: rec.home,
+      away: rec.away,
+      config: { engineVersion: rec.engineVersion, tacCap: rec.tacCap, tacticsEnabled: true, disabledRules: [] },
+    });
+    const players: Record<string, string> = {};
+    for (const t of [rec.home, rec.away]) for (const p of [...t.starters, ...t.bench]) players[p.id] = p.name;
+    const clubs: Record<string, string> = { [rec.home.clubId]: rec.home.name, [rec.away.clubId]: rec.away.name };
+    const replay = buildReplay(result, { clubs, players });
+    this.replayCache.set(matchId, replay);
+    return replay;
+  }
+
+  // ── 코치 제안 ──────────────────────────────────────────────────
+
+  private bundle(s: GameState): PlanBundle {
+    const club = s.clubs[s.userClubId]!;
+    const preview = this.preview(s);
+    const fallback: MatchPlan = preview?.plan ?? { clubId: club.id, matchId: null, lineup: { starters: [], bench: [] }, startSlot: 'A', conditionals: [], autoSubThreshold: 55, autoRotation: true };
+    return { plan: pickBasePlan(s.plans[club.id], fallback), tactics: club.tactics };
+  }
+
+  propose(input: ProposalInput): Proposal {
+    const s = this.require();
+    this.guard(s, 'PROPOSE');
+    const f = this.nextFixture(s);
+    if (!f || input.payload.matchId !== f.id) throw new GameError('PROPOSAL_INVALID', '다음 경기에 대한 제안만 할 수 있습니다');
+    const author = this.membership(s);
+    const id = `pr-s${s.time.season}-${s.seq + 1}`;
+    const proposal = this.run(() => createProposal(input, author, Object.values(s.proposals), this.bundle(s), this.ts(s), id));
+    this.commit(this.withLog({ ...s, proposals: { ...s.proposals, [id]: proposal } }, 'PROPOSAL_CREATED', { proposalId: id, paths: proposal.diff.map((d) => d.path) }));
+    return proposal;
+  }
+
+  private openProposal(s: GameState, id: ProposalId): Proposal {
+    const p = s.proposals[id];
+    if (!p) throw new GameError('NOT_FOUND', `제안 없음: ${id}`);
+    if (p.status !== 'OPEN') throw new GameError('PROPOSAL_NOT_OPEN', `이미 처리된 제안입니다 (${p.status})`);
+    return p;
+  }
+
+  react(proposalId: ProposalId, choice: 'FOR' | 'AGAINST', reason?: string): Proposal {
+    const s = this.require();
+    this.guard(s, 'REACT');
+    const p = this.openProposal(s, proposalId);
+    const reactions = [...p.reactions.filter((r) => r.userId !== s.actorUserId), { userId: s.actorUserId, choice, ...(reason ? { reason: reason.slice(0, 80) } : {}) }];
+    const next: Proposal = { ...p, reactions };
+    this.commit(this.withLog({ ...s, proposals: { ...s.proposals, [p.id]: next } }, 'PROPOSAL_REACTED', { proposalId: p.id, choice }));
+    return next;
+  }
+
+  approve(proposalId: ProposalId, edits?: PlanChangePatch): ApproveResult {
+    const s = this.require();
+    this.guard(s, 'APPROVE');
+    const p = this.openProposal(s, proposalId);
+    const at = this.ts(s);
+    const f = this.nextFixture(s);
+    const details: string[] = [];
+    let after: PlanBundle | null = null;
+    if (!f || f.id !== p.payload.matchId) {
+      details.push('대상 경기가 이미 지났거나 다음 경기가 아닙니다');
+    } else {
+      after = this.run(() => applyPatch(this.bundle(s), edits ?? p.payload.patch));
+      after.plan = { ...after.plan, clubId: s.userClubId, matchId: f.id };
+      const issues = validatePlanDomain(after.plan, s.clubs[s.userClubId]!, s.players);
+      for (const i of issues) if (i.severity === 'ERROR') details.push(i.message);
+      const lineup = (edits ?? p.payload.patch).lineup;
+      if (lineup) {
+        for (const id of [...lineup.starters, ...lineup.bench]) {
+          const pl = s.players[id];
+          if (pl && !isAvailable(pl)) details.push(`${pl.name} ${pl.availability.injuryDays > 0 ? '부상' : '출장 정지'} — 다시 확인이 필요합니다`);
+        }
+      }
+      for (const slot of ['A', 'B'] as SlotKey[]) {
+        const t = after.tactics[slot];
+        details.push(...tacticIssues(t.formation, t.roles, t.instructions));
+      }
+    }
+    if (details.length > 0 || !after || !f) {
+      const stale: Proposal = { ...p, status: 'STALE', resolvedBy: s.actorUserId, resolvedAt: at, resolutionNote: details.join(' / ') };
+      this.commit(this.withLog({ ...s, proposals: { ...s.proposals, [p.id]: stale } }, 'PROPOSAL_APPROVED', { proposalId: p.id, result: 'STALE', details }));
+      return { ok: false, proposal: stale, reason: 'STALE', details };
+    }
+    const approved: Proposal = {
+      ...p,
+      status: 'APPROVED',
+      resolvedBy: s.actorUserId,
+      resolvedAt: at,
+      ...(edits ? { resolutionNote: '수정 후 승인' } : {}),
+    };
+    const proposals = { ...s.proposals, [p.id]: approved };
+    const superseded = findConflicting(p, Object.values(s.proposals)).map((c) => c.id);
+    for (const id of superseded) proposals[id] = { ...proposals[id]!, status: 'SUPERSEDED', supersededBy: p.id, resolvedAt: at, resolvedBy: s.actorUserId };
+    const club = s.clubs[s.userClubId]!;
+    const tactics = { ...club.tactics };
+    for (const k of ['A', 'B'] as SlotKey[]) tactics[k] = { ...club.tactics[k], instructions: { ...after.tactics[k].instructions } };
+    const record: PlanRecord = { plan: after.plan, status: 'CONFIRMED', updatedBy: OWNER_ID, updatedAt: at, sourceProposalId: p.id };
+    const cur = s.plans[club.id] ?? {};
+    const next: GameState = {
+      ...s,
+      proposals,
+      clubs: { ...s.clubs, [club.id]: { ...club, tactics } },
+      plans: { ...s.plans, [club.id]: { ...cur, confirmed: record } },
+    };
+    this.commit(this.withLog(next, 'PROPOSAL_APPROVED', { proposalId: p.id, edited: !!edits, superseded }));
+    return { ok: true, proposal: approved, superseded };
+  }
+
+  reject(proposalId: ProposalId, note?: string): Proposal {
+    const s = this.require();
+    this.guard(s, 'REJECT');
+    const p = this.openProposal(s, proposalId);
+    const next: Proposal = { ...p, status: 'REJECTED', resolvedBy: s.actorUserId, resolvedAt: this.ts(s), ...(note ? { resolutionNote: note.slice(0, 80) } : {}) };
+    this.commit(this.withLog({ ...s, proposals: { ...s.proposals, [p.id]: next } }, 'PROPOSAL_REJECTED', { proposalId: p.id }));
+    return next;
+  }
+
+  listProposals(filter: { status?: ProposalStatus } = {}): Proposal[] {
+    const s = this.require();
+    return Object.values(s.proposals)
+      .filter((p) => filter.status === undefined || p.status === filter.status)
+      .sort((a, b) => b.createdAt.season - a.createdAt.season || b.createdAt.seq - a.createdAt.seq);
+  }
+
+  // ── 로그 ───────────────────────────────────────────────────────
+
+  logEvent(kind: UiLogKind, data?: Record<string, unknown>): void {
+    const s = this.state;
+    if (!s) return;
+    // 계약 1.1.0: 스냅샷 교체·구독자 알림 없이 로그만 추가하고 저장한다 (UI 재렌더 방지)
+    let log = [...s.actionLog, this.entry(s, kind, data)];
+    if (log.length > ACTION_LOG_LIMIT) log = log.slice(-ACTION_LOG_LIMIT);
+    (s as GameState).actionLog = log;
+    try {
+      this.storage.save(JSON.stringify(s));
+    } catch {
+      // 로그 저장 실패는 게임 진행을 막지 않는다
+    }
+  }
+
   exportActionLog(): string {
-    return todo();
+    return JSON.stringify(this.require().actionLog, null, 2);
   }
 
-  setTacCap(_cap: TacticCap): void {
-    todo();
+  // ── 개발자 패널 ────────────────────────────────────────────────
+
+  setTacCap(cap: TacticCap): void {
+    const s = this.require();
+    if (!(EngineConstants.TAC_CAP_OPTIONS as readonly number[]).includes(cap)) throw new GameError('INVALID_TACTIC', `tacCap 은 0.25 / 0.35 / 0.5 중 하나: ${cap}`);
+    if (s.settings.tacCap === cap) return;
+    this.commit({ ...s, settings: { ...s.settings, tacCap: cap } });
   }
-  resimulate(_matchId: MatchId, _overrides?: ResimulateOverrides): MatchReport {
-    return todo();
+
+  resimulate(matchId: MatchId, overrides: ResimulateOverrides = {}): MatchReport {
+    const s = this.require();
+    const rec = this.record(s, matchId);
+    const result = simulateMatch({
+      matchId,
+      seed: rec.seed,
+      home: rec.home,
+      away: rec.away,
+      config: {
+        engineVersion: ENGINE_VERSION,
+        tacCap: overrides.tacCap ?? rec.tacCap,
+        tacticsEnabled: overrides.tacticsEnabled ?? true,
+        disabledRules: overrides.disabledRules ?? [],
+      },
+    });
+    const ex = explainMatch(result, VALUE_TABLE);
+    const summaries = Object.values(s.summaries).filter((x) => x.season === s.time.season);
+    const upTo = summaries.filter((x) => x.day <= (s.summaries[matchId]?.day ?? 99));
+    const names: Record<string, string> = {};
+    for (const t of [rec.home, rec.away]) for (const p of [...t.starters, ...t.bench]) names[p.id] = p.name;
+    return buildReport(result, ex, s.userClubId, computeLeagueAverages(summaries), upTo.filter((x) => x.matchId !== matchId), names);
   }
-  runCalibration(
-    _opts: CalibrationOptions,
-    _onProgress?: (p: CalibrationProgress) => void,
-  ): Promise<CalibrationReport> {
-    return Promise.reject(new Error('TODO'));
+
+  runCalibration(opts: CalibrationOptions, onProgress?: (p: CalibrationProgress) => void): Promise<CalibrationReport> {
+    if (typeof Worker === 'undefined') {
+      return new Promise((resolve, reject) => {
+        setTimeout(() => {
+          try {
+            resolve(runCalibrationSync(opts, onProgress));
+          } catch (e) {
+            reject(e instanceof Error ? e : new Error(String(e)));
+          }
+        }, 0);
+      });
+    }
+    return new Promise((resolve, reject) => {
+      const worker = new Worker(new URL('./workers/calibration.worker.ts', import.meta.url), { type: 'module' });
+      worker.onmessage = (e: MessageEvent<{ type: 'progress' | 'done' | 'error'; progress?: CalibrationProgress; report?: CalibrationReport; message?: string }>) => {
+        const m = e.data;
+        if (m.type === 'progress' && m.progress) onProgress?.(m.progress);
+        else if (m.type === 'done' && m.report) {
+          worker.terminate();
+          resolve(m.report);
+        } else if (m.type === 'error') {
+          worker.terminate();
+          reject(new Error(m.message ?? 'calibration failed'));
+        }
+      };
+      worker.onerror = (err) => {
+        worker.terminate();
+        reject(new Error(err.message));
+      };
+      worker.postMessage(opts);
+    });
   }
 }
 
 export function createGameService(deps: GameServiceDeps = {}): GameService {
   return new LocalGameService(deps);
 }
+
+export { COACH_ID, OWNER_ID };

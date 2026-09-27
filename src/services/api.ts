@@ -46,7 +46,7 @@ import type {
   UiLogKind,
 } from '../types';
 
-export const CONTRACT_VERSION = '1.0.0';
+export const CONTRACT_VERSION = '1.1.0';
 
 export interface NewGameOptions {
   /** 미지정 시 Date.now() 기반 */
@@ -65,6 +65,12 @@ export interface TacticUpdateResult {
   slot: TacticSlot;
   /** 포메이션 변경으로 숙련도가 절반이 되었는가 */
   familiarityHalved: boolean;
+}
+
+/** 1.1.0 추가: submitPlan 두 번째 인자 (선택) */
+export interface SubmitPlanOptions {
+  /** 'RECOMMENDED' 면 행동 로그를 PLAN_RECOMMENDED_SUBMITTED 로 남긴다 */
+  origin?: 'MANUAL' | 'RECOMMENDED';
 }
 
 export interface FixtureFilter {
@@ -118,7 +124,12 @@ export interface GameService {
   validatePlan(plan: MatchPlan): PlanValidationIssue[];
   saveDraft(plan: MatchPlan): PlanRecord;
   /** CBT API: 확정 제출 */
-  submitPlan(plan: MatchPlan): PlanRecord;
+  submitPlan(plan: MatchPlan, opts?: SubmitPlanOptions): PlanRecord;
+  /**
+   * 1.1.0 추가(선택 메서드): 시작 슬롯/포메이션이 바뀔 때 현재 선발 11명을 새 포메이션 슬롯에
+   * 적합도 최대로 재배치한 플랜을 돌려준다(저장하지 않음). 슬롯 전술 편집 직후에도 쓸 수 있다.
+   */
+  remapLineup?(plan: MatchPlan, slot: SlotKey): MatchPlan;
   /** 상대 맞춤 지시는 제거된 상태로 저장된다 */
   setDefaultPlan(plan: MatchPlan): void;
   /** "추천대로" = 현재 유효 플랜 + 부상/징계 대체 + 피로 로테이션 (감독 AI). 제출은 하지 않는다 */
@@ -151,6 +162,7 @@ export interface GameService {
   listProposals(filter?: { status?: ProposalStatus }): Proposal[];
 
   // ── 로그 ─────────────────────────────────────────────────────────
+  /** 로그만 추가·저장한다. 스냅샷 교체·구독자 알림 없음 (1.1.0 명시) */
   logEvent(kind: UiLogKind, data?: Record<string, unknown>): void;
   exportActionLog(): string;
 
