@@ -1,6 +1,6 @@
 /** 미구현 실제 서비스 안내 · 에러 경계 (소유: B) */
 import { Component, type ErrorInfo, type ReactNode } from 'react';
-import { reloadInFakeMode, reloadInRealMode, type ServiceMode } from '../service/serviceHost';
+import { DEV_TOOLS, reloadInFakeMode, reloadInRealMode, type ServiceMode } from '../service/serviceHost';
 
 export function ServiceUnavailable({ error, mode }: { error: unknown; mode: ServiceMode }) {
   const msg = error instanceof Error ? error.message : String(error);
@@ -13,7 +13,7 @@ export function ServiceUnavailable({ error, mode }: { error: unknown; mode: Serv
         <br />
         오류: <code>{msg}</code>
       </p>
-      {mode === 'real' ? (
+      {!DEV_TOOLS ? null : mode === 'real' ? (
         <>
           <h2>fake 모드로 실행하려면…</h2>
           <ol>

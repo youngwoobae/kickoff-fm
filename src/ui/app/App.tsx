@@ -2,16 +2,15 @@
  * 앱 셸 (소유: B). 서비스 부팅 → 게임 유무 분기 → 하단 탭 5개.
  * 탭: 홈 / 스쿼드(목록·선발) / 전술(팀 전술·경기 플랜) / 경기(중계·리포트) / 클럽(리그·재정·코치실·개발자)
  */
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { isGameError, type GameService } from '../../services';
 import { ToastProvider } from '../components/Toast';
 import { Segmented } from '../components/kit';
 import { formatKc } from '../format';
 import { PlanEditorProvider } from '../plan/PlanEditor';
 import { ServiceProvider, useAction, useActor, useQuery, useService, useServiceCtx, useSnapshot } from '../service/ServiceContext';
-import { createServiceFor, resolveServiceMode, type ServiceMode } from '../service/serviceHost';
+import { DEV_TOOLS, createServiceFor, resolveServiceMode, type ServiceMode } from '../service/serviceHost';
 import { CoachScreen } from '../screens/CoachScreen';
-import { DevPanel } from '../screens/DevPanel';
 import { FinanceScreen } from '../screens/FinanceScreen';
 import { HomeScreen } from '../screens/HomeScreen';
 import { LeagueScreen } from '../screens/LeagueScreen';
@@ -24,7 +23,10 @@ import { TacticsScreen } from '../screens/TacticsScreen';
 import { ErrorBoundary, ServiceUnavailable } from './Fallbacks';
 import { INITIAL_NAV, NavCtx, useNav, type NavState, type TabId } from './nav';
 
-type Boot = { status: 'loading' } | { status: 'ready'; service: GameService } | { status: 'failed'; error: unknown };
+/** 개발자 패널: 개발 도구 허용 빌드에서만 별도 청크로 불러온다 (프로덕션 번들 제외) */
+const DevPanel = DEV_TOOLS ? lazy(() => import('../screens/DevPanel').then((m) => ({ default: m.DevPanel }))) : null;
+
+type Boot ={ status: 'loading' } | { status: 'ready'; service: GameService } | { status: 'failed'; error: unknown };
 
 export function App() {
   const [mode] = useState<ServiceMode>(resolveServiceMode);
@@ -189,9 +191,14 @@ function TabContent({ tab }: { tab: TabId }) {
     case 'match':
       return <MatchCenterScreen />;
     case 'club': {
-      const dev = snap?.settings.devMode ?? true;
+      const dev = !!DevPanel && (snap?.settings.devMode ?? true);
       const cur = !dev && nav.club === 'dev' ? 'league' : nav.club;
-      const body = cur === 'league' ? <LeagueScreen /> : cur === 'finance' ? <FinanceScreen /> : cur === 'coach' ? <CoachScreen /> : <DevPanel />;
+      const body =
+        cur === 'league' ? <LeagueScreen /> : cur === 'finance' ? <FinanceScreen /> : cur === 'coach' ? <CoachScreen /> : DevPanel && (
+          <Suspense fallback={<div className="boot">불러오는 중…</div>}>
+            <DevPanel />
+          </Suspense>
+        );
       return sub(
         body,
         <Segmented
