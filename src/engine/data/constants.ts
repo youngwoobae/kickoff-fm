@@ -159,7 +159,7 @@ export const SUB_WINDOWS = 3;
 
 /** 8.6 규칙 수치 (0.5.0 재보정: cap 0.7, 9×9 스타일 행렬 2,000경기/쌍 탐색, 실축구_전술설계 2.2) */
 export const RULES = {
-  R1: { perPressStep: -0.051, max: -1.0, dp8PerPress: -0.277, dp6CounterBonus: 0.542, resistPer: 0.143, resistMax: 3, threeBackMult: 0.7, pressingFwdPrs: 3, pressingFwdDp6: 0.1, dp5Counter: 0.09 },
+  R1: { perPressStep: -0.051, max: -1.0, dp8PerPress: -0.277, dp6CounterBonus: 0.542, resistPer: 0.143, resistMax: 3, threeBackMult: 0.7, pressingFwdPrs: 3, pressingFwdDp6: 0.1, dp5Counter: 0.09, pressingFwdDp1: 0 },
   R2: { perDirectStep: 2.044, max: 0.952, dp3Through: 0.319, paceScale: 4, paceMin: 0.3, paceMax: 1.6, sweeperFast: 0.5, sweeperSlow: 0.75, sweeperFastPace: 10, threeBackMult: 0.894, deepBlockPerStep: -0.04, dp5: 0.342 },
   R3: { dp4: -4.625, compBase: 0.6, compScale: 25, compMin: 0.4, compMax: 1.2, dp3LongCross: 3.461, crossAer: 6.512, aerScale: 10, dp5Long: 0.3, dp2PerDeepLine: 0.443, dp5Box: 1.89 },
   R4: { dp3: 0.1, dp4: 0.7, negMult: 0.11, threshold: 0.2, widthStep: 0.4, narrowStep: 0.25, dp5: 0.48 },

@@ -247,7 +247,9 @@ export function evalBinaryRules(dp: BinaryDP, actor: TeamView, opp: TeamView, ct
     case 'DP1': {
       const att = actor;
       const def = opp;
-      put('R1', r1Value(att, def, R.R1.perPressStep));
+      // 0.6.0: 프레싱 포워드는 압박 지시(+1 이상)에서 짧은 빌드업의 첫 패스를 직접 끊는다 (역할 서명)
+      const pf = def.instr.press >= 1 && att.instr.directness <= 0 ? R.R1.pressingFwdDp1 * def.shape.pressingFwds : 0;
+      put('R1', r1Value(att, def, R.R1.perPressStep) + pf);
       if (r2Active(att, def)) put('R2', Math.min(R.R2.perDirectStep * att.instr.directness, R.R2.max) * r2Mult(att, def));
       else if (r2Blocked(att, def)) put('R2', R.R2.deepBlockPerStep * att.instr.directness * -def.instr.line);
       if (r13Active(att)) {

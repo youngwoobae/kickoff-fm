@@ -340,6 +340,18 @@ export function styleMatrixMatch(seed: number, cap: TacticCap, p: StyleId, s: St
   return { r, xIsHome };
 }
 
+/** 튜닝·검증용: FORMATION_PARITY 와 같은 시드·스쿼드로 (fa vs fb) i 번째 경기 */
+export function formationParityMatch(seed: number, cap: TacticCap, fa: FormationId, fb: FormationId, i: number, extra: Partial<EngineConfig> = {}): { r: MatchResult; xIsHome: boolean } {
+  const k = `${seed}|${cap}`;
+  let R = matrixRunners.get(k);
+  if (!R) {
+    R = { factory: new TeamFactory(seed), cap, seed };
+    matrixRunners.set(k, R);
+  }
+  const { r, xIsHome } = play(R, `FP-${fa}-${fb}`, i, { ovr: BASE_OVR, pkg: formationPkg(fa) }, { ovr: BASE_OVR, pkg: formationPkg(fb) }, { neutralVenue: true, ...extra });
+  return { r, xIsHome };
+}
+
 // ───────────────────────────────────────────── 경기 통계 도우미
 
 const isGoalEvt = (e: MatchResult['events'][number]): e is Extract<MatchResult['events'][number], { type: 'GOAL' }> => e.type === 'GOAL';
