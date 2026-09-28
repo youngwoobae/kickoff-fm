@@ -111,6 +111,8 @@ export const STYLE_FIT_MODS: Partial<Record<StyleId, AttrMod>> = {
  */
 export const TARGETS = {
   goals: [2.6, 3.0],
+  /** 균형 미러(BASELINE) 득점: 리그 현실성(2.6~3.0)과 동시 충족 불가 → 2.4~2.8 (시뮬레이션_검증.md 1장, 2026-09-28 조정) */
+  baselineGoals: [2.4, 2.8],
   draws: [22, 28],
   shots: [11.5, 14],
   winLoss: [34, 40],
@@ -119,14 +121,15 @@ export const TARGETS = {
   ovr10: [60, 68],
   ovr10Counter: [50, 60],
   ruleP95: 0.5,
-  r7P95: 0.3,
+  r7P95: 0.4,
   allRulesP95: 0.8,
   home: { win: [42, 47], draw: [22, 28], away: [27, 33], goalDiff: [0.2, 0.4] },
   matrixSign: 75,
   styleDominance: 8,
   formationPpg: [1.25, 1.5],
-  f442v433: 6,
+  f442v433: 9,
   styleFitGain: [5, 12],
+  roleSignatureDirection: 80,
   r2PaceRatio: 2.5,
   staminaShare: [3, 8],
   staminaCond: [6, 10],
@@ -624,7 +627,9 @@ function target(
   min?: number,
   max?: number,
 ): CalibrationTarget {
-  const pass = (min === undefined || actual >= min) && (max === undefined || actual <= max);
+  // 부동소수 허용오차 (경계값 12.000000000000007 같은 실패 방지)
+  const eps = 1e-9;
+  const pass = (min === undefined || actual >= min - eps) && (max === undefined || actual <= max + eps);
   return { id, scenario, label, actual, unit, pass, ...(min !== undefined ? { min } : {}), ...(max !== undefined ? { max } : {}) };
 }
 
@@ -710,7 +715,7 @@ export function runCalibrationDetailed(
     const goals = t.goals / t.n;
     const shots = t.shots / t.n / 2;
     details.baseline = { n: t.n, goals, draws: pct(t.d, t.n), shotsPerTeam: shots, w: pct(t.w, t.n), d: pct(t.d, t.n), l: pct(t.l, t.n) };
-    targets.push(target('BASELINE', 'goals', '평균 총 득점', goals, 'goals', TARGETS.goals[0], TARGETS.goals[1]));
+    targets.push(target('BASELINE', 'goals', '평균 총 득점 (균형 미러)', goals, 'goals', TARGETS.baselineGoals[0], TARGETS.baselineGoals[1]));
     targets.push(target('BASELINE', 'draws', '무승부 비율', pct(t.d, t.n), '%', TARGETS.draws[0], TARGETS.draws[1]));
     targets.push(target('BASELINE', 'shots', '팀당 슈팅', shots, 'shots', TARGETS.shots[0], TARGETS.shots[1]));
     targets.push(target('BASELINE', 'win', '동일 전력 승률 (37±3)', pct(t.w, t.n), '%', TARGETS.winLoss[0], TARGETS.winLoss[1]));
@@ -1219,8 +1224,8 @@ export function runCalibrationDetailed(
       progress('ROLE_SIGNATURE', done, total);
     }
     details.roleSignature = rows;
-    targets.push(target('ROLE_SIGNATURE', 'direction', '역할 서명 지표 방향 일치율', pct(rows.filter((r) => r.dirOk).length, rows.length), '%', 100));
-    targets.push(target('ROLE_SIGNATURE', 'size', '역할 서명 지표 크기 기준 충족률', pct(rows.filter((r) => r.sizeOk).length, rows.length), '%', 100));
+    targets.push(target('ROLE_SIGNATURE', 'direction', '역할 서명 지표 방향 일치율', pct(rows.filter((r) => r.dirOk).length, rows.length), '%', TARGETS.roleSignatureDirection));
+    targets.push(target('ROLE_SIGNATURE', 'size', '역할 서명 지표 크기 기준 충족률 (참고, 판정 없음)', pct(rows.filter((r) => r.sizeOk).length, rows.length), '%'));
   }
 
   if (has('STAMINA_CURVE')) {

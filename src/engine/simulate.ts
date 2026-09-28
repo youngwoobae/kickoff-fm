@@ -675,9 +675,9 @@ class Match {
   }
 
   /** DP5. 반환: 골 여부 */
-  shoot(att: Team, def: Team, chance: ChanceType, assisted: 'CRE' | 'PRG' | null): boolean {
+  shoot(att: Team, def: Team, chance: ChanceType, assisted: 'CRE' | 'PRG' | null, side?: Lane): boolean {
     const shooter = this.pickShooter(att, chance);
-    const r = this.decide('DP5', att, def, { chance, ...(shooter ? { shooter } : {}) });
+    const r = this.decide('DP5', att, def, { chance, ...(shooter ? { shooter } : {}), ...(side ? { side } : {}) });
     const sid = shooter?.player.id ?? att.id;
     att.stats.shots += 1;
     att.stats.xg += r.p;
@@ -778,7 +778,7 @@ class Match {
       this.seqAdv += 1;
       const inBox = chance === 'CROSS' || chance === 'THROUGH' || chance === 'CUTBACK' || chance === 'SOLO';
       const shotType: ChanceType = inBox && this.rng() < PK_SHARE_IN_BOX ? 'PK' : chance;
-      this.shoot(att, def, shotType, shotType === 'SOLO' || shotType === 'PK' ? null : 'CRE');
+      this.shoot(att, def, shotType, shotType === 'SOLO' || shotType === 'PK' ? null : 'CRE', side);
       return { next: def, zone: 0 };
     }
     if (chance === 'THROUGH' && r4.raw.R6 !== undefined && r4.raw.R6 !== 0) {

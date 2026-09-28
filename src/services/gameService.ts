@@ -368,7 +368,7 @@ class LocalGameService implements GameService {
     const seed = opts.seed ?? hashString(`${this.clock.nowIso()}|${Date.now()}`);
     const s0 = createInitialState(
       seed,
-      { clubName: opts.clubName ?? '킥오프 FC', tier: opts.tier ?? 'T3', devMode: opts.devMode ?? true, tacCap: opts.tacCap ?? 0.5 },
+      { clubName: opts.clubName ?? '킥오프 FC', tier: opts.tier ?? 'T3', devMode: opts.devMode ?? true, tacCap: opts.tacCap ?? (EngineConstants.DEFAULT_TAC_CAP as TacticCap) },
       this.clock.nowIso(),
     );
     const s = { ...s0, actionLog: [this.entry(s0, 'SEASON_STARTED', { season: 1, seed: s0.gameSeed }, OWNER_ID)] };

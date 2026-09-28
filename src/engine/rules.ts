@@ -187,7 +187,11 @@ function r12Pair(att: TeamView, def: TeamView, side: Exclude<Lane, 'C'>): { w: O
   return { w, d };
 }
 function r12M1(p: { w: Occupant; d: Occupant }): number {
-  return clamp((rawAttr(p.w, 'pace') - rawAttr(p.d, 'pace')) / 4 + 0.5, 0, 1);
+  return clamp((rawAttr(p.w, 'pace') - rawAttr(p.d, 'pace')) / 4 + 0.5, 0, 1) * r12Wb(p);
+}
+/** 3백 윙백 뒤 공간은 공격형 풀백보다 넓다 (3백 시스템의 고전적 약점) */
+function r12Wb(p: { d: Occupant }): number {
+  return p.d.role === 'WB_WINGBACK' ? RULES.R12.wbMult : 1;
 }
 function r12D1(p: { w: Occupant; d: Occupant }): number {
   return (rawAttr(p.w, 'dribbling') + rawAttr(p.w, 'pace')) / 2 - (rawAttr(p.d, 'tackling') + rawAttr(p.d, 'pace')) / 2;
@@ -260,7 +264,8 @@ export function evalBinaryRules(dp: BinaryDP, actor: TeamView, opp: TeamView, ct
       if (H > 0) put('R11', R.R11.dp2 * Math.tanh(H) * r11Cf(actor));
       if (r13Active(actor)) {
         const sb = (t: TeamView) => t.units.MID + R.R13.sbPerRole * t.shape.sbRoles;
-        put('R13', R.R13.dp2 * tanhS(sb(actor) - sb(opp), R.R13.scale) * r13Three(actor, opp));
+        // 세컨드볼 우위만 이득 (열세면 0: 롱볼 자체의 손해는 DP1 공중전 항이 맡는다)
+        put('R13', R.R13.dp2 * Math.max(0, tanhS(sb(actor) - sb(opp), R.R13.scale)) * r13Three(actor, opp));
       }
       break;
     }
@@ -287,7 +292,8 @@ export function evalBinaryRules(dp: BinaryDP, actor: TeamView, opp: TeamView, ct
       }
       if ((c === 'SOLO' || c === 'CROSS') && side !== 'C') {
         const p = r12Pair(att, def, side);
-        if (p) put('R12', R.R12.dp4 * tanhS(r12D1(p), R.R12.d1Scale));
+        // 윙백 뒤 공간 자체가 이점(d1Offset), 선수 매치업이 크기를 조정
+        if (p) put('R12', R.R12.dp4 * tanhS(r12D1(p) + R.R12.d1Offset, R.R12.d1Scale) * r12Wb(p));
       }
       break;
     }
@@ -298,6 +304,23 @@ export function evalBinaryRules(dp: BinaryDP, actor: TeamView, opp: TeamView, ct
         put('R6', R.R6.dp5Bonus);
       }
       if (ctx.chance === 'LONG' && r3Active(att, def)) put('R3', R.R3.dp5Long * clamp((att.shape.longShot - 13) / 5, 0, 1));
+      // 0.4.0 보정: 측면 과부하·1:1 은 크로스·컷백·돌파 찬스의 "질"(슈팅 전환)에도 작용한다
+      const side5 = ctx.side ?? 'C';
+      if (ctx.chance === 'CROSS' || ctx.chance === 'CUTBACK') put('R4', r4Value(att, def, side5, R.R4.dp5));
+      if ((ctx.chance === 'CROSS' || ctx.chance === 'SOLO') && side5 !== 'C') {
+        const p = r12Pair(att, def, side5);
+        if (p) put('R12', R.R12.dp5 * tanhS(r12D1(p) + R.R12.d1Offset, R.R12.d1Scale) * r12Wb(p));
+      }
+      // 0.4.0 보정: 상성 우위로 만든 찬스는 질도 좋다 (슈팅 전환 가산, 같은 발동 조건)
+      const c5 = ctx.chance;
+      if ((c5 === 'THROUGH' || c5 === 'COUNTER') && r2Active(att, def)) put('R2', R.R2.dp5 * r2Mult(att, def));
+      if (c5 !== 'LONG' && c5 !== 'CROSS' && c5 !== 'CORNER' && c5 !== 'FK' && c5 !== 'PK' && r3Active(att, def)) put('R3', -R.R3.dp5Box * r3Comp(att, def));
+      if ((c5 === 'THROUGH' || c5 === 'CUTBACK') && r11H(att, def) > 0) put('R11', R.R11.dp5 * Math.tanh(r11H(att, def)) * r11Cf(att));
+      if ((c5 === 'CROSS' || c5 === 'CORNER') && r13Active(att)) put('R13', R.R13.dp5 * tanhS(att.shape.targetAer! - def.units.AER_D + R.R13.aerOffset, R.R13.scale) * r13Three(att, def));
+      if (c5 === 'COUNTER') {
+        if (r5Active(def, att)) put('R5', R.R5.dp5 * def.shape.rd);
+        if (att.instr.press >= 1 && def.instr.directness <= 0) put('R1', R.R1.dp5Counter);
+      }
       put('R9', r9Value(att, def, null, ctx.shooter?.player.id));
       break;
     }
@@ -305,7 +328,7 @@ export function evalBinaryRules(dp: BinaryDP, actor: TeamView, opp: TeamView, ct
       const winner = actor;
       const loser = opp;
       // 역압박 전환은 짧게 빌드업하다 잃은 공에만 (롱볼 팀은 압박을 건너뛴다)
-      if (winner.instr.press >= 1 && loser.instr.directness <= 0) put('R1', R.R1.dp6CounterBonus * Math.min(1, winner.units.PRS / FIT_REQUIREMENTS.pressPlus2PRS) + R.R1.pressingFwdDp6 * winner.shape.pressingFwds);
+      if (winner.instr.press >= 1 && loser.instr.directness <= 0) put('R1', (R.R1.dp6CounterBonus * winner.instr.press) / 2 * Math.min(1, winner.units.PRS / FIT_REQUIREMENTS.pressPlus2PRS) + R.R1.pressingFwdDp6 * winner.shape.pressingFwds);
       if (r5Active(loser, winner)) put('R5', R.R5.dp6 * loser.shape.rd);
       break;
     }

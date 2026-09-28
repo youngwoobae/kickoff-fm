@@ -9,7 +9,8 @@ export const ENGINE_VERSION = '0.4.0';
 
 /** 8.4 */
 export const K = 0.017;
-export const DEFAULT_TAC_CAP = 0.5;
+/** 0.4.0: 전술 영향 15~30%p 목표로 0.5 → 0.7 (cap 0.5·0.6·0.7 A/B: docs/시뮬레이션_검증.md) */
+export const DEFAULT_TAC_CAP = 0.7;
 export const P_MIN = 0.05;
 export const P_MAX = 0.95;
 export const HOME_MOD = 0.11;
@@ -35,7 +36,7 @@ export const FAM_COEF_MIN = 0.5;
 export const SEGMENTS = 18;
 export const SEGMENT_MINUTES = 5;
 /** 0.4.0: 추가시간(+8.9%)과 전술 규칙 증가분을 흡수해 100 → 73 */
-export const BASE_SEQUENCES = 73;
+export const BASE_SEQUENCES = 64;
 /**
  * 0.4.0 추가시간: 세그먼트 9(40-45)·18(85-90)의 시퀀스 배수 (1 + 추가 분/5). 이벤트는 "45+2", "90+4" 로 표기
  */
@@ -158,20 +159,20 @@ export const SUB_WINDOWS = 3;
 
 /** 8.6 규칙 수치 (0.4.0, 실축구_전술설계 2.2) */
 export const RULES = {
-  R1: { perPressStep: -0.35, max: -1.0, dp8PerPress: -0.12, dp6CounterBonus: 1.02, resistPer: 0.25, resistMax: 3, threeBackMult: 0.7, pressingFwdPrs: 3, pressingFwdDp6: 0.1 },
-  R2: { perDirectStep: 0.72, max: 1.0, dp3Through: 0.84, paceScale: 4, paceMin: 0.3, paceMax: 1.6, sweeperFast: 0.5, sweeperSlow: 0.75, sweeperFastPace: 10, threeBackMult: 0.566, deepBlockPerStep: -0.04 },
-  R3: { dp4: -4.98, compBase: 0.6, compScale: 25, compMin: 0.4, compMax: 1.2, dp3LongCross: 4.894, crossAer: 1.246, aerScale: 10, dp5Long: 0.3, dp2PerDeepLine: 0.2 },
-  R4: { dp3: 0.919, dp4: 5.258, negMult: 0.5, threshold: 0.2, widthStep: 0.4, narrowStep: 0.25 },
-  R5: { dp6: 2.376, dp7: 5.386, paceScale: 2.5, dp4PerMentality: 0.18, anchor: 0.4, ballWinner: 0.2, inverted: 0.15, rdMin: 0.4 },
-  R6: { dp4Through: -5.28, dp5Bonus: 0.4, dp5Pace: 15, deepMult: 0.6, slowCbMult: 0.5, cbPaceOk: 13 },
-  R7: { dp2: 0.72, dp8: 0.09, scale: 1.137, coverShadow: 0.433, coverShadowPress: 0.7, narrowWideMid: 0.5, compression: 0.431, fitBU: 65 },
+  R1: { perPressStep: -0.044, max: -1.0, dp8PerPress: -0.235, dp6CounterBonus: 0.771, resistPer: 0.137, resistMax: 3, threeBackMult: 0.7, pressingFwdPrs: 3, pressingFwdDp6: 0.1, dp5Counter: 0.074 },
+  R2: { perDirectStep: 2.044, max: 1.0, dp3Through: 0.481, paceScale: 4, paceMin: 0.3, paceMax: 1.6, sweeperFast: 0.5, sweeperSlow: 0.75, sweeperFastPace: 10, threeBackMult: 0.894, deepBlockPerStep: -0.04, dp5: 0.256 },
+  R3: { dp4: -4.209, compBase: 0.6, compScale: 25, compMin: 0.4, compMax: 1.2, dp3LongCross: 3.262, crossAer: 5.547, aerScale: 10, dp5Long: 0.3, dp2PerDeepLine: 0.3, dp5Box: 1.142 },
+  R4: { dp3: 0.1, dp4: 2.178, negMult: 0.11, threshold: 0.2, widthStep: 0.4, narrowStep: 0.25, dp5: 0.835 },
+  R5: { dp6: 1.434, dp7: 1.833, paceScale: 2.5, dp4PerMentality: 0.176, anchor: 0.4, ballWinner: 0.2, inverted: 0.15, rdMin: 0.4, dp5: 0.163 },
+  R6: { dp4Through: -1.926, dp5Bonus: 0.4, dp5Pace: 15, deepMult: 0.6, slowCbMult: 0.5, cbPaceOk: 13 },
+  R7: { dp2: 0.346, dp8: 0.09, scale: 1.137, coverShadow: 0.364, coverShadowPress: 0.7, narrowWideMid: 0.5, compression: 0.337, fitBU: 65 },
   R9: { perMarkFit: -0.6, minUnitWeight: 0.15, markerOtherUnitMult: 0.8 },
   R10: { dp4: 0.7, tanhScale: 10 },
-  R11: { dp2: 0.492, dp3: 0.2, dp4: 0.703, offset: 1.0, fiveBack: 0.692, threeBack: 2.683, cfScale: 60, cfMin: 0.5 },
-  R12: { dp7: 3.485, dp4: 1.02, d1Scale: 3, wbDefHigh: 0.4 },
-  R13: { dp1: 1.224, dp2: 1.025, scale: 10, vsPress: 1.25, sbPerRole: 5, threeBackMult: 0.676, aerOffset: 8 },
+  R11: { dp2: 0.096, dp3: 0.2, dp4: 0.57, offset: 1.694, fiveBack: 1.5, threeBack: 0.376, cfScale: 60, cfMin: 0.5, dp5: 0.741, doublePivot: 1.0 },
+  R12: { dp7: 1.265, dp4: 0.392, d1Scale: 3, wbDefHigh: 0.4, d1Offset: 1.86, dp5: 0.273, wbMult: 2 },
+  R13: { dp1: 0.25, dp2: 0.387, scale: 10, vsPress: 2.5, sbPerRole: 5, threeBackMult: 0.676, aerOffset: 0.791, dp5: 0.29 },
   TEMPO: { dp8PerStep: 0.1 },
-  LINE_FIT: { penalty: -2.292, paceDRequired: 60, cbPaceRequired: 11 },
+  LINE_FIT: { penalty: -1.586, paceDRequired: 60, cbPaceRequired: 11 },
 } as const;
 
 /** 8.3-4 스쿼드-전술 적합도 요구치 (StyleDef.requirements 와 같은 값) */
@@ -190,7 +191,7 @@ export const RULES_BY_DP: Record<DP, RuleId[]> = {
   DP2: ['R2', 'R3', 'R7', 'R9', 'R11', 'R13'],
   DP3: ['R2', 'R3', 'R4', 'R11'],
   DP4: ['R3', 'R4', 'R5', 'R6', 'R9', 'R10', 'R11', 'R12', 'LINE_FIT'],
-  DP5: ['R3', 'R6', 'R9'],
+  DP5: ['R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R9', 'R11', 'R12', 'R13'],
   DP6: ['R1', 'R5'],
   DP7: ['R5', 'R12', 'LINE_FIT'],
   DP8: ['R1', 'R7', 'TEMPO'],

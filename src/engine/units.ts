@@ -23,6 +23,7 @@ import {
   GK_UNIT_MIX,
   PIVOT_ROLES,
   PRESS_RESIST_ROLES,
+  WIDE_ATTACK_ROLES,
   ROLE_SHAPE,
   ROLE_UNIT_WEIGHTS,
   SET_PIECE,
@@ -230,7 +231,7 @@ export interface TeamShape {
   stCount: number;
   /** 피벗 수: DM 슬롯 선수 + 피벗 역할(앵커·레지스타·볼 위닝). 1 이면 2톱 커버 섀도 대상 */
   pivots: number;
-  /** 전방 압박 인원: ST + 프레싱 포워드 */
+  /** 전방 압박 인원: 최전방(ST + 윙어·인사이드 포워드·인버티드 윙어) 수 (3톱이면 3) */
   frontPress: number;
   pressingFwds: number;
   /** 타깃맨 개인 공중 (0~100), 없으면 null */
@@ -266,6 +267,7 @@ export function computeShape(occ: readonly (Occupant | null)[], instr: TeamInstr
   let stCount = 0;
   let pivots = 0;
   let pressingFwds = 0;
+  let frontLine = 0;
   let targetAer: number | null = null;
   let sbRoles = 0;
   let rd = 1;
@@ -307,8 +309,9 @@ export function computeShape(occ: readonly (Occupant | null)[], instr: TeamInstr
     if (o.position === 'ST' || o.position === 'W' || (o.position === 'AM' && o.lane !== 'C')) frontBest = Math.max(frontBest, pace);
     if (o.position === 'DM' || PIVOT_ROLES.includes(o.role)) pivots += 1;
     if (o.role === 'ST_PRESSING_FORWARD') pressingFwds += 1;
+    if (o.position === 'ST' || WIDE_ATTACK_ROLES.includes(o.role)) frontLine += 1;
     if (o.role === 'ST_TARGET') targetAer = Math.max(targetAer ?? 0, 0.7 * eff(o, 'physical') + 0.3 * eff(o, 'positioning'));
-    if (o.role === 'DM_BALL_WINNER' || o.role === 'CM_BOX_TO_BOX') sbRoles += 1;
+    if (o.role === 'DM_BALL_WINNER' || o.role === 'CM_BOX_TO_BOX' || o.role === 'DM_ANCHOR') sbRoles += 1;
     if (o.role === 'DM_ANCHOR') rd -= 0.4;
     if (o.role === 'DM_BALL_WINNER') rd -= 0.2;
     if (o.role === 'FB_INVERTED') rd -= 0.15;
@@ -326,6 +329,8 @@ export function computeShape(occ: readonly (Occupant | null)[], instr: TeamInstr
   if (runners === 0) pRun = frontBest * 0.9;
   const pCbMin = cbPaces.length > 0 ? Math.min(...cbPaces) : 10;
   const pCb = coverPace !== null ? 0.3 * pCbMin + 0.7 * coverPace : pCbMin;
+  // 더블 피벗(DM 슬롯 2명): 하프스페이스 커버 (설계 1.2 균형 "더블 피벗이 하프스페이스를 막는다")
+  if (occ.filter((o) => o?.position === 'DM').length >= 2) hsC += RULES.R11.doublePivot;
   if (formation.backLine === 5) hsC += RULES.R11.fiveBack;
   else if (formation.backLine === 3) hsC += RULES.R11.threeBack;
   // 공격 폭 단계마다 wA ±0.25, 좁은 수비(폭 ≤ −1)는 wD −0.25 × |폭|
@@ -356,7 +361,7 @@ export function computeShape(occ: readonly (Occupant | null)[], instr: TeamInstr
     resist: Math.min(resist, RULES.R1.resistMax),
     stCount,
     pivots,
-    frontPress: stCount + pressingFwds,
+    frontPress: frontLine,
     pressingFwds,
     targetAer,
     sbRoles,

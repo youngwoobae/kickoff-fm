@@ -14,7 +14,7 @@ import type { ScenarioId, StyleId, TacticCap } from '../src/types';
 const { values } = parseArgs({
   options: {
     n: { type: 'string', default: '1000' },
-    cap: { type: 'string', default: '0.5' },
+    cap: { type: 'string', default: '0.7' },
     seed: { type: 'string', default: '20260926' },
     scenario: { type: 'string' },
     json: { type: 'string' },
