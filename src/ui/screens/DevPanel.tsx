@@ -8,8 +8,14 @@ import { useAction, useGame, useQuery, useServiceCtx } from '../service/ServiceC
 import { reloadInFakeMode, reloadInRealMode } from '../service/serviceHost';
 import { lastUserFixture } from './HomeScreen';
 
-const SCENARIOS: ScenarioId[] = ['BASELINE', 'COUNTER_SPREAD', 'OVR_DIFF_10', 'OVR_DIFF_10_COUNTER', 'OVR_DIFF_25', 'TEMPO_VARIANCE', 'RULE_ISOLATION'];
-const RULE_IDS: RuleId[] = ['R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R9', 'R10', 'TEMPO', 'LINE_FIT'];
+const SCENARIOS: ScenarioId[] = [
+  'BASELINE', 'COUNTER_SPREAD', 'OVR_DIFF_10', 'OVR_DIFF_10_COUNTER', 'OVR_DIFF_25', 'TEMPO_VARIANCE', 'RULE_ISOLATION',
+  'REAL_HOME', 'LEAGUE_REALISM', 'STYLE_MATRIX', 'FORMATION_PARITY', 'STYLE_FIT', 'ROLE_SIGNATURE', 'STAMINA_CURVE',
+];
+const RULE_IDS: RuleId[] = ['R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R9', 'R10', 'R11', 'R12', 'R13', 'TEMPO', 'LINE_FIT'];
+const CAPS: TacticCap[] = [0.25, 0.35, 0.5, 0.6, 0.7];
+/** 계약 밖: 리포트에 9×9 셀이 실려 오면 행렬로 그린다 (1.2 CalibrationReport 에는 없음) */
+type MatrixCell = { us: string; them: string; winPct: number; lossPct: number };
 
 export function DevPanel() {
   const snap = useGame();
@@ -112,11 +118,7 @@ export function DevPanel() {
           label="전술 상한"
           value={String(snap.settings.tacCap)}
           onChange={(v) => run((s) => s.setTacCap(Number(v) as TacticCap), `상한 ${v} 적용 (이후 경기부터)`)}
-          options={[
-            { value: '0.25', label: '0.25' },
-            { value: '0.35', label: '0.35' },
-            { value: '0.5', label: '0.50' },
-          ]}
+          options={CAPS.map((c) => ({ value: String(c), label: c.toFixed(2) }))}
         />
       </Card>
 
@@ -215,9 +217,50 @@ function Calibration({ reportFatal }: { reportFatal: (e: unknown) => void }) {
               ))}
             </tbody>
           </table>
+          <StyleMatrix cells={(report as CalibrationReport & { details?: { counterMatrix?: MatrixCell[] } }).details?.counterMatrix} />
         </>
       )}
     </Card>
+  );
+}
+
+function StyleMatrix({ cells }: { cells: MatrixCell[] | undefined }) {
+  const labels = useQuery((s) => Object.fromEntries((s.getCatalog().styles ?? []).map((x) => [x.id, x.label]))).data ?? {};
+  if (!cells?.length) return <p className="small muted">9×9 스타일 행렬은 결과에 셀 데이터가 있을 때만 보여요 (STYLE_MATRIX 요약은 위 표)</p>;
+  const ids = [...new Set(cells.map((c) => c.us))];
+  const at = (a: string, b: string) => cells.find((c) => c.us === a && c.them === b);
+  return (
+    <div className="matrix-wrap">
+      <p className="small">9×9 스타일 행렬 · 칸 = 행 스타일의 (승 − 패) %p</p>
+      <table className="table matrix">
+        <thead>
+          <tr>
+            <th className="t-left">우리 \ 상대</th>
+            {ids.map((b) => (
+              <th key={b} title={labels[b] ?? b}>
+                {(labels[b] ?? b).slice(0, 3)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {ids.map((a) => (
+            <tr key={a}>
+              <th className="t-left">{labels[a] ?? a}</th>
+              {ids.map((b) => {
+                const c = at(a, b);
+                const v = c ? Math.round(c.winPct - c.lossPct) : undefined;
+                return (
+                  <td key={b} className={v === undefined || a === b ? '' : v >= 6 ? 'm-pos' : v <= -6 ? 'm-neg' : ''}>
+                    {v === undefined || a === b ? '·' : v > 0 ? `+${v}` : v}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -238,7 +281,7 @@ function Resimulate() {
   const rows = (r: MatchReport | null) => Object.entries(r?.debug?.ruleXg ?? {}) as [RuleId, number][];
   return (
     <Card title={`시드 고정 재시뮬 · Day ${last.day}`}>
-      <Segmented<string> label="재시뮬 상한" size="sm" value={cap} onChange={setCap} options={['0.25', '0.35', '0.5'].map((v) => ({ value: v, label: v }))} />
+      <Segmented<string> label="재시뮬 상한" size="sm" value={cap} onChange={setCap} options={CAPS.map((c) => ({ value: String(c), label: String(c) }))} />
       <Toggle label="전술 효과 켜기" checked={tacticsOn} onChange={setTacticsOn} />
       <div className="chips">
         {RULE_IDS.map((r) => (

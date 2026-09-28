@@ -1,11 +1,29 @@
 /** M03 텍스트 중계(즉시 재생·속도) · M05 경기 리포트 (소유: B) */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { MatchReplay, MatchReport, TeamInstructions } from '../../types';
+import type { CommentaryLine, MatchReplay, MatchReport, TeamInstructions } from '../../types';
 import { Badge, Card, Empty, Segmented, Stat } from '../components/kit';
-import { INSTR_LABEL, pct, signed, stepText } from '../format';
+import { INSTR_LABEL, minuteText, pct, signed, stepText } from '../format';
 import { useNav } from '../app/nav';
 import { ProposeSheet } from '../plan/PlanActions';
 import { useAction, useGame, useIsOwner, useQuery, useService } from '../service/ServiceContext';
+
+/**
+ * 계약 1.2 의 MatchReport·CommentaryLine 에는 새 통계(유효슈팅·코너·경고·시간 점유)와 addedMinute 가 없다.
+ * 서비스가 이 선택 필드를 채우면 표시하고, 없으면 "–" 로 둔다 (fake 서비스는 채운다).
+ */
+type SummaryExt = MatchReport['summary'] & {
+  shotsOnTargetFor?: number;
+  shotsOnTargetAgainst?: number;
+  cornersFor?: number;
+  cornersAgainst?: number;
+  yellowCardsFor?: number;
+  yellowCardsAgainst?: number;
+  possessionTime?: number;
+};
+type Added = { addedMinute?: number };
+const minOf = (l: { minute: number } & Added) => minuteText(l.minute, l.addedMinute);
+const isYellow = (l: CommentaryLine) => l.kind === 'CARD' && l.text.startsWith('경고');
+const pair = (a?: number, b?: number) => (a === undefined || b === undefined ? '–' : `${a} : ${b}`);
 
 export function MatchCenterScreen() {
   const snap = useGame();
@@ -110,7 +128,7 @@ function ReplayView({ matchId }: { matchId: string }) {
           </span>
           <span className="sb-team">{away?.shortName}</span>
         </div>
-        <div className="sb-min">{done ? '경기 종료' : `${minute}′`}</div>
+        <div className="sb-min">{done ? '경기 종료' : cur ? minOf(cur) : '0′'}</div>
         <div className="zone-bar" aria-label={`구역 점유 Z0 ${pct(zone[0])}, Z1 ${pct(zone[1])}, Z2 ${pct(zone[2])}`}>
           <span style={{ flex: zone[0] }}>Z0 수비</span>
           <span style={{ flex: zone[1] }}>Z1 중원</span>
@@ -127,7 +145,7 @@ function ReplayView({ matchId }: { matchId: string }) {
       </Card>
       {lastTactic && (
         <div className="tactic-banner" role="status">
-          📋 {lastTactic.minute}′ {lastTactic.text}
+          📋 {minOf(lastTactic)} {lastTactic.text}
         </div>
       )}
       <div className="replay-controls">
@@ -153,8 +171,11 @@ function ReplayView({ matchId }: { matchId: string }) {
       <ol className="feed" aria-label="텍스트 중계">
         {[...visible].reverse().map((l, i) => (
           <li key={`${l.minute}-${i}`} className={`feed-line kind-${l.kind.toLowerCase()}`}>
-            <span className="feed-min">{l.minute}′</span>
-            <span>{l.text}</span>
+            <span className="feed-min">{minOf(l)}</span>
+            <span>
+              {isYellow(l) ? '🟨 ' : ''}
+              {l.text}
+            </span>
           </li>
         ))}
       </ol>
@@ -177,6 +198,9 @@ function ReportView({ matchId }: { matchId: string }) {
   const [propose, setPropose] = useState<Partial<TeamInstructions> | null>(null);
   const nextSlot = useQuery((s) => s.getPlanState()).data?.confirmed?.plan.startSlot ?? 'A';
   const rules = useRuleLabels();
+  const ruleWhy = useQuery((s) => Object.fromEntries(s.getCatalog().rules.map((x) => [x.id, x.why]))).data ?? {};
+  // 경고 수 폴백: 계약에 통계가 없으면 중계의 경고 줄을 센다
+  const replay = useQuery((s) => s.getMatchReplay(matchId), [matchId]).data;
 
   useEffect(() => {
     try {
@@ -189,11 +213,15 @@ function ReportView({ matchId }: { matchId: string }) {
   if (q.error) return <Empty>{q.error.message}</Empty>;
   if (!r) return null;
   const opp = snap.clubs[r.opponentId];
-  const s = r.summary;
+  const s: SummaryExt = r.summary;
+  const yellows = (clubId: string) => replay?.lines.filter((l) => isYellow(l) && l.clubId === clubId).length;
+  const yFor = s.yellowCardsFor ?? yellows(r.clubId);
+  const yAgainst = s.yellowCardsAgainst ?? yellows(r.opponentId);
   const res = s.goalsFor > s.goalsAgainst ? '승' : s.goalsFor === s.goalsAgainst ? '무' : '패';
   const bars: [string, number][] = [
     ['전력', r.factorBars.strength],
     ['준비', r.factorBars.prep],
+    ...(r.factorBars.state !== undefined ? ([['경기 흐름', r.factorBars.state]] as [string, number][]) : []),
     ['전술', r.factorBars.tactics],
     ['운', r.factorBars.luck],
   ];
@@ -223,8 +251,11 @@ function ReportView({ matchId }: { matchId: string }) {
         </div>
         <div className="stat-grid">
           <Stat label="xG" value={`${s.xgFor.toFixed(2)} : ${s.xgAgainst.toFixed(2)}`} />
-          <Stat label="점유" value={pct(s.possession)} />
+          <Stat label="점유" value={pct(s.possessionTime ?? s.possession)} sub={s.possessionTime !== undefined ? '시간 기준' : undefined} />
           <Stat label="슈팅" value={`${s.shotsFor} : ${s.shotsAgainst}`} />
+          <Stat label="유효슈팅" value={pair(s.shotsOnTargetFor, s.shotsOnTargetAgainst)} />
+          <Stat label="코너" value={pair(s.cornersFor, s.cornersAgainst)} />
+          <Stat label="🟨 경고" value={pair(yFor, yAgainst)} />
           <Stat label="시즌 승점" value={`${r.seasonPoints.actual}`} sub={`기대 ${r.seasonPoints.expected.toFixed(1)}`} />
         </div>
         <p className={`luck luck-${r.luck.level.toLowerCase()}`}>
@@ -246,6 +277,7 @@ function ReportView({ matchId }: { matchId: string }) {
                   <span className={k.xg >= 0 ? 'pos' : 'neg'}>{signed(k.xg)} xG</span>
                 </div>
                 <div>{k.text}</div>
+                {ruleWhy[k.ruleId] && <div className="small">왜? {ruleWhy[k.ruleId]}</div>}
                 <div className="small muted">
                   {k.count}회 (리그 평균 {k.leagueAvgCount.toFixed(1)})
                 </div>
@@ -291,8 +323,10 @@ function ReportView({ matchId }: { matchId: string }) {
           <ol className="timeline">
             {r.timeline.map((t, i) => (
               <li key={i} className={`tl tl-${t.kind.toLowerCase()} ${t.clubId === snap.userClubId ? 'is-us' : 'is-them'}`}>
-                <span className="feed-min">{t.minute}′</span>
-                <span>{TL_ICON[t.kind]} {t.text}</span>
+                <span className="feed-min">{minOf(t)}</span>
+                <span>
+                  {TL_ICON[t.kind] ?? ''} {t.text}
+                </span>
               </li>
             ))}
           </ol>
@@ -336,7 +370,7 @@ function ReportView({ matchId }: { matchId: string }) {
   );
 }
 
-const TL_ICON: Record<string, string> = { GOAL: '⚽', TRIGGER: '📋', SUB: '🔁', CONDITION: '🥵', INJURY: '🩹', RED_CARD: '🟥' };
+const TL_ICON: Record<string, string> = { GOAL: '⚽', TRIGGER: '📋', SUB: '🔁', CONDITION: '🥵', INJURY: '🩹', RED_CARD: '🟥', YELLOW_CARD: '🟨' };
 
 function useRuleLabels(): Record<string, string> {
   const catalog = useQuery((s) => s.getCatalog()).data;

@@ -1,7 +1,7 @@
 /** 공용 UI 프리미티브 (소유: B). 외부 UI 라이브러리 없이 CSS 변수 기반. */
 import { useEffect, useId, useRef, type ReactNode } from 'react';
 import type { FitLevel, Step } from '../../types';
-import { FIT_LABEL, FIT_SYMBOL, conditionTone, stepText } from '../format';
+import { FIT_LABEL, FIT_SYMBOL, conditionTone, starsText, stepText } from '../format';
 
 export function Card({ title, extra, children, className = '' }: { title?: ReactNode; extra?: ReactNode; children: ReactNode; className?: string }) {
   return (
@@ -204,5 +204,14 @@ export function Meter({ value, label, tone = 'accent' }: { value: number; label:
     <div className="meter" role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(v * 100)}>
       <span className={`meter-fill tone-${tone}`} style={{ width: `${v * 100}%` }} />
     </div>
+  );
+}
+
+/** 역할 적합 ★ 5단계 (텍스트 병기: aria-label) */
+export function Stars({ n }: { n: number }) {
+  return (
+    <span className="stars" role="img" aria-label={`역할 적합 ${n}/5`}>
+      {starsText(n)}
+    </span>
   );
 }

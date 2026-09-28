@@ -1,8 +1,8 @@
 /** T01 라인업 편집: 탭-탭 교환, 피치/리스트 보기, 벤치 7 (소유: B) */
 import { useMemo, useState } from 'react';
 import type { FormationDef, MatchPlan, Player, PlayerId } from '../../types';
-import { Badge, Card, ConditionBar, Empty, FitMark, Segmented, Toggle } from '../components/kit';
-import { POS_LABEL, fitOf, isAvailable, pitchRows } from '../format';
+import { Badge, Card, ConditionBar, Empty, FitMark, Segmented, Stars, Toggle } from '../components/kit';
+import { POS_LABEL, fitOf, isAvailable, pitchRows, roleFit } from '../format';
 import { PlanActions } from '../plan/PlanActions';
 import { usePlanEditor } from '../plan/PlanEditor';
 import { useGame, useQuery } from '../service/ServiceContext';
@@ -71,7 +71,12 @@ export function LineupScreen() {
   };
   const isPicked = (t: Pick) => !!pick && pick.area === t.area && pick.index === t.index;
   const pickedPlayer = pick?.id ? byId.get(pick.id) : undefined;
-  const roleLabel = (i: number) => catalog?.roles.find((r) => r.id === slot.roles[i])?.label ?? '';
+  const roleOf = (i: number) => catalog?.roles.find((r) => r.id === slot.roles[i]);
+  const roleLabel = (i: number) => roleOf(i)?.label ?? '';
+  const stars = (i: number, p: Player | undefined) => {
+    const r = roleOf(i);
+    return p && r ? roleFit(p, r.keyAttrs).stars : undefined;
+  };
 
   return (
     <div className="screen lineup">
@@ -93,7 +98,7 @@ export function LineupScreen() {
 
       <div className="row-between">
         <Segmented label="보기" size="sm" value={view} onChange={setView} options={[{ value: 'pitch', label: '피치' }, { value: 'list', label: '리스트' }]} />
-        <span className="legend small">◎주 ○숙련 △가능 ✕부적합</span>
+        <span className="legend small">◎주 ○숙련 △가능 ✕부적합 · ★역할 적합</span>
       </div>
 
       <div className="pick-bar" aria-live="polite">
@@ -134,12 +139,13 @@ export function LineupScreen() {
                     className={`token ${isPicked(t) ? 'is-picked' : ''} ${p && !isAvailable(p) ? 'is-out' : ''}`}
                     onClick={() => tap(t)}
                     aria-pressed={isPicked(t)}
-                    aria-label={`${fs ? POS_LABEL[fs.position] : ''} ${roleLabel(i)}, ${p?.name ?? '비어 있음'}, 컨디션 ${Math.round(p?.condition ?? 0)}, 적합도 ${fit}`}
+                    aria-label={`${fs ? POS_LABEL[fs.position] : ''} ${roleLabel(i)}, ${p?.name ?? '비어 있음'}, 컨디션 ${Math.round(p?.condition ?? 0)}, 적합도 ${fit}, 역할 적합 ${stars(i, p) ?? 0}/5`}
                   >
                     <span className="token-pos">
                       {fs && POS_LABEL[fs.position]} <FitMark fit={fit} />
                     </span>
                     <span className="token-name">{p?.name ?? '—'}</span>
+                    {stars(i, p) !== undefined && <Stars n={stars(i, p)!} />}
                     {p && <ConditionBar value={p.condition} compact />}
                     {p && !isAvailable(p) && <span className="token-warn">🩹</span>}
                   </button>
@@ -160,7 +166,7 @@ export function LineupScreen() {
                   <span className="slot-pos">{fs && POS_LABEL[fs.position]}</span>
                   <span className="slot-role small muted">{roleLabel(i)}</span>
                   <span className="slot-name">
-                    {p?.name ?? '—'} {p && fs && <FitMark fit={fitOf(p, fs.position)} />}
+                    {p?.name ?? '—'} {p && fs && <FitMark fit={fitOf(p, fs.position)} />} {stars(i, p) !== undefined && <Stars n={stars(i, p)!} />}
                   </span>
                   {p && <ConditionBar value={p.condition} />}
                   <span className="slot-ovr">{p?.ovr}</span>

@@ -31,7 +31,8 @@ export function PlanEditorProvider({ children }: { children: ReactNode }) {
   const base = useMemo(() => baseOf(planState), [planState]);
   const [plan, setPlan] = useState<MatchPlan | null>(base);
   const [dirty, setDirty] = useState(false);
-  const baseKey = `${planState?.matchId ?? '-'}|${planState?.confirmed?.updatedAt.seq ?? '-'}|${planState?.draft?.updatedAt.seq ?? '-'}`;
+  // 미리보기 선발도 키에 넣는다: 스타일 FULL 적용 등으로 포메이션이 바뀌면 서비스가 재배치한 선발을 따라간다
+  const baseKey = `${planState?.matchId ?? '-'}|${planState?.confirmed?.updatedAt.seq ?? '-'}|${planState?.draft?.updatedAt.seq ?? '-'}|${planState?.preview?.plan.lineup.starters.join(',') ?? '-'}`;
   const lastKey = useRef(baseKey);
   const lastMatch = useRef(planState?.matchId);
 

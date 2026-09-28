@@ -1724,3 +1724,123 @@ button.fx-row {
     width: 84px;
   }
 }
+
+/* 1.2 전술 스타일·역할 */
+.style-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+.style-card,
+.role-btn,
+.role-opt {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-height: var(--tap);
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  width: 100%;
+}
+.style-card.is-active,
+.role-opt.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.style-name {
+  font-weight: 700;
+}
+.stamina-off {
+  opacity: 0.25;
+}
+.stars {
+  color: var(--warn);
+  letter-spacing: -1px;
+  white-space: nowrap;
+}
+.confirm-box {
+  border: 1px solid var(--warn);
+  background: var(--warn-soft);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+}
+.confirm-box p {
+  margin: 0 0 8px;
+}
+.center {
+  text-align: center;
+}
+
+/* 상성 힌트 */
+.edge {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+}
+.edge-cell {
+  height: 10px;
+  border-radius: 4px;
+  background: var(--surface-2);
+}
+.edge-cell.is-on {
+  background: var(--muted);
+}
+.edge-cell.is-on.is-pos {
+  background: var(--good);
+}
+.edge-cell.is-on.is-neg {
+  background: var(--bad);
+}
+.size-meter {
+  display: inline-block;
+  width: 60px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.size-fill {
+  display: block;
+  height: 100%;
+}
+.size-S {
+  width: 33%;
+}
+.size-M {
+  width: 66%;
+}
+.size-L {
+  width: 100%;
+}
+.size-fill.is-pos {
+  background: var(--good);
+}
+.size-fill.is-neg {
+  background: var(--bad);
+}
+
+/* 개발자: 스타일 행렬 */
+.matrix-wrap {
+  overflow-x: auto;
+}
+.matrix td,
+.matrix th {
+  padding: 4px;
+  font-size: 12px;
+}
+.matrix td.m-pos {
+  background: var(--good-soft);
+  color: var(--good);
+}
+.matrix td.m-neg {
+  background: var(--bad-soft);
+  color: var(--bad);
+}

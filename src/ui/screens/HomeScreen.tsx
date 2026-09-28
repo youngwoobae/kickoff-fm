@@ -85,6 +85,7 @@ function NextMatchCard({ fixture }: { fixture: Fixture }) {
   const standings = useQuery((s) => s.getStandings()).data ?? [];
   const oppRow = standings.find((r) => r.clubId === oppId);
   const scout = useQuery((s) => s.getOpponentScout(oppId), [oppId]).data;
+  const styleLabel = useQuery((s) => s.getCatalog().styles?.find((x) => x.id === scout?.style)?.label, [scout?.style]).data;
   const [open, setOpen] = useState(false);
   const today = fixture.day === snap.time.day;
   return (
@@ -99,7 +100,8 @@ function NextMatchCard({ fixture }: { fixture: Fixture }) {
       {scout && (
         <div className="scout">
           <div>
-            상대 성향: <strong>{scout.botStyle ? BOT_STYLE_LABEL[scout.botStyle] : '사람 구단'}</strong>
+            상대 스타일: <strong>{styleLabel ?? (scout.botStyle ? BOT_STYLE_LABEL[scout.botStyle] : '사람 구단')}</strong>
+            {styleLabel && scout.styleEstimated && <> <Badge tone="warn">추정</Badge></>}
             {scout.last5[0] && <> · 최근 {scout.last5[0].formation}</>}
           </div>
           <div className="weak">약점: {scout.weakness}</div>

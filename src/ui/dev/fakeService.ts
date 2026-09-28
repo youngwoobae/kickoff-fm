@@ -42,7 +42,11 @@ import type {
   Player,
   PlayerId,
   Position,
-  PresetId,
+  StyleDef,
+  StyleFit,
+  StyleId,
+  MatchupPreview,
+  MatchupRuleHint,
   Proposal,
   ProposalDiffItem,
   ProposalId,
@@ -73,24 +77,27 @@ import {
   type ResimulateOverrides,
   type TacticSlotInput,
   type TacticUpdateResult,
+  type StyleApplyMode,
+  type StyleApplyResult,
 } from '../../services';
 import {
   ADJACENT,
+  BALANCED_INSTR,
   BOT_STYLES,
   CATALOG,
   CLUB_NAMES,
-  FORMATIONS,
+  FOLD_TAG,
   KEY_ATTRS,
-  PRESET_INSTR,
   RULES,
-  STYLE_SETUP,
+  STYLES,
   hashString,
   koreanName,
   mulberry32,
 } from './fakeData';
-import { conditionalText } from '../format';
+import { conditionalText, nearestStyle } from '../format';
 
-const FAKE_SAVE_KEY = 'kickoff-fm/fake/v1';
+const FAKE_SAVE_KEY = 'kickoff-fm/fake/v2';
+const SCHEMA = 2;
 const USER_CLUB: ClubId = 'c00';
 const OWNER_ID = 'u-owner';
 const COACH_ID = 'u-coach';
@@ -125,7 +132,7 @@ function condEff(c: number): number {
   return 0.8;
 }
 function formationOf(id: FormationId): FormationDef {
-  return FORMATIONS.find((f) => f.id === id) ?? (FORMATIONS[0] as FormationDef);
+  return CATALOG.formations.find((f) => f.id === id) ?? (CATALOG.formations[0] as FormationDef);
 }
 function poisson(rng: () => number, lambda: number): number {
   const L = Math.exp(-lambda);
@@ -237,9 +244,14 @@ function genFixtures(season: SeasonNo, clubIds: ClubId[], rng: () => number): Fi
   return fixtures.sort((x, y) => x.day - y.day || x.id.localeCompare(y.id));
 }
 
-function mkSlot(key: SlotKey, formation: FormationId, preset: PresetId, familiarity: number): TacticSlot {
-  const f = formationOf(formation);
-  return { key, formation, roles: f.slots.map((s) => s.defaultRole), instructions: { ...PRESET_INSTR[preset] }, familiarity };
+function styleOf(id: StyleId): StyleDef {
+  const st = STYLES.find((x) => x.id === id) ?? STYLES[0];
+  if (!st) throw new Error('카탈로그에 스타일이 없습니다');
+  return st;
+}
+function mkSlot(key: SlotKey, styleId: StyleId, familiarity: number): TacticSlot {
+  const st = styleOf(styleId);
+  return { key, formation: st.formation, roles: [...st.roles], instructions: { ...st.instructions }, familiarity };
 }
 
 function describeInstr(i: TeamInstructions): string {
@@ -465,30 +477,29 @@ export class FakeGameService implements GameService {
         const p = players[pid];
         if (p) p.contract.salary = Math.round(((ECON.cap * 0.94 * p.ovr) / totalOvr) / 1000) * 1000;
       }
-      const setup = style ? STYLE_SETUP[style] : { formation: '4-3-3' as const, preset: 'BALANCED' as const, alt: '4-2-3-1' as const, altPreset: 'LOW_BLOCK' as const };
       clubs[id] = {
         id,
         name: isHuman && opts.clubName ? opts.clubName : name,
         shortName: isHuman && opts.clubName ? opts.clubName.trim().split(/\s+/)[0]?.slice(0, 4) ?? short : short,
         isHuman,
         ownerUserId: isHuman ? OWNER_ID : undefined,
-        botStyle: style,
+        style,
         playerIds,
-        tactics: { A: mkSlot('A', setup.formation, setup.preset, 70), B: mkSlot('B', setup.alt, setup.altPreset, 40) },
+        tactics: { A: mkSlot('A', style ?? 'BALANCED', 70), B: mkSlot('B', 'BALANCED', 40) },
       };
     });
     const clubIds = Object.keys(clubs);
     const finances: GameState['finances'] = {};
     for (const id of clubIds) finances[id] = { clubId: id, balance: 0, transferOnlyBudget: 0, ledger: [] };
     const s: GameState = {
-      schemaVersion: 1,
+      schemaVersion: SCHEMA,
       engineVersion: 'fake-0',
       gameSeed: seed,
       createdAt: new Date().toISOString(),
       time: { season: 1, day: 1 },
       phase: 'MATCHDAY',
       seq: 0,
-      settings: { tier: opts.tier ?? 'T3', tacCap: opts.tacCap ?? 0.35, devMode: opts.devMode ?? true },
+      settings: { tier: opts.tier ?? 'T3', tacCap: opts.tacCap ?? 0.7, devMode: opts.devMode ?? true },
       userClubId: USER_CLUB,
       actorUserId: OWNER_ID,
       clubs,
@@ -523,7 +534,7 @@ export class FakeGameService implements GameService {
       const raw = globalThis.localStorage?.getItem(FAKE_SAVE_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw) as FakeSave;
-      if (parsed?.state?.schemaVersion !== 1) return null;
+      if (parsed?.state?.schemaVersion !== SCHEMA) return null;
       this.reports = parsed.reports ?? {};
       this.replays = parsed.replays ?? {};
       this.state = parsed.state;
@@ -556,7 +567,7 @@ export class FakeGameService implements GameService {
       throw new GameError('SAVE_INCOMPATIBLE', 'JSON 형식이 아닙니다');
     }
     const st = (parsed as Partial<FakeSave>).state ?? (parsed as unknown as GameState);
-    if (!st || st.schemaVersion !== 1 || !st.clubs) throw new GameError('SAVE_INCOMPATIBLE', '호환되지 않는 세이브입니다');
+    if (!st || st.schemaVersion !== SCHEMA || !st.clubs) throw new GameError('SAVE_INCOMPATIBLE', '호환되지 않는 세이브입니다');
     this.reports = parsed.reports ?? {};
     this.replays = parsed.replays ?? {};
     this.commit(st);
@@ -662,14 +673,10 @@ export class FakeGameService implements GameService {
         const op = m.home.clubId === clubId ? m.away : m.home;
         return { matchId: m.matchId, day: m.day, opponentId: op.clubId, goalsFor: me.goals, goalsAgainst: op.goals, formation: me.formation, instructionsSummary: describeInstr(me.instructions) };
       });
-    const weaknessByStyle: Record<string, string> = {
-      POSSESSION: '전방 압박을 받으면 빌드업 실수가 잦아요 (R1)',
-      COUNTER: '공격 성향을 낮추면 역습 공간이 사라져요 (R5)',
-      HIGH_PRESS: '긴 패스로 압박을 넘기면 뒷공간이 열려요 (R2)',
-      LOW_BLOCK: '측면 폭을 넓힌 크로스에 약해요 (R3·R4)',
-      WIDE: '중원 숫자를 늘리면 주도권을 잡기 쉬워요 (R7)',
-    };
-    return { clubId, botStyle: club.botStyle, last5, weakness: club.botStyle ? (weaknessByStyle[club.botStyle] ?? '') : '특이점 없음' };
+    const style = club.style ?? nearestStyle(STYLES, club.tactics.A.instructions)?.style.id;
+    const st = style ? styleOf(style) : undefined;
+    const weakness = st ? st.weaknesses.map((r: string) => `${RULES.find((x) => x.id === r)?.label ?? r} (${r})`).join(' · ') + '에 약해요' : '특이점 없음';
+    return { clubId, botStyle: club.style ? FOLD_TAG[club.style] : undefined, style, styleEstimated: !club.style, last5, weakness };
   }
   getFinance(clubId?: ClubId): FinanceSummary {
     const s = this.req();
@@ -718,6 +725,54 @@ export class FakeGameService implements GameService {
     this.log(s, 'TACTIC_CHANGED', { slot, formation: next.formation, halved });
     this.commit(s);
     return { slot: updated, familiarityHalved: halved };
+  }
+
+  applyStyle(slot: SlotKey, styleId: StyleId, mode: StyleApplyMode): StyleApplyResult {
+    const cur = this.req().clubs[this.req().userClubId]?.tactics[slot];
+    if (!cur) throw new GameError('NO_GAME', '구단 없음');
+    const st = styleOf(styleId);
+    const next: TacticSlotInput =
+      mode === 'FULL' ? { formation: st.formation, roles: [...st.roles], instructions: { ...st.instructions } } : { formation: cur.formation, roles: [...cur.roles], instructions: { ...st.instructions } };
+    const r = this.updateTacticSlot(slot, next);
+    const warning = r.familiarityHalved ? `포메이션 ${cur.formation} → ${st.formation}: 숙련도 ${Math.round(cur.familiarity)} → ${Math.round(r.slot.familiarity)} (절반)` : undefined;
+    return { ...r, styleId, mode, ...(warning ? { warning } : {}) };
+  }
+
+  /** 가짜: 요구치 × (스쿼드 평균 OVR·해시) 로 실제값을 흉내 낸다 */
+  getStyleFits(): StyleFit[] {
+    const s = this.req();
+    const squad = this.squadOf(s, s.userClubId);
+    const avg = squad.reduce((a, p) => a + p.ovr, 0) / Math.max(1, squad.length);
+    return STYLES.map((st) => {
+      const reqs = st.requirements.map((r) => ({ ...r, actual: Math.round(r.min * (avg / 62) * (0.82 + (hashString(`${s.gameSeed}|${st.id}|${r.key}`) % 30) / 100)) }));
+      const fit = Math.min(1, reqs.reduce((a, r) => a * Math.min(1, r.actual / Math.max(1, r.min)), 1));
+      const missing = reqs.filter((r) => r.actual < r.min).map((r) => ({ key: r.key, label: r.label, actual: r.actual, required: r.min }));
+      return { styleId: st.id, fit: round2(fit), level: fit >= 0.95 ? 'GOOD' : fit >= 0.8 ? 'OK' : 'POOR', missing };
+    });
+  }
+
+  /** 가짜: 스타일 강점·약점 교차로 힌트를 만들고 양 팀 대표 선수 수치를 문장에 넣는다 */
+  getMatchupPreview(ourSlot: SlotKey, opponentId: ClubId): MatchupPreview {
+    const s = this.req();
+    const opp = s.clubs[opponentId];
+    const me = s.clubs[s.userClubId];
+    if (!opp || !me) throw new GameError('NOT_FOUND', `구단 없음: ${opponentId}`);
+    const ours = nearestStyle(STYLES, me.tactics[ourSlot].instructions)?.style ?? styleOf('BALANCED');
+    const theirs = opp.style ? styleOf(opp.style) : (nearestStyle(STYLES, opp.tactics.A.instructions)?.style ?? styleOf('BALANCED'));
+    const best = (id: ClubId, pos: Position) => this.squadOf(s, id).filter((p) => p.primary === pos).sort((a, b) => b.ovr - a.ovr)[0];
+    const reason = (sign: 1 | -1) => {
+      const [att, def] = sign > 0 ? [best(s.userClubId, 'ST'), best(opponentId, 'CB')] : [best(opponentId, 'ST'), best(s.userClubId, 'CB')];
+      const side = sign > 0 ? ['우리', '상대'] : ['상대', '우리'];
+      return `${side[0]} ST ${att?.name ?? '?'} 속도 ${att?.attrs.pace ?? '?'} vs ${side[1]} CB ${def?.name ?? '?'} 속도 ${def?.attrs.pace ?? '?'}`;
+    };
+    const rules: MatchupRuleHint[] = [];
+    for (const r of ours.strengths) rules.push({ id: r, dp: 'DP4', sign: 1, size: theirs.weaknesses.includes(r) ? 'L' : 'S', reason: reason(1) });
+    for (const r of theirs.strengths) rules.push({ id: r, dp: 'DP4', sign: -1, size: ours.weaknesses.includes(r) ? 'L' : 'M', reason: reason(-1) });
+    const w = { S: 1, M: 2, L: 3 } as const;
+    rules.sort((a, b) => w[b.size] - w[a.size]);
+    const net = rules.reduce((a, r) => a + r.sign * w[r.size], 0) + (ours.goodAgainst.includes(theirs.id) ? 3 : 0) - (ours.badAgainst.includes(theirs.id) ? 3 : 0);
+    const styleEdge = clamp(Math.round(net / 3), -2, 2) as MatchupPreview['styleEdge'];
+    return { ourSlot, opponentId, opponentStyle: theirs.id, opponentStyleEstimated: !opp.style, rules: rules.slice(0, 6), styleEdge };
   }
   getPlanState(): PlanState {
     const s = this.req();
@@ -1089,10 +1144,25 @@ export class FakeGameService implements GameService {
       return rp.plan.lineup.starters[0] ?? '';
     };
     const chances: ChanceType[] = ['CROSS', 'THROUGH', 'CUTBACK', 'LONG', 'SOLO', 'COUNTER', 'CORNER'];
-    const goals: { minute: number; clubId: ClubId; playerId: PlayerId; chance: ChanceType }[] = [];
-    for (let i = 0; i < gh; i++) goals.push({ minute: 1 + Math.floor(rng() * 90), clubId: fx.homeId, playerId: scorerOf(rh), chance: chances[Math.floor(rng() * chances.length)] ?? 'CROSS' });
-    for (let i = 0; i < ga; i++) goals.push({ minute: 1 + Math.floor(rng() * 90), clubId: fx.awayId, playerId: scorerOf(ra), chance: chances[Math.floor(rng() * chances.length)] ?? 'CROSS' });
-    goals.sort((a, b) => a.minute - b.minute);
+    // 추가시간: 88분 이후 이벤트는 90+N 으로 (계약 1.2 addedMinute)
+    const at = (): { minute: number; addedMinute?: number } => {
+      const m = 1 + Math.floor(rng() * 94);
+      return m > 90 ? { minute: 90, addedMinute: m - 90 } : { minute: m };
+    };
+    const goals: { minute: number; addedMinute?: number; clubId: ClubId; playerId: PlayerId; chance: ChanceType }[] = [];
+    for (let i = 0; i < gh; i++) goals.push({ ...at(), clubId: fx.homeId, playerId: scorerOf(rh), chance: chances[Math.floor(rng() * chances.length)] ?? 'CROSS' });
+    for (let i = 0; i < ga; i++) goals.push({ ...at(), clubId: fx.awayId, playerId: scorerOf(ra), chance: chances[Math.floor(rng() * chances.length)] ?? 'CROSS' });
+    goals.sort((a, b) => a.minute - b.minute || (a.addedMinute ?? 0) - (b.addedMinute ?? 0));
+    const yellowCards = [[fx.homeId, rh], [fx.awayId, ra]].flatMap(([clubId, rp]) =>
+      Array.from({ length: Math.floor(rng() * 4) }, () => ({ ...at(), clubId: clubId as ClubId, playerId: (rp as ResolvedPlan).plan.lineup.starters[1 + Math.floor(rng() * 10)] ?? '' })),
+    );
+    const extra = (clubId: ClubId, shots: number, g: number) => ({
+      sot: Math.max(g, Math.round(shots * (0.28 + rng() * 0.12))),
+      corners: 2 + Math.floor(rng() * 7),
+      yellows: yellowCards.filter((y) => y.clubId === clubId).length,
+    });
+    const exH = extra(fx.homeId, shotsH, gh);
+    const exA = extra(fx.awayId, shotsA, ga);
     const scoreAt = (minute: number): [number, number] => [
       goals.filter((g) => g.minute <= minute && g.clubId === fx.homeId).length,
       goals.filter((g) => g.minute <= minute && g.clubId === fx.awayId).length,
@@ -1184,7 +1254,7 @@ export class FakeGameService implements GameService {
         shots,
         possession: poss,
         formation: slot?.formation ?? '4-4-2',
-        instructions: slot ? clone(slot.instructions) : PRESET_INSTR.BALANCED,
+        instructions: slot ? clone(slot.instructions) : BALANCED_INSTR,
         zonePass: { z0: z(50 + Math.round(rng() * 20), 0.75 + rng() * 0.15), z1: z(35 + Math.round(rng() * 15), 0.55 + rng() * 0.15), z2: z(18 + Math.round(rng() * 10), 0.3 + rng() * 0.15) },
         ruleFires: { R1: Math.round(rng() * 8), R2: Math.round(rng() * 4), R5: Math.round(rng() * 3) },
         xPts: xPoints(xg, xgOpp),
@@ -1235,11 +1305,13 @@ export class FakeGameService implements GameService {
     const tacticsSum = round2(keyFactors.reduce((a, k) => a + k.xg, 0));
     const luckDelta = round2(us.goals - them.goals - (us.xg - them.xg));
     const timeline: TimelineItem[] = [
-      ...goals.map((g) => ({ minute: g.minute, kind: 'GOAL' as const, clubId: g.clubId, text: `${nameOf(g.playerId)} 골 (${clubName(g.clubId)})` })),
+      ...goals.map((g) => ({ minute: g.minute, ...(g.addedMinute ? { addedMinute: g.addedMinute } : {}), kind: 'GOAL' as const, clubId: g.clubId, text: `${nameOf(g.playerId)} 골 (${clubName(g.clubId)})` })),
+      // TimelineKind 에 YELLOW_CARD 가 없어 캐스트 (계약 부족분)
+      ...yellowCards.map((y) => ({ minute: y.minute, ...(y.addedMinute ? { addedMinute: y.addedMinute } : {}), kind: 'YELLOW_CARD' as unknown as 'RED_CARD', clubId: y.clubId, text: `${nameOf(y.playerId)} 경고` })),
       ...triggers.map((t) => ({ minute: t.minute, kind: 'TRIGGER' as const, clubId: t.clubId, text: `지시 발동: ${t.text}` })),
       ...subs.map((x) => ({ minute: x.minute, kind: 'SUB' as const, clubId: x.clubId, text: `${nameOf(x.out)} ↔ ${nameOf(x.in)}` })),
       ...injuries.map((x) => ({ minute: x.minute, kind: 'INJURY' as const, clubId: x.clubId, text: `${nameOf(x.playerId)} 부상 (${x.days}일)` })),
-    ].sort((a, b) => a.minute - b.minute);
+    ].sort((a, b) => a.minute - b.minute || ((a as { addedMinute?: number }).addedMinute ?? 0) - ((b as { addedMinute?: number }).addedMinute ?? 0));
     const worst = keyFactors.filter((k) => k.beneficiary === 'THEM');
     const patchFor: Partial<Record<RuleId, Partial<TeamInstructions>>> = {
       R1: { directness: 2 }, R5: { mentality: 0 }, R3: { width: 2 }, R6: { tempo: -1 }, R2: { line: -1 }, R4: { width: 1 },
@@ -1263,14 +1335,26 @@ export class FakeGameService implements GameService {
       matchId: fx.id,
       clubId: usId,
       opponentId: themId,
-      summary: { goalsFor: us.goals, goalsAgainst: them.goals, xgFor: us.xg, xgAgainst: them.xg, possession: us.possession, shotsFor: us.shots, shotsAgainst: them.shots, isHome: userIsHome },
+      summary: {
+        goalsFor: us.goals, goalsAgainst: them.goals, xgFor: us.xg, xgAgainst: them.xg, possession: us.possession, shotsFor: us.shots, shotsAgainst: them.shots, isHome: userIsHome,
+        // 계약 밖 선택 필드 (UI 는 있으면 표시): 1.2 ReportSummary 에는 새 통계가 없다
+        ...{
+          shotsOnTargetFor: (userIsHome ? exH : exA).sot,
+          shotsOnTargetAgainst: (userIsHome ? exA : exH).sot,
+          cornersFor: (userIsHome ? exH : exA).corners,
+          cornersAgainst: (userIsHome ? exA : exH).corners,
+          yellowCardsFor: (userIsHome ? exH : exA).yellows,
+          yellowCardsAgainst: (userIsHome ? exA : exH).yellows,
+          possessionTime: round2(clamp(us.possession + (rng() - 0.5) * 0.06, 0.25, 0.75)),
+        },
+      },
       luck: {
         level: luckDelta <= -1 ? 'UNLUCKY' : luckDelta >= 1 ? 'LUCKY' : 'NEUTRAL',
         delta: luckDelta,
         text: luckDelta <= -1 ? '기대보다 결과가 나빴어요. 경기 내용은 괜찮았습니다' : luckDelta >= 1 ? '기대 이상으로 운이 따랐어요' : '경기 내용대로의 결과입니다',
       },
       keyFactors,
-      factorBars: { strength: round2(((userIsHome ? sh - sa : sa - sh) / 20) * 1.2), prep: round2((rng() - 0.5) * 0.3), tactics: tacticsSum, luck: luckDelta },
+      factorBars: { strength: round2(((userIsHome ? sh - sa : sa - sh) / 20) * 1.2), prep: round2((rng() - 0.5) * 0.3), state: round2((rng() - 0.5) * 0.2), tactics: tacticsSum, luck: luckDelta },
       zoneFlow: [
         { zone: 0, label: '빌드업 (Z0→Z1)', passRate: us.zonePass.z0.successes / Math.max(1, us.zonePass.z0.attempts), leagueAvg: 0.8 },
         { zone: 1, label: '전진 (Z1→Z2)', passRate: us.zonePass.z1.successes / Math.max(1, us.zonePass.z1.attempts), leagueAvg: 0.62 },
@@ -1301,13 +1385,15 @@ export class FakeGameService implements GameService {
       lines.push({ minute: m, kind: chance ? 'CHANCE' : 'NEUTRAL', clubId: c, text: tpl ? tpl(clubName(c)) : '', score: scoreAt(m) });
       if (m < 45 && m + 4 >= 45) lines.push({ minute: 45, kind: 'PERIOD', text: '전반 종료', score: scoreAt(45) });
     }
-    for (const g of goals) lines.push({ minute: g.minute, kind: 'GOAL', clubId: g.clubId, text: `골! ${nameOf(g.playerId)} (${clubName(g.clubId)})`, score: scoreAt(g.minute) });
+    for (const g of goals) lines.push({ minute: g.minute, ...(g.addedMinute ? { addedMinute: g.addedMinute } : {}), kind: 'GOAL', clubId: g.clubId, text: `골! ${nameOf(g.playerId)} (${clubName(g.clubId)})`, score: scoreAt(g.minute) });
+    for (const y of yellowCards) lines.push({ minute: y.minute, ...(y.addedMinute ? { addedMinute: y.addedMinute } : {}), kind: 'CARD', clubId: y.clubId, text: `경고! ${clubName(y.clubId)} ${nameOf(y.playerId)}`, score: scoreAt(y.minute) });
     for (const t of triggers) lines.push({ minute: t.minute, kind: 'TACTIC', clubId: t.clubId, text: `[전술] ${clubName(t.clubId)} 지시 발동: ${t.text}`, score: scoreAt(t.minute) });
     for (const x of subs) lines.push({ minute: x.minute, kind: 'SUB', clubId: x.clubId, text: `교체: ${nameOf(x.out)} → ${nameOf(x.in)}`, score: scoreAt(x.minute) });
     for (const x of injuries) lines.push({ minute: x.minute, kind: 'CARD', clubId: x.clubId, text: `${nameOf(x.playerId)} 부상으로 쓰러집니다`, score: scoreAt(x.minute) });
-    lines.push({ minute: 90, kind: 'PERIOD', text: `경기 종료 ${gh} : ${ga}`, score: [gh, ga] });
     const order: Record<string, number> = { PERIOD: 0, GOAL: 1 };
-    lines.sort((a, b) => a.minute - b.minute || (order[a.kind] ?? 2) - (order[b.kind] ?? 2));
+    const added = (l: CommentaryLine) => (l as CommentaryLine & { addedMinute?: number }).addedMinute ?? 0;
+    lines.sort((a, b) => a.minute - b.minute || added(a) - added(b) || (order[a.kind] ?? 2) - (order[b.kind] ?? 2));
+    lines.push({ minute: 90, kind: 'PERIOD', text: `경기 종료 ${gh} : ${ga}`, score: [gh, ga] });
     const momentum = Array.from({ length: 18 }, () => round2(clamp((possH - 0.5) * 2 + (rng() - 0.5) * 1.2, -1, 1)));
     const zoneBars = Array.from({ length: 18 }, () => {
       const a = rng() + 0.3;
@@ -1496,7 +1582,7 @@ export class FakeGameService implements GameService {
   resimulate(matchId: MatchId, overrides: ResimulateOverrides = {}): MatchReport {
     const base = this.getReport(matchId);
     const r = clone(base);
-    const factor = overrides.tacticsEnabled === false ? 0 : (overrides.tacCap ?? this.req().settings.tacCap) / 0.35;
+    const factor = overrides.tacticsEnabled === false ? 0 : (overrides.tacCap ?? this.req().settings.tacCap) / 0.7;
     const disabled = new Set(overrides.disabledRules ?? []);
     const ruleXg: Partial<Record<RuleId, number>> = {};
     for (const [k, v] of Object.entries(base.debug?.ruleXg ?? {}) as [RuleId, number][]) ruleXg[k] = disabled.has(k) ? 0 : round2(v * factor);
@@ -1521,11 +1607,25 @@ export class FakeGameService implements GameService {
             { id: 'ovr10', scenario: 'OVR_DIFF_10', label: '강팀 승률 (10점 차)', min: 60, max: 68, actual: round2(58 + rng() * 12), pass: false, unit: '%' },
             { id: 'ovr25', scenario: 'OVR_DIFF_25', label: '강팀 승률 (25점 차)', min: 85, actual: round2(80 + rng() * 15), pass: false, unit: '%' },
             { id: 'p95', scenario: 'RULE_ISOLATION', label: '규칙 합 기여 P95', max: 0.6, actual: round2(0.4 + rng() * 0.3), pass: false, unit: 'xG' },
+            { id: 'rgoals', scenario: 'LEAGUE_REALISM', label: '경기당 총 득점', min: 2.6, max: 3.0, actual: round2(2.5 + rng() * 0.6), pass: false, unit: 'goals' },
+            { id: 'sot', scenario: 'LEAGUE_REALISM', label: '팀당 유효슈팅', min: 3.8, max: 4.8, actual: round2(3.6 + rng() * 1.4), pass: false, unit: 'shots' },
+            { id: 'corners', scenario: 'LEAGUE_REALISM', label: '팀당 코너', min: 4.3, max: 5.8, actual: round2(4 + rng() * 2), pass: false, unit: 'count' },
+            { id: 'yellows', scenario: 'LEAGUE_REALISM', label: '경기당 경고', min: 3.5, max: 5.0, actual: round2(3.2 + rng() * 2), pass: false, unit: 'count' },
+            { id: 'signRate', scenario: 'STYLE_MATRIX', label: '설계 2.5 행렬 부호 일치율', min: 70, actual: round2(60 + rng() * 30), pass: false, unit: '%' },
           ];
           const targets = all
             .filter((t) => scenarios.includes(t.scenario))
             .map((t) => ({ ...t, pass: (t.min === undefined || t.actual >= t.min) && (t.max === undefined || t.actual <= t.max) }));
-          resolve({ engineVersion: 'fake-0', tacCap: opts.tacCap, matchesPerScenario: opts.matchesPerScenario, seed: opts.seed, targets, allPass: targets.every((t) => t.pass), durationMs: Date.now() - started });
+          // 계약 밖 details.counterMatrix (UI 는 있으면 9×9 행렬로 그린다)
+          const counterMatrix = scenarios.includes('STYLE_MATRIX')
+            ? STYLES.flatMap((a) =>
+                STYLES.map((b) => {
+                  const edge = (a.goodAgainst.includes(b.id) ? 12 : 0) - (a.badAgainst.includes(b.id) ? 12 : 0) + (rng() - 0.5) * 8;
+                  return { us: a.id, them: b.id, winPct: round2(37 + edge / 2), lossPct: round2(37 - edge / 2) };
+                }),
+              )
+            : undefined;
+          resolve({ engineVersion: 'fake-0', tacCap: opts.tacCap, matchesPerScenario: opts.matchesPerScenario, seed: opts.seed, targets, allPass: targets.every((t) => t.pass), durationMs: Date.now() - started, ...(counterMatrix ? { details: { counterMatrix } } : {}) });
           return;
         }
         onProgress?.({ scenario: sc, done: i + 1, total: scenarios.length });

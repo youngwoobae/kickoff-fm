@@ -1,8 +1,8 @@
 /** 경기 플랜: 시작 슬롯, 상대 맞춤 지시, 조건부 지시(T04), 자동 교체, 초안/제출/기본 플랜/추천 (소유: B) */
 import { useState } from 'react';
-import type { ConditionalOrder, Lane, SlotKey, TriggerAction, TriggerCondition } from '../../types';
+import type { ClubId, ConditionalOrder, Lane, SlotKey, TriggerAction, TriggerCondition } from '../../types';
 import { Badge, Card, Empty, Segmented, Sheet, Toggle } from '../components/kit';
-import { conditionalText, PLAN_SOURCE_LABEL } from '../format';
+import { conditionalText, EDGE_LABEL, PLAN_SOURCE_LABEL, SIZE_LABEL } from '../format';
 import { PlanActions } from '../plan/PlanActions';
 import { usePlanEditor } from '../plan/PlanEditor';
 import { useAction, useGame, useIsOwner, useQuery } from '../service/ServiceContext';
@@ -79,6 +79,8 @@ export function PlanScreen() {
           options={(['A', 'B'] as SlotKey[]).map((k) => ({ value: k, label: `${k} · ${club?.tactics[k].formation ?? ''}` }))}
         />
       </Card>
+
+      {oppId && <MatchupCard slot={plan.startSlot} oppId={oppId} />}
 
       <Card title="조건부 지시" extra={<span className="small muted">{plan.conditionals.length}/3 · 위에서부터 우선</span>}>
         {plan.conditionals.length === 0 && <Empty>아직 없어요. 템플릿으로 시작해 보세요.</Empty>}
@@ -222,6 +224,62 @@ export function PlanScreen() {
       <PlanActions />
       <ConditionalBuilder open={builderOpen} onClose={() => setBuilderOpen(false)} onAdd={(c) => { addCond(c); setBuilderOpen(false); }} />
     </div>
+  );
+}
+
+/** 상성 힌트: 상대 스타일 + 발동 예상 규칙 상위 3개 (logit 숫자 없이 S/M/L 크기만) */
+function MatchupCard({ slot, oppId }: { slot: SlotKey; oppId: ClubId }) {
+  const catalog = useQuery((s) => s.getCatalog()).data;
+  const scout = useQuery((s) => s.getOpponentScout(oppId), [oppId]).data;
+  const q = useQuery((s) => s.getMatchupPreview?.(slot, oppId) ?? null, [slot, oppId]);
+  const mp = q.data ?? null;
+  const styleId = mp?.opponentStyle ?? scout?.style;
+  const estimated = mp ? mp.opponentStyleEstimated : scout?.styleEstimated;
+  const styleLabel = catalog?.styles?.find((x) => x.id === styleId)?.label;
+  const rule = (id: string) => catalog?.rules.find((r) => r.id === id);
+  return (
+    <Card title="상성 힌트" extra={<span className="small muted">슬롯 {slot} 기준</span>}>
+      <p>
+        상대 스타일: <strong>{styleLabel ?? '알 수 없음'}</strong> {styleLabel && estimated && <Badge tone="warn">추정</Badge>}
+      </p>
+      {!mp ? (
+        <p className="small muted">{q.error ? q.error.message : '이 서비스는 상성 미리보기를 제공하지 않아요'}</p>
+      ) : (
+        <>
+          <div className="edge" role="img" aria-label={`전체 판정 ${EDGE_LABEL[mp.styleEdge]}`}>
+            {([-2, -1, 0, 1, 2] as const).map((v) => (
+              <span key={v} className={`edge-cell ${v === mp.styleEdge ? `is-on ${v > 0 ? 'is-pos' : v < 0 ? 'is-neg' : ''}` : ''}`} />
+            ))}
+          </div>
+          <p className="small center">
+            전체 판정: <strong>{EDGE_LABEL[mp.styleEdge]}</strong>
+          </p>
+          {mp.rules.length === 0 ? (
+            <Empty>뚜렷하게 발동할 규칙이 없어요</Empty>
+          ) : (
+            <ul className="factor-list">
+              {mp.rules.slice(0, 3).map((h, i) => (
+                <li key={`${h.id}-${h.dp}-${i}`} className={`factor factor-${h.sign > 0 ? 'us' : 'them'}`}>
+                  <div className="row-between">
+                    <strong>
+                      {h.sign > 0 ? '▲ 우리 유리' : '▼ 상대 유리'} · {rule(h.id)?.label ?? h.id}
+                    </strong>
+                    <span className="size-meter" role="img" aria-label={`영향 ${SIZE_LABEL[h.size]}`}>
+                      <span className={`size-fill size-${h.size} ${h.sign > 0 ? 'is-pos' : 'is-neg'}`} />
+                    </span>
+                  </div>
+                  <div>{h.reason}</div>
+                  <div className="small muted">
+                    영향 {SIZE_LABEL[h.size]}
+                    {h.sign < 0 && rule(h.id)?.counter ? ` · 대응: ${rule(h.id)?.counter}` : ''}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </Card>
   );
 }
 

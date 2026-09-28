@@ -1,6 +1,11 @@
 /** 표시 전용 포맷터·라벨 (소유: B). 게임 규칙 계산은 하지 않는다. */
 import type {
+  AttrKey,
   BotStyleTag,
+  MatchupPreview,
+  MatchupRuleHint,
+  StyleDef,
+  StyleFit,
   Membership,
   ConditionalOrder,
   FitLevel,
@@ -175,4 +180,41 @@ export function seatLabel(memberships: readonly Membership[], userId: string): s
   const m = memberships.find((x) => x.userId === userId);
   if (!m) return userId;
   return m.seat === 'OWNER' ? '구단주' : m.seat === 'COACH' ? '코치' : '관전 코치';
+}
+
+/** 경기 분 표기: 추가시간이면 "90+3′" */
+export function minuteText(minute: number, addedMinute?: number): string {
+  return addedMinute ? `${minute}+${addedMinute}′` : `${minute}′`;
+}
+
+/** 역할 적합 ★ (1~5): 역할 keyAttrs 평균(1~20)을 4점 단위로. 계약 16장 권장 계산 */
+export function roleFit(p: Pick<Player, 'attrs'>, keyAttrs: readonly AttrKey[]): { avg: number; stars: number } {
+  const vals = keyAttrs.map((k) => p.attrs[k] ?? 0);
+  const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+  return { avg, stars: Math.max(1, Math.min(5, Math.round(avg / 4))) };
+}
+export function starsText(n: number): string {
+  return '★'.repeat(n) + '☆'.repeat(5 - n);
+}
+
+export const FIT_LEVEL_LABEL: Record<StyleFit['level'], string> = { GOOD: '잘 맞음', OK: '보통', POOR: '부족' };
+export const FIT_LEVEL_TONE: Record<StyleFit['level'], 'good' | 'warn' | 'bad'> = { GOOD: 'good', OK: 'warn', POOR: 'bad' };
+export const SIZE_LABEL: Record<MatchupRuleHint['size'], string> = { S: '작음', M: '중간', L: '큼' };
+export const EDGE_LABEL: Record<MatchupPreview['styleEdge'], string> = { [-2]: '크게 불리', [-1]: '불리', 0: '팽팽', 1: '유리', 2: '크게 유리' } as Record<MatchupPreview['styleEdge'], string>;
+
+/** 지시값이 가장 가까운 스타일 (L1 거리, 토글은 1점). 정확히 같으면 exact */
+export function nearestStyle(styles: readonly StyleDef[], i: TeamInstructions): { style: StyleDef; exact: boolean } | undefined {
+  let best: StyleDef | undefined;
+  let bestD = Infinity;
+  for (const s of styles) {
+    const d =
+      SLIDERS.reduce((a, k) => a + Math.abs(s.instructions[k.key] - i[k.key]), 0) +
+      Number(s.instructions.counter !== i.counter) +
+      Number(s.instructions.offsideTrap !== i.offsideTrap);
+    if (d < bestD) {
+      bestD = d;
+      best = s;
+    }
+  }
+  return best && { style: best, exact: bestD === 0 };
 }
