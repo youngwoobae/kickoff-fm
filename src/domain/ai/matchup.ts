@@ -32,7 +32,9 @@ import {
   defaultRoles,
   evalBinaryRules,
   evalChoiceRules,
+  eff,
   paceMult,
+  sideOverload,
   type Occupant,
   type TeamView,
 } from '../../engine';
@@ -191,40 +193,72 @@ const RULE_NAME: Record<RuleId, string> = {
 
 const r1 = (x: number) => Math.round(x);
 
-/** 규칙 힌트 문장 (선수 매치업 수치 포함, 우리 관점) */
+/** 규칙 힌트 문장 (선수 매치업 수치 포함, 우리 관점). 1.3.0: 가능한 규칙마다 관련 수치를 붙인다 */
 function reasonOf(id: RuleId, sign: 1 | -1, us: TeamView, them: TeamView): string {
+  // att = 이 규칙의 수혜 측, def = 손해 측
   const [att, def] = sign > 0 ? [us, them] : [them, us];
   const who = sign > 0 ? '우리' : '상대';
   const other = sign > 0 ? '상대' : '우리';
   const n = RULE_NAME[id];
   switch (id) {
-    case 'R1':
-      return sign > 0 ? `${n}: 우리 압박이 상대의 짧은 빌드업을 노린다` : `${n}: 상대 압박에 짧은 빌드업이 걸린다 → 패스 길게·볼플레잉 CB 추천`;
+    case 'R1': {
+      // 수혜 측이 압박 팀
+      const nums = `압박 ${r1(att.units.PRS)} vs 빌드업 ${r1(def.units.BU)}`;
+      return sign > 0 ? `${n}: 우리 압박이 상대의 짧은 빌드업을 노린다 (${nums})` : `${n}: 상대 압박에 짧은 빌드업이 걸린다 (${nums}) → 패스 길게·볼플레잉 CB 추천`;
+    }
     case 'R2':
       return `${n}: ${who} 최고 러너 속도 ${r1(att.shape.pRun)} vs ${other} 최저 CB ${r1(def.shape.pCb)} (${other} 라인 ${def.instr.line >= 1 ? '높음' : '낮음'}, 배수 ×${paceMult(att, def).toFixed(1)})`;
-    case 'R3':
-      return sign > 0 ? `${n}: 상대의 짧은 패스는 우리 두 줄 앞에서 막힌다` : `${n}: 짧은 패스로는 박스 진입이 막힌다 → 폭·크로스·중거리 추천`;
-    case 'R4':
-      return `${n}: ${who} 측면 인원이 ${other}보다 많다 → 크로스·컷백 ↑`;
-    case 'R5':
-      return sign > 0 ? `${n}: 상대가 올라올수록 우리 역습 공간이 커진다` : `${n}: 공격 성향이 높아 상대 역습에 노출된다 → 앵커·성향 낮추기`;
-    case 'R6':
-      return sign > 0 ? `${n}: 상대 최전방 침투가 우리 트랩에 걸린다` : `${n}: 상대 트랩 → 폴스9·메짤라 등 2선 침투 추천`;
+    case 'R3': {
+      // 수혜 측이 로우 블록(수비) 팀
+      const nums = `박스 수비 ${r1(att.units.BOX)} vs 창의성 ${r1(def.units.CRE)}`;
+      return sign > 0 ? `${n}: 상대의 짧은 패스는 우리 두 줄 앞에서 막힌다 (${nums})` : `${n}: 짧은 패스로는 박스 진입이 막힌다 (${nums}) → 폭·크로스·중거리 추천`;
+    }
+    case 'R4': {
+      const o = sideOverload(att, def, 'L') >= sideOverload(att, def, 'R') ? 'L' : 'R';
+      const d = o === 'L' ? 'R' : 'L';
+      return `${n}: ${who} 측면 인원이 ${other}보다 많다 (${o === 'L' ? '왼쪽' : '오른쪽'} ${f1(att.shape.wA[o])} vs ${f1(def.shape.wD[d])}) → 크로스·컷백 ↑`;
+    }
+    case 'R5': {
+      const nums = `러너 속도 ${r1(att.shape.pRun)} vs CB ${r1(def.shape.pCb)}`;
+      return sign > 0 ? `${n}: 상대가 올라올수록 우리 역습 공간이 커진다 (${nums})` : `${n}: 공격 성향이 높아 상대 역습에 노출된다 (${nums}) → 앵커·성향 낮추기`;
+    }
+    case 'R6': {
+      // 수혜 측이 트랩 팀, def 가 침투 팀
+      const nums = `침투 숙련 ${r1(def.shape.runnerSkill)} vs 최저 CB 속도 ${r1(att.shape.pCbMin)}`;
+      return sign > 0 ? `${n}: 상대 최전방 침투가 우리 트랩에 걸린다 (${nums})` : `${n}: 상대 트랩 (${nums}) → 폴스9·메짤라 등 2선 침투 추천`;
+    }
     case 'R7':
-      return `${n}: ${who} 중앙 유효 인원 우위 (역할 기준)`;
+      return `${n}: ${who} 중앙 유효 인원 우위 (${f1(att.shape.cA)} vs ${f1(def.shape.cD)}, 역할 기준)`;
     case 'R11':
-      return `${n}: ${who} 하프스페이스 점유가 ${other} 커버보다 많다`;
-    case 'R12':
-      return `${n}: ${who} 윙어가 ${other} 윙백·공격형 풀백 뒤 공간에서 1:1`;
+      return `${n}: ${who} 하프스페이스 점유가 ${other} 커버보다 많다 (${f1(att.shape.hs)} vs ${f1(def.shape.hsC)})`;
+    case 'R12': {
+      const p = bestWingDuel(att, def);
+      return `${n}: ${who} 윙어가 ${other} 윙백·공격형 풀백 뒤 공간에서 1:1${p ? ` (속도 ${p[0]} vs ${p[1]})` : ''}`;
+    }
     case 'R13': {
       const t = att.shape.targetAer ?? 0;
       return `${n}: ${who} 타깃맨 공중 ${r1(t)} vs ${other} 공중 수비 ${r1(def.units.AER_D)}`;
     }
     case 'LINE_FIT':
-      return `${n}: ${other === '상대' ? '상대' : '우리'} 수비가 느린데 라인이 높다`;
+      return `${n}: ${other} 수비가 느린데 라인이 높다 (${other} 수비 속도 ${r1(def.units.PACE_D)} vs 필요 ${EngineConstants.FIT_REQUIREMENTS.linePlus2PACE_D}, CB ${r1(def.shape.pCb)} vs 필요 ${EngineConstants.RULES.LINE_FIT.cbPaceRequired})`;
     default:
       return `${n}: ${who} 유리`;
   }
+}
+
+const f1 = (x: number) => (Math.round(x * 10) / 10).toFixed(1);
+
+/** R12 표시용: att 윙어 vs def 맞은편 측면 수비수 속도 차가 가장 큰 쌍 [윙어, 수비수] (1~20) */
+function bestWingDuel(att: TeamView, def: TeamView): [number, number] | null {
+  let best: [number, number] | null = null;
+  for (const s of ['L', 'R'] as const) {
+    const w = att.shape.wing[s];
+    const d = def.shape.sideBack[s === 'L' ? 'R' : 'L'];
+    if (!w || !d) continue;
+    const pair: [number, number] = [r1(eff(w, 'pace') / 5), r1(eff(d, 'pace') / 5)];
+    if (!best || pair[0] - pair[1] > best[0] - best[1]) best = pair;
+  }
+  return best;
 }
 
 /** getMatchupPreview 본체: 규칙 힌트(크기 S/M/L)와 전체 판정 −2~+2 */
@@ -291,5 +325,7 @@ export function styleFitOf(style: StyleId, players: readonly (EnginePlayer | und
     }
   }
   fit = Math.min(1, fit);
-  return { styleId: style, fit: Math.round(fit * 1000) / 1000, level: fit >= 0.95 ? 'GOOD' : fit >= 0.8 ? 'OK' : 'POOR', missing };
+  // 1.3.0: 요구치 미달 항목이 하나라도 있으면 fit 이 0.95 이상이어도 최대 OK
+  const level: StyleFit['level'] = fit >= 0.95 && missing.length === 0 ? 'GOOD' : fit >= 0.8 ? 'OK' : 'POOR';
+  return { styleId: style, fit: Math.round(fit * 1000) / 1000, level, missing };
 }

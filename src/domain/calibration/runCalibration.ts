@@ -1368,6 +1368,10 @@ export function runCalibrationDetailed(
     targets,
     allPass: targets.every((t) => t.pass),
     durationMs: Math.max(0, Math.round(clock() - t0)),
+    // 1.3.0: 개발자 패널 9×9 행렬 (STYLE_MATRIX 실행 시)
+    ...(has('STYLE_MATRIX') && details.counterMatrix
+      ? { details: { counterMatrix: details.counterMatrix.map((c) => ({ us: c.us, them: c.them, winPct: Math.round(c.winPct * 100) / 100, lossPct: Math.round(c.lossPct * 100) / 100 })) } }
+      : {}),
   };
   return { report, details };
 }

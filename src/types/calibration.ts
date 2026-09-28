@@ -1,6 +1,6 @@
 /** 8.1 보정 목표 몬테카를로 배치 (개발자 패널, scripts/sim-batch.ts) */
 import type { RuleId } from './engine';
-import type { TacticCap } from './tactics';
+import type { StyleId, TacticCap } from './tactics';
 
 export type ScenarioId =
   | 'BASELINE' // 동일 전력·동일 전술: 평균 득점·무승부율·슈팅·37/26/37
@@ -47,6 +47,21 @@ export interface CalibrationReport {
   targets: CalibrationTarget[];
   allPass: boolean;
   durationMs: number;
+  /** 1.3.0: 시나리오별 상세 데이터 (개발자 패널) */
+  details?: CalibrationReportDetails;
+}
+
+/** 1.3.0: STYLE_MATRIX 셀. us 스타일이 them 스타일을 상대한 승/패 비율 (%, 0~100) */
+export interface CounterMatrixCell {
+  us: StyleId;
+  them: StyleId;
+  winPct: number;
+  lossPct: number;
+}
+
+export interface CalibrationReportDetails {
+  /** STYLE_MATRIX 실행 시 9×9 = 81 셀 */
+  counterMatrix?: CounterMatrixCell[];
 }
 
 export interface CalibrationProgress {

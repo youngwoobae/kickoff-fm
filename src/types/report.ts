@@ -15,6 +15,17 @@ export interface ReportSummary {
   shotsFor: number;
   shotsAgainst: number;
   isHome: boolean;
+  /** 1.3.0: 유효슈팅 (골 포함) */
+  shotsOnTargetFor?: number;
+  shotsOnTargetAgainst?: number;
+  /** 1.3.0: 코너킥 */
+  cornersFor?: number;
+  cornersAgainst?: number;
+  /** 1.3.0: 경고 */
+  yellowCardsFor?: number;
+  yellowCardsAgainst?: number;
+  /** 1.3.0: 시간 가중 점유율 0~1 (우리 관점, 표시용). possession 은 시퀀스 비율 */
+  possessionTime?: number;
 }
 
 export type LuckLevel = 'UNLUCKY' | 'NEUTRAL' | 'LUCKY';
@@ -45,10 +56,13 @@ export interface ZoneFlowRow {
   leagueAvg: number;
 }
 
-export type TimelineKind = 'GOAL' | 'TRIGGER' | 'SUB' | 'CONDITION' | 'INJURY' | 'RED_CARD';
+/** 1.3.0: YELLOW_CARD 추가 */
+export type TimelineKind = 'GOAL' | 'TRIGGER' | 'SUB' | 'CONDITION' | 'INJURY' | 'RED_CARD' | 'YELLOW_CARD';
 
 export interface TimelineItem {
   minute: number;
+  /** 1.3.0: 추가시간 분 (minute 45/90 과 함께 "90+3") */
+  addedMinute?: number;
   kind: TimelineKind;
   clubId: ClubId;
   text: string;
@@ -85,6 +99,8 @@ export type CommentaryKind = 'NEUTRAL' | 'CHANCE' | 'GOAL' | 'TACTIC' | 'SUB' | 
 
 export interface CommentaryLine {
   minute: number;
+  /** 1.3.0: 추가시간 분 (minute 45/90 과 함께 "90+3") */
+  addedMinute?: number;
   kind: CommentaryKind;
   clubId?: ClubId;
   text: string;

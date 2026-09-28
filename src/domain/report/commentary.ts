@@ -23,8 +23,10 @@ export function buildReplay(result: MatchResult, names: ReplayNames = {}): Match
   const player = (id: string) => names.players?.[id] ?? id;
   const score: [number, number] = [0, 0];
   const lines: CommentaryLine[] = [];
+  /** 현재 처리 중인 이벤트의 추가시간 분 (1.3.0 CommentaryLine.addedMinute) */
+  let added = 0;
   const push = (minute: number, kind: CommentaryLine['kind'], text: string, clubId?: ClubId) =>
-    lines.push({ minute, kind, text, score: [score[0], score[1]], ...(clubId ? { clubId } : {}) });
+    lines.push({ minute, ...(added ? { addedMinute: added } : {}), kind, text, score: [score[0], score[1]], ...(clubId ? { clubId } : {}) });
 
   // 세그먼트별 필러 (결정 로그에서 그 구간 점유가 많은 팀 기준, 무작위 없이 해시로 문장 선택)
   const segPoss: [number, number][] = Array.from({ length: 18 }, () => [0, 0]);
@@ -52,7 +54,9 @@ export function buildReplay(result: MatchResult, names: ReplayNames = {}): Match
   };
 
   for (const e of events) {
+    added = 0;
     flushFillers(e.minute - 1);
+    added = e.addedMinute ?? 0;
     switch (e.type) {
       case 'KICK_OFF':
         push(0, 'PERIOD', `킥오프! ${club(homeId)} vs ${club(awayId)}`);
@@ -101,6 +105,7 @@ export function buildReplay(result: MatchResult, names: ReplayNames = {}): Match
         break;
     }
   }
+  added = 0;
   flushFillers(90);
   push(90, 'PERIOD', `경기 종료 ${score[0]} : ${score[1]}`);
   lines.sort((a, b) => a.minute - b.minute);

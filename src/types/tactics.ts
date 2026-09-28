@@ -170,7 +170,7 @@ export interface StyleFit {
   styleId: StyleId;
   /** 0~1 */
   fit: number;
-  /** ≥ 0.95 GOOD(초록), 0.80~0.95 OK(노랑), < 0.80 POOR(빨강) */
+  /** ≥ 0.95 GOOD(초록), 0.80~0.95 OK(노랑), < 0.80 POOR(빨강). 1.3.0: missing 이 있으면 GOOD 불가(최대 OK) */
   level: 'GOOD' | 'OK' | 'POOR';
   /** 요구치 미달 항목 */
   missing: { key: StyleRequirementKey; label: string; actual: number; required: number }[];

@@ -124,6 +124,11 @@ export function buildReport(
     shotsFor: us.shots,
     shotsAgainst: them.shots,
     isHome,
+    // 1.3.0: 엔진 1.2.0 통계 (구 엔진 결과에는 없음)
+    ...(us.shotsOnTarget !== undefined && them.shotsOnTarget !== undefined ? { shotsOnTargetFor: us.shotsOnTarget, shotsOnTargetAgainst: them.shotsOnTarget } : {}),
+    ...(us.corners !== undefined && them.corners !== undefined ? { cornersFor: us.corners, cornersAgainst: them.corners } : {}),
+    ...(us.yellowCards !== undefined && them.yellowCards !== undefined ? { yellowCardsFor: us.yellowCards, yellowCardsAgainst: them.yellowCards } : {}),
+    ...(us.possessionTime !== undefined ? { possessionTime: round3(us.possessionTime) } : {}),
   };
 
   // 블록 3: 승부 요인 Top 3
@@ -161,25 +166,30 @@ export function buildReport(
 
   // 블록 6: 타임라인
   const timeline: TimelineItem[] = [];
+  const push = (e: { minute: number; addedMinute?: number }, item: Omit<TimelineItem, 'minute' | 'addedMinute'>) =>
+    timeline.push({ minute: e.minute, ...(e.addedMinute ? { addedMinute: e.addedMinute } : {}), ...item });
   for (const e of result.events) {
     switch (e.type) {
       case 'GOAL':
-        timeline.push({ minute: e.minute, kind: 'GOAL', clubId: e.clubId, text: `골! ${nm(e.playerId)} (${chanceLabel(e.chance)}, xG ${e.xg.toFixed(2)})` });
+        push(e, { kind: 'GOAL', clubId: e.clubId, text: `골! ${nm(e.playerId)} (${chanceLabel(e.chance)}, xG ${e.xg.toFixed(2)})` });
         break;
       case 'TRIGGER_FIRED':
-        timeline.push({ minute: e.minute, kind: 'TRIGGER', clubId: e.clubId, text: `조건부 지시 발동: ${e.description}` });
+        push(e, { kind: 'TRIGGER', clubId: e.clubId, text: `조건부 지시 발동: ${e.description}` });
         break;
       case 'SUBSTITUTION':
-        timeline.push({ minute: e.minute, kind: 'SUB', clubId: e.clubId, text: `교체: ${nm(e.out)} → ${nm(e.in)}${e.reason === 'INJURY' ? ' (부상)' : ' (컨디션)'}` });
+        push(e, { kind: 'SUB', clubId: e.clubId, text: `교체: ${nm(e.out)} → ${nm(e.in)}${e.reason === 'INJURY' ? ' (부상)' : ' (컨디션)'}` });
         break;
       case 'CONDITION_DROP':
-        timeline.push({ minute: e.minute, kind: 'CONDITION', clubId: e.clubId, text: `${nm(e.playerId)} 컨디션 ${e.condition} (효율 저하)` });
+        push(e, { kind: 'CONDITION', clubId: e.clubId, text: `${nm(e.playerId)} 컨디션 ${e.condition} (효율 저하)` });
         break;
       case 'INJURY':
-        timeline.push({ minute: e.minute, kind: 'INJURY', clubId: e.clubId, text: `${nm(e.playerId)} 부상 (${e.days}일)` });
+        push(e, { kind: 'INJURY', clubId: e.clubId, text: `${nm(e.playerId)} 부상 (${e.days}일)` });
         break;
       case 'RED_CARD':
-        timeline.push({ minute: e.minute, kind: 'RED_CARD', clubId: e.clubId, text: `${nm(e.playerId)} 퇴장` });
+        push(e, { kind: 'RED_CARD', clubId: e.clubId, text: `${nm(e.playerId)} 퇴장` });
+        break;
+      case 'YELLOW_CARD':
+        push(e, { kind: 'YELLOW_CARD', clubId: e.clubId, text: `${nm(e.playerId)} 경고` });
         break;
       default:
         break;
@@ -222,6 +232,7 @@ export function buildReport(
       prep: round3(ex.bars.prep),
       tactics: round3(ex.bars.tactics),
       luck: round3(ex.bars.luck),
+      ...(ex.bars.state !== undefined ? { state: round3(ex.bars.state) } : {}),
     },
     zoneFlow,
     timeline,

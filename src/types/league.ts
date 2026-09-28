@@ -47,6 +47,11 @@ export interface TeamSummaryLite {
   ruleFires: Partial<Record<RuleId, number>>;
   /** 기대 승점 (xG 기반 포아송 근사) */
   xPts: number;
+  /** 1.3.0: 유효슈팅·코너·경고·시간 가중 점유율 (엔진 1.2.0 통계, 구 세이브에는 없음) */
+  shotsOnTarget?: number;
+  corners?: number;
+  yellowCards?: number;
+  possessionTime?: number;
 }
 
 /** 모든 경기(봇 경기 포함)에 대해 영속화하는 경량 결과 */

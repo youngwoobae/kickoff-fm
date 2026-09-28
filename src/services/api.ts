@@ -53,8 +53,12 @@ import type {
  * 1.2.0 (엔진 0.4.0, 추가만): 포메이션 3·역할 14·스타일 9(Catalog.styles, StyleDef), RuleId R11~R13,
  * 경기 통계(유효슈팅·코너·경고·시간 가중 점유·추가시간 분), OpponentScout.style, Club.style,
  * 선택 메서드 applyStyle / getStyleFits / getMatchupPreview. 세이브 스키마 2.
+ *
+ * 1.3.0 (추가만, 엔진 수치 불변): ReportSummary·TeamSummaryLite 에 유효슈팅·코너·경고·시간 점유 선택 필드,
+ * TimelineItem·CommentaryLine.addedMinute, TimelineKind 'YELLOW_CARD', MatchReport.factorBars.state 전달,
+ * CalibrationReport.details.counterMatrix. 세이브 스키마 2 유지(구 세이브는 새 필드가 없을 뿐).
  */
-export const CONTRACT_VERSION = '1.2.0';
+export const CONTRACT_VERSION = '1.3.0';
 
 export interface NewGameOptions {
   /** 미지정 시 Date.now() 기반 */

@@ -206,7 +206,7 @@ describe('서비스 계약 1.2.0', () => {
 
   it('카탈로그: 스타일 9 · 역할 28 · 포메이션 9 · 규칙 R11~R13', () => {
     const s = mk();
-    expect(s.contractVersion).toBe('1.2.0');
+    expect(s.contractVersion).toBe('1.3.0');
     const c = s.getCatalog();
     expect(c.styles).toHaveLength(9);
     expect(c.roles).toHaveLength(28);
@@ -236,7 +236,7 @@ describe('서비스 계약 1.2.0', () => {
     for (const f of fits) {
       expect(f.fit).toBeGreaterThanOrEqual(0);
       expect(f.fit).toBeLessThanOrEqual(1);
-      expect(f.level).toBe(f.fit >= 0.95 ? 'GOOD' : f.fit >= 0.8 ? 'OK' : 'POOR');
+      expect(f.level).toBe(f.fit >= 0.95 && f.missing.length === 0 ? 'GOOD' : f.fit >= 0.8 ? 'OK' : 'POOR');
       if (f.fit < 1) expect(f.missing.length).toBeGreaterThan(0);
     }
   });

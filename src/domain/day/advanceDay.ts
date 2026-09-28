@@ -252,6 +252,10 @@ function summaryLite(t: TeamMatchStats, op: TeamMatchStats): TeamSummaryLite {
     zonePass: { z0: { ...t.zonePass.z0 }, z1: { ...t.zonePass.z1 }, z2: { ...t.zonePass.z2 } },
     ruleFires: { ...t.ruleFires },
     xPts: r3(expectedPoints(t.xg, op.xg)),
+    ...(t.shotsOnTarget !== undefined ? { shotsOnTarget: t.shotsOnTarget } : {}),
+    ...(t.corners !== undefined ? { corners: t.corners } : {}),
+    ...(t.yellowCards !== undefined ? { yellowCards: t.yellowCards } : {}),
+    ...(t.possessionTime !== undefined ? { possessionTime: r3(t.possessionTime) } : {}),
   };
 }
 
