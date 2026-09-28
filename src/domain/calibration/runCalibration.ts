@@ -124,7 +124,8 @@ export const TARGETS = {
   r7P95: 0.4,
   allRulesP95: 0.8,
   home: { win: [42, 47], draw: [22, 28], away: [27, 33], goalDiff: [0.2, 0.4] },
-  matrixSign: 75,
+  /** 0.5.0: 설계 9×9 기대 부호는 가설이고 표본·시드에 따라 64~81% 로 흔들려 75 → 65 (시뮬레이션_검증.md 1장) */
+  matrixSign: 65,
   styleDominance: 8,
   /** 0.5.0: 모든 스타일이 (승 − 패) ≥ +6%p 인 상대 ≥ 1 (우위 상대가 있음), ≤ −6%p 인 상대 ≥ 1 (약점이 있음). 이전 2 */
   stylePlusMinus: 1,

@@ -118,7 +118,7 @@ export const ROLE_SHAPE: Record<RoleId, RoleShape> = {
   AM_TREQUARTISTA: sh(1.0, 0.1, 0, 0, 0.7, 0, 0, 0, -1, 0.7),
   AM_SHADOW_STRIKER: sh(0.6, 0.2, 0, 0, 1.0, 0, 1, 1, 1, 0.9),
   AM_ENGANCHE: sh(1.2, 0, 0, 0, 0.3, 0, 0, 0, -1, 0.7),
-  W_WINGER: sh(0.1, 0.1, 1, 0.4, 0, 0, 1, 0, 1, 0.8),
+  W_WINGER: sh(0.1, 0.1, 1.0, 0.4, 0, 0, 1, 0, 1, 0.8),
   W_INSIDE_FORWARD: sh(0.2, 0.1, 0.6, 0.2, 1.0, 0, 1, 0, 1, 0.8),
   W_INVERTED_WINGER: sh(0.3, 0.1, 0.7, 0.3, 0.6, 0, 0, 0, 1, 0.8),
   W_WIDE_MIDFIELDER: sh(0.1, 0.2, 0.8, 1.048, 0, 0, 0, 0, 2, 1.0),

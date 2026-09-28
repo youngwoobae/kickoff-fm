@@ -5,11 +5,11 @@
  */
 import type { BinaryDP, ChanceType, DP, FitLevel, OpenPlayChance, RuleId } from '../../types';
 
-export const ENGINE_VERSION = '0.4.0';
+export const ENGINE_VERSION = '0.5.0';
 
 /** 8.4 */
 export const K = 0.017;
-/** 0.4.0: 전술 영향 15~30%p 목표로 0.5 → 0.7 (cap 0.5·0.6·0.7 A/B: docs/시뮬레이션_검증.md) */
+/** 0.5.0: 전술 영향(교차검증 최선−최악) 15~30%p 목표로 0.5 → 0.7. 새 게임·엔진 설정·sim-batch 기본값 (docs/시뮬레이션_검증.md) */
 export const DEFAULT_TAC_CAP = 0.7;
 export const P_MIN = 0.05;
 export const P_MAX = 0.95;
@@ -35,8 +35,8 @@ export const FAM_COEF_MIN = 0.5;
 /** 8.2 경기 구조 */
 export const SEGMENTS = 18;
 export const SEGMENT_MINUTES = 5;
-/** 0.4.0: 추가시간(+8.9%)과 전술 규칙 증가분을 흡수해 100 → 73 */
-export const BASE_SEQUENCES = 72;
+/** 0.4.0: 100 → 73. 0.5.0: 71.5 (오픈 플레이 xG × 0.915 와 함께 리그 득점 2.6~3.0 유지) */
+export const BASE_SEQUENCES = 71.5;
 /**
  * 0.4.0 추가시간: 세그먼트 9(40-45)·18(85-90)의 시퀀스 배수 (1 + 추가 분/5). 이벤트는 "45+2", "90+4" 로 표기
  */
@@ -141,7 +141,7 @@ export const CONDITION = {
   injuryDaysMin: 1,
   injuryDaysMax: 7,
   /** [PH] 기획서 미정의: 팀당 경기당 퇴장 확률 */
-  redCardPerTeamMatch: 0.028,
+  redCardPerTeamMatch: 0.02,
   /** [PH] 퇴장 시 해당 팀 모든 유닛 배수 */
   tenMenUnitMult: 0.9,
 } as const;
@@ -157,22 +157,22 @@ export const FAMILIARITY = {
 export const MAX_SUBS = 5;
 export const SUB_WINDOWS = 3;
 
-/** 8.6 규칙 수치 (0.4.0, 실축구_전술설계 2.2) */
+/** 8.6 규칙 수치 (0.5.0 재보정: cap 0.7, 9×9 스타일 행렬 2,000경기/쌍 탐색, 실축구_전술설계 2.2) */
 export const RULES = {
-  R1: { perPressStep: -0.062, max: -1.0, dp8PerPress: -0.292, dp6CounterBonus: 0.571, resistPer: 0.143, resistMax: 3, threeBackMult: 0.7, pressingFwdPrs: 3, pressingFwdDp6: 0.1, dp5Counter: 0.095 },
-  R2: { perDirectStep: 2.044, max: 1.002, dp3Through: 0.336, paceScale: 4, paceMin: 0.3, paceMax: 1.6, sweeperFast: 0.5, sweeperSlow: 0.75, sweeperFastPace: 10, threeBackMult: 0.894, deepBlockPerStep: -0.04, dp5: 0.36 },
-  R3: { dp4: -4.868, compBase: 0.6, compScale: 25, compMin: 0.4, compMax: 1.2, dp3LongCross: 3.643, crossAer: 8.393, aerScale: 10, dp5Long: 0.3, dp2PerDeepLine: 0.393, dp5Box: 1.989 },
-  R4: { dp3: 0.1, dp4: 0.473, negMult: 0.11, threshold: 0.2, widthStep: 0.4, narrowStep: 0.25, dp5: 0.505 },
-  R5: { dp6: 2.005, dp7: 3.49, paceScale: 2.5, dp4PerMentality: 0.246, anchor: 0.487, ballWinner: 0.2, inverted: 0.15, rdMin: 0.4, dp5: 0.147 },
-  R6: { dp4Through: -3.657, dp5Bonus: 0.4, dp5Pace: 15, deepMult: 0.6, slowCbMult: 0.5, cbPaceOk: 13 },
-  R7: { dp2: 0.45, dp8: 0.09, scale: 1.137, coverShadow: 0.366, coverShadowPress: 0.7, narrowWideMid: 0.5, compression: 0.332, fitBU: 65 },
+  R1: { perPressStep: -0.051, max: -1.0, dp8PerPress: -0.277, dp6CounterBonus: 0.542, resistPer: 0.143, resistMax: 3, threeBackMult: 0.7, pressingFwdPrs: 3, pressingFwdDp6: 0.1, dp5Counter: 0.09 },
+  R2: { perDirectStep: 2.044, max: 0.952, dp3Through: 0.319, paceScale: 4, paceMin: 0.3, paceMax: 1.6, sweeperFast: 0.5, sweeperSlow: 0.75, sweeperFastPace: 10, threeBackMult: 0.894, deepBlockPerStep: -0.04, dp5: 0.342 },
+  R3: { dp4: -4.625, compBase: 0.6, compScale: 25, compMin: 0.4, compMax: 1.2, dp3LongCross: 3.461, crossAer: 6.512, aerScale: 10, dp5Long: 0.3, dp2PerDeepLine: 0.443, dp5Box: 1.89 },
+  R4: { dp3: 0.1, dp4: 0.7, negMult: 0.11, threshold: 0.2, widthStep: 0.4, narrowStep: 0.25, dp5: 0.48 },
+  R5: { dp6: 1.905, dp7: 3.415, paceScale: 2.5, dp4PerMentality: 0.234, anchor: 0.487, ballWinner: 0.2, inverted: 0.15, rdMin: 0.4, dp5: 0.14 },
+  R6: { dp4Through: -3.93, dp5Bonus: 0.4, dp5Pace: 15, deepMult: 0.6, slowCbMult: 0.5, cbPaceOk: 13 },
+  R7: { dp2: 0.427, dp8: 0.09, scale: 1.137, coverShadow: 0.366, coverShadowPress: 0.7, narrowWideMid: 0.5, compression: 0.332, fitBU: 65 },
   R9: { perMarkFit: -0.6, minUnitWeight: 0.15, markerOtherUnitMult: 0.8 },
   R10: { dp4: 0.7, tanhScale: 10 },
-  R11: { dp2: 0.101, dp3: 0.2, dp4: 0.322, offset: 1.346, fiveBack: 2.298, threeBack: 0.227, cfScale: 60, cfMin: 0.5, dp5: 0.298, doublePivot: 0.877 },
-  R12: { dp7: 2.022, dp4: 0.469, d1Scale: 3, wbDefHigh: 0.4, d1Offset: 2.256, dp5: 0.277, wbMult: 2 },
-  R13: { dp1: 0.26, dp2: 0.471, scale: 10, vsPress: 2.5, sbPerRole: 5, threeBackMult: 0.676, aerOffset: 0.86, dp5: 0.207 },
+  R11: { dp2: 0.096, dp3: 0.2, dp4: 0.171, offset: 0.904, fiveBack: 2.298, threeBack: 0.227, cfScale: 60, cfMin: 0.5, dp5: 0.283, doublePivot: 0.877 },
+  R12: { dp7: 1.927, dp4: 0.32, d1Scale: 3, wbDefHigh: 0.4, d1Offset: 2.422, dp5: 0.263, wbMult: 2 },
+  R13: { dp1: 0.248, dp2: 0.384, scale: 10, vsPress: 2.5, sbPerRole: 5, threeBackMult: 0.676, aerOffset: 0.86, dp5: 0.226 },
   TEMPO: { dp8PerStep: 0.1 },
-  LINE_FIT: { penalty: -1.023, paceDRequired: 60, cbPaceRequired: 11 },
+  LINE_FIT: { penalty: -0.972, paceDRequired: 60, cbPaceRequired: 11 },
 } as const;
 
 /** 8.3-4 스쿼드-전술 적합도 요구치 (StyleDef.requirements 와 같은 값) */
@@ -185,7 +185,7 @@ export const FIT_REQUIREMENTS = {
   lowBlockBOX: 65,
 } as const;
 
-/** DP 별로 어떤 규칙이 개입할 수 있는가 (0.4.0) — rules.ts 구현과 테스트의 기준 */
+/** DP 별로 어떤 규칙이 개입할 수 있는가 (0.5.0: DP5 찬스 질 규칙 추가) — rules.ts 구현과 테스트의 기준 */
 export const RULES_BY_DP: Record<DP, RuleId[]> = {
   DP1: ['R1', 'R2', 'R13'],
   DP2: ['R2', 'R3', 'R7', 'R9', 'R11', 'R13'],

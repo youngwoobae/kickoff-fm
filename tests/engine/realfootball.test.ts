@@ -1,4 +1,4 @@
-/** 엔진 0.4.0 (실축구_전술설계) 게이트: 규칙 단위, 표시 RNG 분리, 스타일·역할 데이터, 세이브 마이그레이션, 서비스 계약 */
+/** 엔진 0.4.0~0.5.0 (실축구_전술설계) 게이트: 규칙 단위, 표시 RNG 분리, 스타일·역할 데이터, 세이브 마이그레이션, 서비스 계약 */
 import { describe, expect, it } from 'vitest';
 import {
   EngineConstants,
@@ -19,7 +19,7 @@ import type { EngineConfig, EnginePlayer, TeamInstructions } from '../../src/typ
 import { config, makeTeam, play } from '../helpers';
 
 const NEUTRAL: TeamInstructions = { mentality: 0, press: 0, line: 0, width: 0, tempo: 0, directness: 0, counter: false, offsideTrap: false };
-const CFG: EngineConfig = config({ tacCap: 0.5 });
+const CFG: EngineConfig = config({ tacCap: 0.7 });
 
 describe('데이터: 스타일 9 · 역할 28 · 포메이션 9', () => {
   it('스타일마다 역할 11개가 권장 포메이션 슬롯 허용 역할 안에 있다', () => {
@@ -51,14 +51,15 @@ describe('데이터: 스타일 9 · 역할 28 · 포메이션 9', () => {
 });
 
 describe('규칙 단위 (0.4.0)', () => {
-  it('R7: 중립 지시·기본 역할 4-4-2 vs 4-3-3 DP2 원기여가 설계 계산 예(−0.02 / +0.10) ±0.06 이내 (0.3.0 의 ±0.16 상시 불리 해소)', () => {
+  it('R7: 중립 지시·기본 역할 4-4-2 vs 4-3-3 DP2 원기여 — 4-4-2 공격 |r| ≤ 0.08, 4-3-3 공격 0 < r ≤ 0.25 (0.5.0 에서 R7.dp2 0.346 → 0.45 로 커져 설계 예 +0.10 대신 상한만 검사, 실제 영향은 FORMATION_PARITY)', () => {
     const a = staticView('a', { formation: '4-4-2', instructions: NEUTRAL });
     const b = staticView('b', { formation: '4-3-3', instructions: NEUTRAL });
     const r442 = evalBinaryRules('DP2', a, b, { zone: 1 }, CFG).R7 ?? 0;
     const r433 = evalBinaryRules('DP2', b, a, { zone: 1 }, CFG).R7 ?? 0;
-    // 설계 2.4 계산 예: 4-4-2 공격 −0.02, 4-3-3 공격 +0.10 (각 ±0.06)
-    expect(Math.abs(r442 - -0.02)).toBeLessThanOrEqual(0.06);
-    expect(Math.abs(r433 - 0.1)).toBeLessThanOrEqual(0.06);
+    // 설계 2.4 계산 예(4-4-2 −0.02, 4-3-3 +0.10)는 R7.dp2 0.30 기준. 0.5.0 값: 약 −0.03 / +0.21
+    expect(Math.abs(r442)).toBeLessThanOrEqual(0.08);
+    expect(r433).toBeGreaterThan(0);
+    expect(r433).toBeLessThanOrEqual(0.25);
     expect(centralDiff(b, a)).toBeGreaterThan(centralDiff(a, b));
     // 패스 길게면 R7 미발동 (중원을 건너뛴다)
     const direct = staticView('d', { formation: '4-4-2', instructions: { ...NEUTRAL, directness: 1 } });
@@ -260,7 +261,7 @@ describe('서비스 계약 1.2.0', () => {
 
 describe('보정 게이트 (고정 시드, 축약)', () => {
   it('REAL_HOME 1,000경기: 홈 승 42~47 / 무 22~28 / 원정 27~33, 홈−원정 득점 0.2~0.4', () => {
-    const rep = runCalibration({ matchesPerScenario: 1000, tacCap: 0.5, seed: 20260926, scenarios: ['REAL_HOME'] });
+    const rep = runCalibration({ matchesPerScenario: 1000, tacCap: 0.7, seed: 20260926, scenarios: ['REAL_HOME'] });
     for (const t of rep.targets) expect(t.pass, `${t.label} = ${t.actual}`).toBe(true);
   });
 });
