@@ -107,7 +107,7 @@ export const STYLE_FIT_MODS: Partial<Record<StyleId, AttrMod>> = {
 };
 
 /**
- * 보정 목표 (엔진 0.4.0). 근거는 docs/시뮬레이션_검증.md 1장, 실축구_전술설계 4·5장. 기획서 8.1 표와 같은 값이어야 한다.
+ * 보정 목표 (엔진 0.5.0). 근거는 docs/시뮬레이션_검증.md 1장, 실축구_전술설계 4·5장. 기획서 8.1 표와 같은 값이어야 한다.
  */
 export const TARGETS = {
   goals: [2.6, 3.0],
@@ -126,6 +126,8 @@ export const TARGETS = {
   home: { win: [42, 47], draw: [22, 28], away: [27, 33], goalDiff: [0.2, 0.4] },
   matrixSign: 75,
   styleDominance: 8,
+  /** 0.5.0: 모든 스타일이 (승 − 패) ≥ +6%p 인 상대 ≥ 1 (우위 상대가 있음), ≤ −6%p 인 상대 ≥ 1 (약점이 있음). 이전 2 */
+  stylePlusMinus: 1,
   formationPpg: [1.25, 1.5],
   f442v433: 9,
   styleFitGain: [5, 12],
@@ -928,8 +930,8 @@ export function runCalibrationDetailed(
       const minPlus = Math.min(...Object.values(plus));
       const minMinus = Math.min(...Object.values(minus));
       targets.push(target('STYLE_MATRIX', 'dominance', '③ 스타일별 전체 상대 평균 (승 − 패) 최댓값', maxAvg, '%p', undefined, TARGETS.styleDominance));
-      targets.push(target('STYLE_MATRIX', 'plus2', '④ 모든 스타일이 (승 − 패) ≥ +6%p 인 상대 수 (최소)', minPlus, 'count', 2));
-      targets.push(target('STYLE_MATRIX', 'minus2', '④ 모든 스타일이 (승 − 패) ≤ −6%p 인 상대 수 (최소)', minMinus, 'count', 2));
+      targets.push(target('STYLE_MATRIX', 'plus2', '④ 모든 스타일이 (승 − 패) ≥ +6%p 인 상대 수 (최소)', minPlus, 'count', TARGETS.stylePlusMinus));
+      targets.push(target('STYLE_MATRIX', 'minus2', '④ 모든 스타일이 (승 − 패) ≤ −6%p 인 상대 수 (최소)', minMinus, 'count', TARGETS.stylePlusMinus));
       targets.push(target('STYLE_MATRIX', 'signRate', '⑤ 설계 2.5 행렬 부호 일치율', rate, '%', TARGETS.matrixSign));
     }
   }

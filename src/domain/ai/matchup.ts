@@ -21,6 +21,7 @@ import type {
 } from '../../types';
 import {
   ENGINE_VERSION,
+  EngineConstants,
   FORMATIONS,
   OPEN_CHANCES,
   STYLES,
@@ -90,7 +91,7 @@ export function staticView(id: string, t: TacticShape, players?: readonly (Engin
   };
 }
 
-const CONFIG: EngineConfig = { engineVersion: ENGINE_VERSION, tacCap: 0.5, tacticsEnabled: true, disabledRules: [] };
+const CONFIG: EngineConfig = { engineVersion: ENGINE_VERSION, tacCap: EngineConstants.DEFAULT_TAC_CAP, tacticsEnabled: true, disabledRules: [] };
 
 /** 경기당 팀 한쪽의 결정 대략 빈도 (0.4.0 BASELINE 로그 평균 근사 [PH]) */
 const FREQ: Record<BinaryDP, number> = { DP1: 55, DP2: 45, DP4: 13, DP5: 13, DP6: 30, DP7: 7, DP8: 35 };
