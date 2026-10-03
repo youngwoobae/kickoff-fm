@@ -1,7 +1,7 @@
 /**
  * ★ 공유 계약 (A·B 공동 고정) ★
  * UI 가 호출할 수 있는 유일한 진입점. 모양은 CBT 서버 API(submitPlan, advanceDay, getReport, propose, approve)에 맞춘다.
- * - 모든 메서드는 동기(로컬 목 백엔드)다. runCalibration 만 Promise(웹 워커).
+ * - 게임 메서드는 동기(로컬 목 백엔드)다. Promise 는 runCalibration(웹 워커)과 2.0.0 슬롯 메서드(listSlots·openSlot·deleteSlot·closeSlot·flush·exportSlot)뿐.
  * - 실패는 GameError(code) 를 throw 한다 (services/errors.ts).
  * - 반환 객체는 불변으로 취급한다. UI 는 수정하지 않는다.
  * - 상태가 바뀌는 메서드는 영속화 후 subscribe 리스너를 호출한다.
@@ -33,6 +33,9 @@ import type {
   PlayerId,
   Proposal,
   ProposalId,
+  SaveSlotId,
+  SaveSlotMeta,
+  SaveStatus,
   ProposalInput,
   ProposalStatus,
   ResolvedPlan,
@@ -58,7 +61,16 @@ import type {
  * TimelineItem·CommentaryLine.addedMinute, TimelineKind 'YELLOW_CARD', MatchReport.factorBars.state 전달,
  * CalibrationReport.details.counterMatrix. 세이브 스키마 2 유지(구 세이브는 새 필드가 없을 뿐).
  */
-export const CONTRACT_VERSION = '1.3.0';
+/**
+ * 2.0.0 (세이브 슬롯·비동기 시작): 슬롯 3개(SaveSlotId 1~3)와 SaveSlotMeta, 비동기 StoragePort(ports.ts).
+ * 선택 메서드 listSlots / openSlot / deleteSlot / closeSlot / flush / exportSlot / getActiveSlot / getSaveStatus,
+ * NewGameOptions.slotId, importSave(json, slotId?). 슬롯이 열려 있으면 모든 변경은 메모리에 즉시 반영되고
+ * 저장소에는 뒤에서 쓴다(write-behind). loadGame·resetGame 은 deprecated(UI 이전 M2.3 뒤 제거). 아키텍처 16장.
+ */
+export const CONTRACT_VERSION = '2.0.0';
+
+/** 슬롯 번호 목록 (D28: 3개) */
+export const SAVE_SLOT_IDS: readonly SaveSlotId[] = [1, 2, 3];
 
 export interface NewGameOptions {
   /** 미지정 시 Date.now() 기반 */
@@ -68,6 +80,11 @@ export interface NewGameOptions {
   tier?: Tier;
   tacCap?: TacticCap;
   devMode?: boolean;
+  /**
+   * 2.0.0: 이 슬롯에 새 게임을 만들고 연다(기존 내용은 덮어쓴다 — 확인은 UI 몫). 저장은 write-behind.
+   * 생략하면 열린 슬롯에, 열린 슬롯도 없으면 레거시 동기 저장소에 저장한다.
+   */
+  slotId?: SaveSlotId;
 }
 
 /** updateTacticSlot 입력. familiarity 는 서비스가 계산하므로 받지 않는다 */
@@ -118,12 +135,35 @@ export interface GameService {
 
   // ── 수명 주기 ────────────────────────────────────────────────────
   newGame(opts?: NewGameOptions): GameSnapshot;
-  /** 저장소에서 불러오기. 없거나 호환 불가면 null */
+  /** @deprecated 2.0.0: openSlot 사용. 레거시 단일 세이브에서 불러오기. 없거나 호환 불가면 null */
   loadGame(): GameSnapshot | null;
+  /** @deprecated 2.0.0: deleteSlot / closeSlot 사용. 레거시 세이브를 지우고 게임을 닫는다 */
   resetGame(): void;
+  /** 현재 게임 JSON. 다른 슬롯은 exportSlot */
   exportSave(): string;
-  /** 실패 시 GameError('SAVE_INCOMPATIBLE') */
-  importSave(json: string): GameSnapshot;
+  /** 실패 시 GameError('SAVE_INCOMPATIBLE'). 2.0.0: slotId 를 주면 그 슬롯에 넣고 연다 */
+  importSave(json: string, slotId?: SaveSlotId): GameSnapshot;
+
+  // ── 세이브 슬롯 (2.0.0, 선택 메서드: 실제 서비스는 모두 구현) ─────
+  /** 저장된 슬롯 메타만, slotId 오름차순. 빈 슬롯은 빠진다(SAVE_SLOT_IDS 와 대조) */
+  listSlots?(): Promise<SaveSlotMeta[]>;
+  /**
+   * 슬롯을 열어 현재 게임으로 만든다. 열린 슬롯의 남은 쓰기를 먼저 flush 한다. 리스너 통지.
+   * 빈 슬롯 = GameError('NOT_FOUND'), 손상·호환 불가 = GameError('SAVE_INCOMPATIBLE')(슬롯은 지우지 않는다).
+   */
+  openSlot?(slotId: SaveSlotId): Promise<GameSnapshot>;
+  /** 슬롯 삭제. 열린 슬롯이면 게임도 닫힌다(getSnapshot() = null, 리스너 통지) */
+  deleteSlot?(slotId: SaveSlotId): Promise<void>;
+  /** flush 후 게임을 닫는다(타이틀 화면으로). 실패 시 닫지 않고 reject */
+  closeSlot?(): Promise<void>;
+  /** 밀린 쓰기를 모두 끝낸다. 마지막 쓰기가 실패했으면 GameError('STORAGE_FULL') 로 reject. pagehide·visibilitychange 에서 호출 */
+  flush?(): Promise<void>;
+  /** 슬롯 세이브 JSON (열린 슬롯이면 메모리 최신 상태). 빈 슬롯 = NOT_FOUND */
+  exportSlot?(slotId: SaveSlotId): Promise<string>;
+  /** 열린 슬롯 번호 (없으면 null) */
+  getActiveSlot?(): SaveSlotId | null;
+  /** 자동 저장 상태. 바뀌면 subscribe 리스너가 호출된다. 같은 상태면 같은 참조 */
+  getSaveStatus?(): SaveStatus;
 
   // ── 역할 전환 (Phase 0 로컬 코치 시연) ──────────────────────────
   getActor(): Membership;

@@ -26,9 +26,9 @@ describe('서비스 계약 1.3.0', () => {
   const { s, ids } = played(3, 8);
   const snap = s.getSnapshot()!;
 
-  it('CONTRACT_VERSION = 1.3.0', () => {
-    expect(CONTRACT_VERSION).toBe('1.3.0');
-    expect(s.contractVersion).toBe('1.3.0');
+  it('CONTRACT_VERSION = 2.0.0 (1.3.0 기능 포함)', () => {
+    expect(CONTRACT_VERSION).toBe('2.0.0');
+    expect(s.contractVersion).toBe('2.0.0');
   });
 
   it('① ReportSummary·TeamSummaryLite 에 유효슈팅·코너·경고·시간 점유가 채워지고 두 경로가 일치', () => {

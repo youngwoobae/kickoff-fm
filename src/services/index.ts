@@ -3,6 +3,7 @@
  */
 export {
   CONTRACT_VERSION,
+  SAVE_SLOT_IDS,
   type GameService,
   type NewGameOptions,
   type TacticSlotInput,
@@ -17,9 +18,13 @@ export { GameError, isGameError } from './errors';
 export {
   createLocalStorageAdapter,
   createMemoryStorage,
+  createMemorySlotStorage,
+  createLocalStorageSlotStorage,
   systemClock,
   SAVE_KEY,
+  SLOT_KEY_PREFIX,
   type StoragePort,
+  type LegacyStoragePort,
   type Clock,
 } from './ports';
 export { createGameService, type GameServiceDeps } from './gameService';

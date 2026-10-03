@@ -10,3 +10,4 @@ export type * from './report';
 export type * from './calibration';
 export type * from './catalog';
 export type * from './game';
+export type * from './save';

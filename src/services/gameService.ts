@@ -2,6 +2,8 @@
  * GameService 로컬 구현 (소유: A).
  * 구현 원칙: 모든 변경은 (1) checkAction 권한 검사 → (2) 새 GameState 계산(domain 순수 함수)
  * → (3) storage.save → (4) snapshot 교체 → (5) 리스너 통지 순서. 중간 실패 시 이전 상태 유지(원자성).
+ * 2.0.0: 슬롯이 열려 있으면 (3) 대신 (4)·(5) 뒤에 슬롯 저장소 쓰기를 예약한다(write-behind, scheduleWrite = 자동 저장 훅 지점).
+ * 쓰기 실패는 상태를 되돌리지 않고 SaveStatus.error 로 알리며, flush() 가 재시도한다.
  */
 import type {
   ActionKind,
@@ -35,6 +37,9 @@ import type {
   Position,
   Proposal,
   ProposalId,
+  SaveSlotId,
+  SaveSlotMeta,
+  SaveStatus,
   ProposalInput,
   ProposalStatus,
   ResolvedPlan,
@@ -121,11 +126,15 @@ import {
   type TacticSlotInput,
   type TacticUpdateResult,
 } from './api';
+import { SAVE_SLOT_IDS } from './api';
 import { GameError } from './errors';
-import { createMemoryStorage, systemClock, type Clock, type StoragePort } from './ports';
+import { createMemorySlotStorage, createMemoryStorage, systemClock, type Clock, type LegacyStoragePort, type StoragePort } from './ports';
 
 export interface GameServiceDeps {
-  storage?: StoragePort;
+  /** @deprecated 1.x 동기 단일 세이브 (loadGame/resetGame, 슬롯이 열려 있지 않을 때의 저장). 기본: 메모리 */
+  storage?: LegacyStoragePort;
+  /** 2.0.0 슬롯 저장소. 기본: 메모리. 브라우저는 createLocalStorageSlotStorage() (M2.2 부터 IndexedDB) */
+  slots?: StoragePort;
   clock?: Clock;
 }
 
@@ -232,8 +241,16 @@ function saveProblem(x: unknown): string | null {
 
 class LocalGameService implements GameService {
   readonly contractVersion = CONTRACT_VERSION;
-  private readonly storage: StoragePort;
+  private readonly storage: LegacyStoragePort;
+  private readonly slots: StoragePort;
   private readonly clock: Clock;
+  private activeSlot: SaveSlotId | null = null;
+  /** 쓰기 대기 (슬롯별 최신 상태만 = 합치기) */
+  private readonly pendingWrites = new Map<SaveSlotId, GameState>();
+  /** 쓰기 실패한 최신 상태. 새 변경이 오면 대체되고, flush 가 재시도한다 */
+  private readonly failedWrites = new Map<SaveSlotId, GameState>();
+  private writing: Promise<void> | null = null;
+  private saveStatus: SaveStatus = { slotId: null, pending: false, lastSavedAt: null, error: null };
   private readonly listeners = new Set<() => void>();
   private state: GameState | null = null;
   private standingsCache: { state: GameState; rows: StandingRow[] } | null = null;
@@ -241,6 +258,7 @@ class LocalGameService implements GameService {
 
   constructor(deps: GameServiceDeps) {
     this.storage = deps.storage ?? createMemoryStorage();
+    this.slots = deps.slots ?? createMemorySlotStorage();
     this.clock = deps.clock ?? systemClock;
   }
 
@@ -258,6 +276,14 @@ class LocalGameService implements GameService {
   /** 저장 성공 후에만 스냅샷을 교체한다 (원자성) */
   private commit(next: GameState): void {
     if (next.actionLog.length > ACTION_LOG_LIMIT) next = { ...next, actionLog: next.actionLog.slice(-ACTION_LOG_LIMIT) };
+    if (this.activeSlot === null) this.saveLegacy(next);
+    if (next.schemaVersion !== this.state?.schemaVersion || next.gameSeed !== this.state?.gameSeed) this.replayCache.clear();
+    this.state = next;
+    this.scheduleWrite();
+    this.notify();
+  }
+
+  private saveLegacy(next: GameState): void {
     let json: string;
     try {
       json = JSON.stringify(next);
@@ -270,8 +296,94 @@ class LocalGameService implements GameService {
       if (e instanceof GameError) throw e;
       throw new GameError('STORAGE_FULL', '저장 공간이 부족해 저장하지 못했습니다. 행동 로그를 내보낸 뒤 새 시즌을 시작하세요');
     }
-    if (next.schemaVersion !== this.state?.schemaVersion || next.gameSeed !== this.state?.gameSeed) this.replayCache.clear();
-    this.state = next;
+  }
+
+  // ── 슬롯 저장 (write-behind) ───────────────────────────────────
+
+  /** 자동 저장 훅 지점: 슬롯이 열려 있으면 현재 상태 쓰기를 예약한다. 매 변경(= 매일 처리 직후 포함)마다 불린다 */
+  private scheduleWrite(): void {
+    if (this.activeSlot === null || !this.state) return;
+    this.failedWrites.delete(this.activeSlot);
+    this.pendingWrites.set(this.activeSlot, this.state);
+    this.writing ??= this.drain();
+    this.updateStatus();
+  }
+
+  private async drain(): Promise<void> {
+    try {
+      while (this.pendingWrites.size > 0) {
+        const [slotId, s] = this.pendingWrites.entries().next().value as [SaveSlotId, GameState];
+        this.pendingWrites.delete(slotId);
+        try {
+          await this.slots.write(slotId, JSON.stringify(s), this.metaOf(slotId, s));
+          this.updateStatus({ lastSavedAt: this.clock.nowIso(), error: null });
+        } catch (e) {
+          if (!this.pendingWrites.has(slotId)) this.failedWrites.set(slotId, s);
+          this.updateStatus({ error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+    } finally {
+      this.writing = null;
+      this.updateStatus();
+    }
+  }
+
+  private metaOf(slotId: SaveSlotId, s: GameState): SaveSlotMeta {
+    return {
+      slotId,
+      clubName: s.clubs[s.userClubId]?.name ?? '',
+      tier: s.settings.tier,
+      season: s.time.season,
+      day: s.time.day,
+      phase: s.phase,
+      savedAt: this.clock.nowIso(),
+      schemaVersion: s.schemaVersion,
+    };
+  }
+
+  /** 상태 객체는 바뀔 때만 교체한다. 리스너 통지는 error 가 바뀔 때만 (logEvent 무통지 계약 유지) */
+  private updateStatus(patch: Partial<SaveStatus> = {}): void {
+    const prev = this.saveStatus;
+    const next: SaveStatus = {
+      ...prev,
+      ...patch,
+      slotId: this.activeSlot,
+      pending: this.writing !== null || this.pendingWrites.size > 0 || this.failedWrites.size > 0,
+    };
+    if (next.slotId === prev.slotId && next.pending === prev.pending && next.lastSavedAt === prev.lastSavedAt && next.error === prev.error) return;
+    this.saveStatus = next;
+    if (next.error !== prev.error) this.notify();
+  }
+
+  private assertSlot(slotId: SaveSlotId): void {
+    if (!SAVE_SLOT_IDS.includes(slotId)) throw new GameError('NOT_FOUND', `없는 슬롯입니다: ${String(slotId)}`);
+  }
+
+  /** 세이브 JSON → 검증된 상태. 실패 시 SAVE_INCOMPATIBLE */
+  private parseSave(json: string): GameState {
+    let parsed: GameState;
+    try {
+      parsed = migrateSave(JSON.parse(json)) as GameState;
+    } catch {
+      throw new GameError('SAVE_INCOMPATIBLE', '저장 데이터를 읽을 수 없습니다 (JSON 형식 오류)');
+    }
+    const problem = saveProblem(parsed);
+    if (problem !== null) throw new GameError('SAVE_INCOMPATIBLE', `호환되지 않는 저장 데이터입니다 (${problem})`);
+    try {
+      // 조회 경로 사전 실행: 구조 검사를 통과해도 화면이 쓰는 계산에서 깨지면 커밋하지 않는다
+      this.preview(parsed);
+      computeStandings(Object.keys(parsed.clubs).sort(), Object.values(parsed.summaries), parsed.time.season, 0);
+    } catch (e) {
+      throw new GameError('SAVE_INCOMPATIBLE', `저장 데이터가 손상되었습니다 (${e instanceof Error ? e.message : String(e)})`);
+    }
+    return parsed;
+  }
+
+  private close(): void {
+    this.activeSlot = null;
+    this.state = null;
+    this.replayCache.clear();
+    this.updateStatus();
     this.notify();
   }
 
@@ -372,6 +484,10 @@ class LocalGameService implements GameService {
       this.clock.nowIso(),
     );
     const s = { ...s0, actionLog: [this.entry(s0, 'SEASON_STARTED', { season: 1, seed: s0.gameSeed }, OWNER_ID)] };
+    if (opts.slotId !== undefined) {
+      this.assertSlot(opts.slotId);
+      this.activeSlot = opts.slotId;
+    }
     this.replayCache.clear();
     this.commit(s);
     return s;
@@ -381,9 +497,9 @@ class LocalGameService implements GameService {
     const raw = this.storage.load();
     if (!raw) return null;
     try {
-      const parsed = migrateSave(JSON.parse(raw)) as GameState;
-      if (saveProblem(parsed) !== null) return null;
-      this.preview(parsed); // 손상 세이브면 여기서 throw → null (부팅 크래시 루프 방지)
+      const parsed = this.parseSave(raw); // 손상 세이브면 throw → null (부팅 크래시 루프 방지)
+      this.activeSlot = null;
+      this.updateStatus();
       this.state = parsed;
       this.replayCache.clear();
       this.notify();
@@ -395,34 +511,81 @@ class LocalGameService implements GameService {
 
   resetGame(): void {
     this.storage.clear();
-    this.state = null;
-    this.replayCache.clear();
-    this.notify();
+    this.close();
   }
 
   exportSave(): string {
     return JSON.stringify(this.require());
   }
 
-  importSave(json: string): GameSnapshot {
-    let parsed: GameState;
-    try {
-      parsed = migrateSave(JSON.parse(json)) as GameState;
-    } catch {
-      throw new GameError('SAVE_INCOMPATIBLE', '저장 데이터를 읽을 수 없습니다 (JSON 형식 오류)');
-    }
-    const problem = saveProblem(parsed);
-    if (problem !== null) throw new GameError('SAVE_INCOMPATIBLE', `호환되지 않는 저장 데이터입니다 (${problem})`);
-    try {
-      // 조회 경로 사전 실행: 구조 검사를 통과해도 화면이 쓰는 계산에서 깨지면 커밋하지 않는다
-      this.preview(parsed);
-      computeStandings(Object.keys(parsed.clubs).sort(), Object.values(parsed.summaries), parsed.time.season, 0);
-    } catch (e) {
-      throw new GameError('SAVE_INCOMPATIBLE', `저장 데이터가 손상되었습니다 (${e instanceof Error ? e.message : String(e)})`);
-    }
+  importSave(json: string, slotId?: SaveSlotId): GameSnapshot {
+    if (slotId !== undefined) this.assertSlot(slotId);
+    const parsed = this.parseSave(json);
+    if (slotId !== undefined) this.activeSlot = slotId;
     this.replayCache.clear();
     this.commit(parsed);
     return parsed;
+  }
+
+  // ── 세이브 슬롯 (2.0.0) ────────────────────────────────────────
+
+  listSlots(): Promise<SaveSlotMeta[]> {
+    return this.slots.listSlots();
+  }
+
+  async openSlot(slotId: SaveSlotId): Promise<GameSnapshot> {
+    this.assertSlot(slotId);
+    await this.writing; // 진행 중 쓰기가 끝난 뒤 읽는다 (실패분은 failedWrites 에 남아 flush 가 재시도)
+    const unsaved = this.pendingWrites.get(slotId) ?? this.failedWrites.get(slotId);
+    const raw = unsaved ? JSON.stringify(unsaved) : await this.slots.read(slotId);
+    if (raw === null) throw new GameError('NOT_FOUND', `슬롯 ${slotId} 이 비어 있습니다`);
+    const s = this.parseSave(raw);
+    this.activeSlot = slotId;
+    this.state = s;
+    this.replayCache.clear();
+    this.updateStatus();
+    this.notify();
+    return s;
+  }
+
+  async deleteSlot(slotId: SaveSlotId): Promise<void> {
+    this.assertSlot(slotId);
+    if (this.activeSlot === slotId) this.close();
+    this.pendingWrites.delete(slotId);
+    this.failedWrites.delete(slotId);
+    await this.writing; // 진행 중 쓰기가 삭제 뒤에 슬롯을 되살리지 않도록
+    await this.slots.remove(slotId);
+    this.updateStatus();
+  }
+
+  async closeSlot(): Promise<void> {
+    await this.flush();
+    this.close();
+  }
+
+  async flush(): Promise<void> {
+    for (const [id, st] of this.failedWrites) if (!this.pendingWrites.has(id)) this.pendingWrites.set(id, st);
+    this.failedWrites.clear();
+    if (this.pendingWrites.size > 0) this.writing ??= this.drain();
+    await this.writing;
+    if (this.failedWrites.size > 0) throw new GameError('STORAGE_FULL', this.saveStatus.error ?? '저장하지 못했습니다');
+  }
+
+  async exportSlot(slotId: SaveSlotId): Promise<string> {
+    this.assertSlot(slotId);
+    const mem = slotId === this.activeSlot ? this.state : (this.pendingWrites.get(slotId) ?? this.failedWrites.get(slotId));
+    if (mem) return JSON.stringify(mem);
+    const raw = await this.slots.read(slotId);
+    if (raw === null) throw new GameError('NOT_FOUND', `슬롯 ${slotId} 이 비어 있습니다`);
+    return raw;
+  }
+
+  getActiveSlot(): SaveSlotId | null {
+    return this.activeSlot;
+  }
+
+  getSaveStatus(): SaveStatus {
+    return this.saveStatus;
   }
 
   // ── 역할 ───────────────────────────────────────────────────────
@@ -893,6 +1056,10 @@ class LocalGameService implements GameService {
     let log = [...s.actionLog, this.entry(s, kind, data)];
     if (log.length > ACTION_LOG_LIMIT) log = log.slice(-ACTION_LOG_LIMIT);
     (s as GameState).actionLog = log;
+    if (this.activeSlot !== null) {
+      this.scheduleWrite(); // ponytail: 로그 1건에 세이브 전체 재직렬화 — M2.2 가 logs 저장소를 분리해 없앤다
+      return;
+    }
     try {
       this.storage.save(JSON.stringify(s));
     } catch {
