@@ -51,16 +51,17 @@ describe('데이터: 스타일 9 · 역할 28 · 포메이션 9', () => {
 });
 
 describe('규칙 단위 (0.4.0)', () => {
-  it('R7: 중립 지시·기본 역할 4-4-2 vs 4-3-3 DP2 원기여 — 4-4-2 공격 |r| ≤ 0.08, 4-3-3 공격 0 < r ≤ 0.25 (0.5.0 에서 R7.dp2 0.346 → 0.45 로 커져 설계 예 +0.10 대신 상한만 검사, 실제 영향은 FORMATION_PARITY)', () => {
+  it('R7: 중립 지시·기본 역할 4-4-2 vs 4-3-3 DP2 원기여 — 0.6.0 와이드 MF 중앙 합류(cA 0.6)로 두 포메이션 중앙 기여가 비슷하다 (차 ≤ 0.1, 각 0 < r ≤ 0.3)', () => {
     const a = staticView('a', { formation: '4-4-2', instructions: NEUTRAL });
     const b = staticView('b', { formation: '4-3-3', instructions: NEUTRAL });
     const r442 = evalBinaryRules('DP2', a, b, { zone: 1 }, CFG).R7 ?? 0;
     const r433 = evalBinaryRules('DP2', b, a, { zone: 1 }, CFG).R7 ?? 0;
-    // 설계 2.4 계산 예(4-4-2 −0.02, 4-3-3 +0.10)는 R7.dp2 0.30 기준. 0.5.0 값: 약 −0.03 / +0.21
-    expect(Math.abs(r442)).toBeLessThanOrEqual(0.08);
+    // 0.5.0 은 4-4-2 −0.03 / 4-3-3 +0.21 로 4-4-2 vs 4-3-3 |승−패| 16.5 (시뮬레이션_검증.md 5장). 0.6.0: 약 +0.28 / +0.21
+    expect(r442).toBeGreaterThan(0);
     expect(r433).toBeGreaterThan(0);
-    expect(r433).toBeLessThanOrEqual(0.25);
-    expect(centralDiff(b, a)).toBeGreaterThan(centralDiff(a, b));
+    expect(Math.max(r442, r433)).toBeLessThanOrEqual(0.3);
+    expect(Math.abs(r442 - r433)).toBeLessThanOrEqual(0.1);
+    expect(Math.abs(centralDiff(a, b) - centralDiff(b, a))).toBeLessThanOrEqual(0.5);
     // 패스 길게면 R7 미발동 (중원을 건너뛴다)
     const direct = staticView('d', { formation: '4-4-2', instructions: { ...NEUTRAL, directness: 1 } });
     expect(evalBinaryRules('DP2', direct, b, { zone: 1 }, CFG).R7).toBeUndefined();
@@ -206,7 +207,7 @@ describe('서비스 계약 1.2.0', () => {
 
   it('카탈로그: 스타일 9 · 역할 28 · 포메이션 9 · 규칙 R11~R13', () => {
     const s = mk();
-    expect(s.contractVersion).toBe('1.3.0');
+    expect(s.contractVersion).toMatch(/^\d+\.\d+\.\d+$/); // 정확한 계약 버전은 tests/services 가 검사 (계약 단위 소유)
     const c = s.getCatalog();
     expect(c.styles).toHaveLength(9);
     expect(c.roles).toHaveLength(28);

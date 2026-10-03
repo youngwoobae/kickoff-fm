@@ -5,7 +5,7 @@
  */
 import type { BinaryDP, ChanceType, DP, FitLevel, OpenPlayChance, RuleId } from '../../types';
 
-export const ENGINE_VERSION = '0.5.0';
+export const ENGINE_VERSION = '0.6.0';
 
 /** 8.4 */
 export const K = 0.017;
@@ -92,7 +92,8 @@ export const SOT_Q: Record<ChanceType, number> = {
 /** 표시 판정: 빗나간 슈팅이 코너가 되는 확률, 실패한 스루·역습의 오프사이드 표기 확률 */
 export const DISPLAY = { blockedCorner: 0.25, throughOffside: 0.35, counterOffside: 0.2 } as const;
 /** 표시 판정: 시간 가중 점유 = 1 + reset × 리셋 + advance × 성공 전진, 패스 길게 × (1 − direct × directness), 짧게 × (1 + short × |directness|) */
-export const POSSESSION_WEIGHT = { reset: 3, advance: 0.5, direct: 0.2, short: 0.15, mentality: 0.12 } as const;
+/** 0.6.0: 짧게 빌드업하는 팀(패스 길이 ≤ 0)은 중앙 점유 인원(형태값 cA 합)이 기준 centralRef 보다 많을수록 × (1 + central × 차) — 인버티드 풀백·폴스9 등 중앙 합류 역할이 공을 오래 돌린다 (표시 전용) */
+export const POSSESSION_WEIGHT = { reset: 3, advance: 0.5, direct: 0.2, short: 0.15, mentality: 0.12, central: 0.15, centralRef: 3 } as const;
 /** 0.4.0 경고: 파울 기회(수비 성공한 DP1·DP2·DP4·DP7)마다 p = base × 역할 경고 배수 × (1 + press × max(압박,0)) × 지는 팀(60분+) × 원정 */
 export const CARD = { base: 0.039, perPress: 0.15, trailing: 1.2, away: 1.1, booked: 0.3, spread: 0.4 } as const;
 
@@ -159,7 +160,7 @@ export const SUB_WINDOWS = 3;
 
 /** 8.6 규칙 수치 (0.5.0 재보정: cap 0.7, 9×9 스타일 행렬 2,000경기/쌍 탐색, 실축구_전술설계 2.2) */
 export const RULES = {
-  R1: { perPressStep: -0.051, max: -1.0, dp8PerPress: -0.277, dp6CounterBonus: 0.542, resistPer: 0.143, resistMax: 3, threeBackMult: 0.7, pressingFwdPrs: 3, pressingFwdDp6: 0.1, dp5Counter: 0.09, pressingFwdDp1: 0 },
+  R1: { perPressStep: -0.051, max: -1.0, dp8PerPress: -0.277, dp6CounterBonus: 0.542, resistPer: 0.143, resistMax: 3, threeBackMult: 0.7, pressingFwdPrs: 3, pressingFwdDp6: 0.1, dp5Counter: 0.09, pressingFwdDp1: -0.1 },
   R2: { perDirectStep: 2.044, max: 0.952, dp3Through: 0.319, paceScale: 4, paceMin: 0.3, paceMax: 1.6, sweeperFast: 0.5, sweeperSlow: 0.75, sweeperFastPace: 10, threeBackMult: 0.894, deepBlockPerStep: -0.04, dp5: 0.342 },
   R3: { dp4: -4.625, compBase: 0.6, compScale: 25, compMin: 0.4, compMax: 1.2, dp3LongCross: 3.461, crossAer: 6.512, aerScale: 10, dp5Long: 0.3, dp2PerDeepLine: 0.443, dp5Box: 1.89 },
   R4: { dp3: 0.1, dp4: 0.7, negMult: 0.11, threshold: 0.2, widthStep: 0.4, narrowStep: 0.25, dp5: 0.48 },

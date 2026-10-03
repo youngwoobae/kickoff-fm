@@ -734,7 +734,8 @@ class Match {
     const P = POSSESSION_WEIGHT;
     const d = att.instr.directness;
     const f = d >= 1 ? 1 - P.direct * d : 1 + P.short * -d;
-    att.stats.possW += (1 + P.reset * this.seqResets + P.advance * this.seqAdv) * f * (1 + P.mentality * att.instr.mentality);
+    const cen = d <= 0 ? Math.max(0.5, 1 + P.central * (att.view.shape.cA - P.centralRef)) : 1;
+    att.stats.possW += (1 + P.reset * this.seqResets + P.advance * this.seqAdv) * f * (1 + P.mentality * att.instr.mentality) * cen;
     return end;
   }
 

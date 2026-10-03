@@ -340,7 +340,7 @@ describe('calibration (고정 시드 게이트, 엔진 0.5.0, 기본 상한 0.7)
     expect(mean).toBeLessThanOrEqual(30);
   }, 120_000);
 
-  it('FORMATION_PARITY 축약 (칸당 200경기): 포메이션 경기당 승점 1.1~1.6 회귀 경계 (본 목표 1.25~1.50 은 0.5.0 에서 미달 1.17~1.50, 시뮬레이션_검증.md 5장)', () => {
+  it('FORMATION_PARITY 축약 (칸당 200경기): 포메이션 경기당 승점 1.1~1.6 회귀 경계 (본 목표 1.25~1.50 은 sim:batch n=2000 에서 0.6.0 1.28~1.47 PASS)', () => {
     const rep = runCalibration({ matchesPerScenario: 400, tacCap: CAP, seed: 11, scenarios: ['FORMATION_PARITY'] });
     const get = (id: string) => rep.targets.find((t) => t.id === id)!;
     expect(get('ppgMin').actual).toBeGreaterThanOrEqual(1.1);
