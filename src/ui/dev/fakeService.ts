@@ -54,6 +54,9 @@ import type {
   ProposalStatus,
   ResolvedPlan,
   RuleId,
+  SaveSlotId,
+  SaveSlotMeta,
+  SaveStatus,
   SeasonNo,
   SeasonOutcome,
   SlotKey,
@@ -70,6 +73,7 @@ import type {
 } from '../../types';
 import {
   CONTRACT_VERSION,
+  SAVE_SLOT_IDS,
   GameError,
   type FixtureFilter,
   type GameService,
@@ -278,9 +282,34 @@ export class FakeGameService implements GameService {
   private replays: Record<MatchId, MatchReplay> = {};
   private readonly listeners = new Set<() => void>();
   private readonly persist: boolean;
+  /** 2.0.0 슬롯: persist 면 localStorage(`${FAKE_SAVE_KEY}/slot/{n}`), 아니면 메모리 */
+  private readonly mem = new Map<string, string>();
+  private slot: SaveSlotId | null = null;
+  private status: SaveStatus = { slotId: null, pending: false, lastSavedAt: null, error: null };
 
   constructor(opts: { persist?: boolean } = {}) {
     this.persist = opts.persist ?? true;
+  }
+
+  private kv(key: string, value?: string | null): string | null {
+    if (!this.persist) {
+      if (value === null) this.mem.delete(key);
+      else if (value !== undefined) this.mem.set(key, value);
+      return this.mem.get(key) ?? null;
+    }
+    if (value === null) globalThis.localStorage?.removeItem(key);
+    else if (value !== undefined) globalThis.localStorage?.setItem(key, value);
+    return globalThis.localStorage?.getItem(key) ?? null;
+  }
+  private slotKey(id: SaveSlotId): string {
+    return `${FAKE_SAVE_KEY}/slot/${id}`;
+  }
+  private setSlot(id: SaveSlotId | null, lastSavedAt: string | null = this.status.lastSavedAt): void {
+    this.slot = id;
+    if (this.status.slotId !== id || this.status.lastSavedAt !== lastSavedAt) this.status = { slotId: id, pending: false, lastSavedAt, error: null };
+  }
+  private notify(): void {
+    for (const l of this.listeners) l();
   }
 
   // ── 내부 유틸 ─────────────────────────────────────────────────────
@@ -294,12 +323,30 @@ export class FakeGameService implements GameService {
     for (const l of this.listeners) l();
   }
   private save(): void {
-    if (!this.persist || !this.state) return;
+    if (!this.state) return;
+    const payload: FakeSave = { state: this.state, reports: this.reports, replays: this.replays };
     try {
-      const payload: FakeSave = { state: this.state, reports: this.reports, replays: this.replays };
-      globalThis.localStorage?.setItem(FAKE_SAVE_KEY, JSON.stringify(payload));
-    } catch {
-      /* 용량 초과 등은 무시 (개발용) */
+      if (this.slot === null) {
+        if (this.persist) globalThis.localStorage?.setItem(FAKE_SAVE_KEY, JSON.stringify(payload));
+        return;
+      }
+      const s = this.state;
+      const meta: SaveSlotMeta = {
+        slotId: this.slot,
+        clubName: s.clubs[s.userClubId]?.name ?? '?',
+        tier: s.settings.tier,
+        season: s.time.season,
+        day: s.time.day,
+        phase: s.phase,
+        savedAt: new Date().toISOString(),
+        schemaVersion: s.schemaVersion,
+      };
+      this.kv(this.slotKey(this.slot), JSON.stringify(payload));
+      this.kv(`${this.slotKey(this.slot)}/meta`, JSON.stringify(meta));
+      this.setSlot(this.slot, meta.savedAt);
+    } catch (e) {
+      // 실제 서비스처럼 상태는 유지하고 오류만 알린다 (오류가 바뀔 때만 통지는 commit 이 어차피 통지하므로 생략)
+      this.status = { ...this.status, pending: true, error: e instanceof Error ? e.message : String(e) };
     }
   }
   private log(s: GameState, kind: ActionLogKind, data?: Record<string, unknown>): void {
@@ -523,6 +570,7 @@ export class FakeGameService implements GameService {
     }
     this.reports = {};
     this.replays = {};
+    if (opts.slotId !== undefined) this.setSlot(opts.slotId);
     this.commit(s);
     return s;
   }
@@ -546,6 +594,7 @@ export class FakeGameService implements GameService {
   }
   resetGame(): void {
     this.state = null;
+    this.setSlot(null, null);
     this.reports = {};
     this.replays = {};
     try {
@@ -559,7 +608,7 @@ export class FakeGameService implements GameService {
     const payload: FakeSave = { state: this.req(), reports: this.reports, replays: this.replays };
     return JSON.stringify(payload);
   }
-  importSave(json: string): GameSnapshot {
+  importSave(json: string, slotId?: SaveSlotId): GameSnapshot {
     let parsed: FakeSave;
     try {
       parsed = JSON.parse(json) as FakeSave;
@@ -570,8 +619,68 @@ export class FakeGameService implements GameService {
     if (!st || st.schemaVersion !== SCHEMA || !st.clubs) throw new GameError('SAVE_INCOMPATIBLE', '호환되지 않는 세이브입니다');
     this.reports = parsed.reports ?? {};
     this.replays = parsed.replays ?? {};
+    if (slotId !== undefined) this.setSlot(slotId);
     this.commit(st);
     return st;
+  }
+
+  // ── 세이브 슬롯 (2.0.0, 메모리/localStorage 3칸) ──────────────────
+  async listSlots(): Promise<SaveSlotMeta[]> {
+    const out: SaveSlotMeta[] = [];
+    for (const id of SAVE_SLOT_IDS) {
+      const raw = this.kv(`${this.slotKey(id)}/meta`);
+      try {
+        if (raw) out.push(JSON.parse(raw) as SaveSlotMeta);
+      } catch {
+        /* 메타 손상 = 빈 슬롯 (실제 어댑터와 같음) */
+      }
+    }
+    return out;
+  }
+  async openSlot(slotId: SaveSlotId): Promise<GameSnapshot> {
+    const raw = this.kv(this.slotKey(slotId));
+    if (raw === null) throw new GameError('NOT_FOUND', `슬롯 ${slotId} 이 비어 있습니다`);
+    let parsed: FakeSave;
+    try {
+      parsed = JSON.parse(raw) as FakeSave;
+    } catch {
+      throw new GameError('SAVE_INCOMPATIBLE', '세이브가 손상되었습니다');
+    }
+    if (parsed?.state?.schemaVersion !== SCHEMA) throw new GameError('SAVE_INCOMPATIBLE', '호환되지 않는 세이브입니다');
+    this.reports = parsed.reports ?? {};
+    this.replays = parsed.replays ?? {};
+    this.state = parsed.state;
+    this.setSlot(slotId, null);
+    this.notify();
+    return this.state;
+  }
+  async deleteSlot(slotId: SaveSlotId): Promise<void> {
+    if (this.slot === slotId) await this.closeSlot();
+    this.kv(this.slotKey(slotId), null);
+    this.kv(`${this.slotKey(slotId)}/meta`, null);
+  }
+  async closeSlot(): Promise<void> {
+    this.state = null;
+    this.reports = {};
+    this.replays = {};
+    this.setSlot(null, null);
+    this.notify();
+  }
+  async flush(): Promise<void> {
+    if (this.status.error) this.save();
+    if (this.status.error) throw new GameError('STORAGE_FULL', this.status.error);
+  }
+  async exportSlot(slotId: SaveSlotId): Promise<string> {
+    if (slotId === this.slot) return this.exportSave();
+    const raw = this.kv(this.slotKey(slotId));
+    if (raw === null) throw new GameError('NOT_FOUND', `슬롯 ${slotId} 이 비어 있습니다`);
+    return raw;
+  }
+  getActiveSlot(): SaveSlotId | null {
+    return this.slot;
+  }
+  getSaveStatus(): SaveStatus {
+    return this.status;
   }
 
   // ── 역할 ──────────────────────────────────────────────────────────

@@ -1,14 +1,14 @@
 /**
- * 앱 셸 (소유: B). 서비스 부팅 → 게임 유무 분기 → 하단 탭 5개.
+ * 앱 셸 (소유: B). 서비스 부팅 → 게임 없으면 타이틀/슬롯 화면 → 하단 탭 5개.
  * 탭: 홈 / 스쿼드(목록·선발) / 전술(팀 전술·경기 플랜) / 경기(중계·리포트) / 클럽(리그·재정·코치실·개발자)
  */
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { isGameError, type GameService } from '../../services';
+import type { GameService } from '../../services';
 import { ToastProvider } from '../components/Toast';
 import { Segmented } from '../components/kit';
 import { formatKc } from '../format';
 import { PlanEditorProvider } from '../plan/PlanEditor';
-import { ServiceProvider, useAction, useActor, useQuery, useService, useServiceCtx, useSnapshot } from '../service/ServiceContext';
+import { ServiceProvider, useAction, useActor, useAsyncAction, useQuery, useSaveStatus, useService, useServiceCtx, useSnapshot } from '../service/ServiceContext';
 import { DEV_TOOLS, createServiceFor, resolveServiceMode, type ServiceMode } from '../service/serviceHost';
 import { CoachScreen } from '../screens/CoachScreen';
 import { FinanceScreen } from '../screens/FinanceScreen';
@@ -16,10 +16,10 @@ import { HomeScreen } from '../screens/HomeScreen';
 import { LeagueScreen } from '../screens/LeagueScreen';
 import { LineupScreen } from '../screens/LineupScreen';
 import { MatchCenterScreen } from '../screens/MatchCenterScreen';
-import { NewGameScreen } from '../screens/NewGameScreen';
 import { PlanScreen } from '../screens/PlanScreen';
 import { SquadScreen } from '../screens/SquadScreen';
 import { TacticsScreen } from '../screens/TacticsScreen';
+import { TitleScreen } from '../screens/TitleScreen';
 import { ErrorBoundary, ServiceUnavailable } from './Fallbacks';
 import { INITIAL_NAV, NavCtx, useNav, type NavState, type TabId } from './nav';
 
@@ -36,19 +36,7 @@ export function App() {
   useEffect(() => {
     let alive = true;
     createServiceFor(mode).then(
-      (service) => {
-        if (!alive) return;
-        try {
-          service.loadGame();
-        } catch (e) {
-          // GameError(SAVE_INCOMPATIBLE 등)는 "게임 없음"으로 처리, 그 외(미구현 TODO 등)는 안내 화면
-          if (!isGameError(e)) {
-            setBoot({ status: 'failed', error: e });
-            return;
-          }
-        }
-        setBoot({ status: 'ready', service });
-      },
+      (service) => alive && setBoot({ status: 'ready', service }),
       (error: unknown) => alive && setBoot({ status: 'failed', error }),
     );
     return () => {
@@ -79,7 +67,7 @@ export function App() {
 function GameRoot() {
   const snap = useSnapshot();
   useSessionLog();
-  if (!snap) return <NewGameScreen />;
+  if (!snap) return <TitleScreen />;
   return (
     <PlanEditorProvider>
       <Shell />
@@ -98,9 +86,19 @@ function useSessionLog() {
       }
     };
     log('SESSION_START');
-    const onVis = () => log(document.visibilityState === 'visible' ? 'SESSION_START' : 'SESSION_END');
+    // 앱을 떠나거나 가릴 때 밀린 자동 저장을 끝낸다 (실패는 저장 상태 배너가 알린다)
+    const flush = () => void service.flush?.().catch(() => undefined);
+    const onVis = () => {
+      const hidden = document.visibilityState !== 'visible';
+      log(hidden ? 'SESSION_END' : 'SESSION_START');
+      if (hidden) flush();
+    };
     document.addEventListener('visibilitychange', onVis);
-    return () => document.removeEventListener('visibilitychange', onVis);
+    globalThis.addEventListener('pagehide', flush);
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      globalThis.removeEventListener('pagehide', flush);
+    };
   }, [service]);
 }
 
@@ -126,6 +124,7 @@ function Shell() {
     <NavCtx.Provider value={api}>
       <div className="app-shell">
         <TopBar />
+        <SaveBanner />
         <main className="app-main">
           <ErrorBoundary mode={mode} resetKey={nav.tab}>
             <TabContent tab={nav.tab} />
@@ -246,7 +245,45 @@ function TopBar() {
         {actor?.seat === 'OWNER' ? '👑 구단주' : '🧢 코치'}
       </button>
       <ThemeToggle />
+      <TitleButton />
     </header>
+  );
+}
+
+/** 게임 중 "타이틀로": 저장을 끝낸 뒤 게임을 닫는다 (closeSlot). 저장 실패면 닫지 않는다 */
+function TitleButton() {
+  const act = useAsyncAction();
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      type="button"
+      className="btn btn-ghost btn-icon"
+      aria-label="저장하고 타이틀로"
+      title="저장하고 타이틀로"
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        await act((s) => s.closeSlot?.());
+        setBusy(false);
+      }}
+    >
+      ⏏
+    </button>
+  );
+}
+
+/** 자동 저장 실패 배너 (getSaveStatus().error) */
+function SaveBanner() {
+  const status = useSaveStatus();
+  const act = useAsyncAction();
+  if (!status.error) return null;
+  return (
+    <div className="save-banner" role="alert">
+      <span>⚠ 저장 실패: {status.error}</span>
+      <button type="button" className="btn btn-secondary btn-sm" onClick={() => void act((s) => s.flush?.(), '저장했어요')}>
+        다시 저장
+      </button>
+    </div>
   );
 }
 

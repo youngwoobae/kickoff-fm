@@ -6,7 +6,7 @@
  */
 import { createContext, useCallback, useContext, useMemo, useSyncExternalStore, type ReactNode } from 'react';
 import { isGameError, type GameService } from '../../services';
-import type { GameSnapshot, Membership } from '../../types';
+import type { GameSnapshot, Membership, SaveStatus } from '../../types';
 import { useToast } from '../components/Toast';
 import type { ServiceMode } from './serviceHost';
 
@@ -93,4 +93,37 @@ export function useAction() {
     },
     [service, reportFatal, toast],
   );
+}
+
+/** 비동기 변경(슬롯·flush) 실행기. useAction 과 같은 오류 처리 */
+export function useAsyncAction() {
+  const { service, reportFatal } = useServiceCtx();
+  const toast = useToast();
+  return useCallback(
+    async <T,>(fn: (s: GameService) => Promise<T> | T, success?: string): Promise<T | undefined> => {
+      try {
+        const r = await fn(service);
+        if (success) toast.show(success, 'success');
+        return r;
+      } catch (e) {
+        if (isGameError(e)) {
+          toast.show(e.message || e.code, 'error');
+          return undefined;
+        }
+        reportFatal(e);
+        return undefined;
+      }
+    },
+    [service, reportFatal, toast],
+  );
+}
+
+const NO_STATUS: SaveStatus = { slotId: null, pending: false, lastSavedAt: null, error: null };
+
+/** 자동 저장 상태 (getSaveStatus 는 같은 상태면 같은 참조) */
+export function useSaveStatus(): SaveStatus {
+  const service = useService();
+  const sub = useCallback((l: () => void) => service.subscribe(l), [service]);
+  const get = useCallback(() => service.getSaveStatus?.() ?? NO_STATUS, [service]);
+  return useSyncExternalStore(sub, get, get);
 }

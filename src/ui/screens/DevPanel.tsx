@@ -4,9 +4,10 @@ import type { CalibrationProgress, CalibrationReport, MatchReport, RuleId, Scena
 import { Badge, Card, Empty, Meter, Segmented, Toggle } from '../components/kit';
 import { downloadText, signed } from '../format';
 import { useNav } from '../app/nav';
-import { useAction, useGame, useQuery, useServiceCtx } from '../service/ServiceContext';
+import { useAction, useAsyncAction, useGame, useQuery, useServiceCtx } from '../service/ServiceContext';
 import { reloadInFakeMode, reloadInRealMode } from '../service/serviceHost';
 import { lastUserFixture } from './HomeScreen';
+import { trackSlotOp } from './TitleScreen';
 
 const SCENARIOS: ScenarioId[] = [
   'BASELINE', 'COUNTER_SPREAD', 'OVR_DIFF_10', 'OVR_DIFF_10_COUNTER', 'OVR_DIFF_25', 'TEMPO_VARIANCE', 'RULE_ISOLATION',
@@ -20,7 +21,9 @@ type MatrixCell = { us: string; them: string; winPct: number; lossPct: number };
 export function DevPanel() {
   const snap = useGame();
   const run = useAction();
+  const act = useAsyncAction();
   const { service, mode, reportFatal } = useServiceCtx();
+  const slot = service.getActiveSlot?.() ?? null;
   const { go } = useNav();
   const [days, setDays] = useState('7');
   const [seed, setSeed] = useState('');
@@ -62,7 +65,7 @@ export function DevPanel() {
         </div>
       </Card>
 
-      <Card title="새 게임">
+      <Card title={slot === null ? '새 게임' : `새 게임 (슬롯 ${slot} 덮어쓰기)`}>
         <label className="field">
           <span>시드 (비우면 무작위)</span>
           <input inputMode="numeric" value={seed} onChange={(e) => setSeed(e.target.value.replace(/[^0-9]/g, ''))} />
@@ -73,7 +76,7 @@ export function DevPanel() {
             className="btn btn-secondary"
             onClick={() => {
               if (!confirm('현재 게임을 버리고 새 게임을 시작할까요?')) return;
-              run((s) => s.newGame({ seed: seed ? Number(seed) : undefined, devMode: true, tacCap: snap.settings.tacCap }), '새 게임을 시작했어요');
+              run((s) => s.newGame({ seed: seed ? Number(seed) : undefined, devMode: true, tacCap: snap.settings.tacCap, slotId: slot ?? undefined }), '새 게임을 시작했어요');
               go({ tab: 'home' });
             }}
           >
@@ -83,10 +86,11 @@ export function DevPanel() {
             type="button"
             className="btn btn-ghost"
             onClick={() => {
-              if (confirm('세이브를 지우고 처음 화면으로 갈까요?')) run((s) => s.resetGame());
+              if (slot === null) void act((s) => s.closeSlot?.());
+              else if (confirm(`슬롯 ${slot} 세이브를 지우고 타이틀로 갈까요?`)) void trackSlotOp(act((s) => s.deleteSlot?.(slot), `슬롯 ${slot} 을 비웠어요`));
             }}
           >
-            게임 초기화
+            {slot === null ? '타이틀로' : `슬롯 ${slot} 삭제`}
           </button>
         </div>
       </Card>
