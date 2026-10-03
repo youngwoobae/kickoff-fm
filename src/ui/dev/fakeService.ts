@@ -70,6 +70,13 @@ import type {
   TimelineItem,
   UiLogKind,
   ActionLogKind,
+  CareerRecord,
+  CareerSeason,
+  ClubMovement,
+  LeagueId,
+  LeagueInfo,
+  Pyramid,
+  Tier,
 } from '../../types';
 import {
   CONTRACT_VERSION,
@@ -98,7 +105,7 @@ import {
   koreanName,
   mulberry32,
 } from './fakeData';
-import { conditionalText, nearestStyle } from '../format';
+import { TIER_NAME, conditionalText, nearestStyle } from '../format';
 
 const FAKE_SAVE_KEY = 'kickoff-fm/fake/v2';
 const SCHEMA = 2;
@@ -111,6 +118,71 @@ const SQUAD_TEMPLATE: Position[] = [
   'GK', 'GK', 'CB', 'CB', 'CB', 'CB', 'FB', 'FB', 'FB', 'FB', 'DM', 'DM',
   'CM', 'CM', 'CM', 'AM', 'W', 'W', 'W', 'ST', 'ST', 'ST',
 ];
+
+// ── 가짜 피라미드 (2.1.0) ──────────────────────────────────────────
+// 사용자 리그 외 4리그(56구단)는 이름·결과만 있는 가상 구단 'v{그룹}-{nn}'. 선수·재정·플랜은 사용자 리그만.
+// ponytail: 승강은 사용자 티어만 바꾸고 가상 구단은 리그를 옮기지 않는다(그룹↔티어 재배치). 실제 이동은 실제 서비스(M3.3) 몫.
+const TIERS: Tier[] = ['T1', 'T2', 'T3', 'T4', 'T5'];
+const PROMOTE: Record<Tier, number> = { T1: 0, T2: 2, T3: 2, T4: 3, T5: 3 };
+const RELEGATE: Record<Tier, number> = { T1: 2, T2: 2, T3: 3, T4: 3, T5: 0 };
+const leagueIdOf = (t: Tier): LeagueId => `L-${t}`;
+const VIRTUAL_PLACES = (
+  '수원 인천 부천 안양 성남 고양 용인 화성 평택 김포 파주 의정부 남양주 광명 ' +
+  '춘천 원주 강릉 청주 충주 천안 아산 대전 세종 전주 군산 광주 목포 여수 ' +
+  '순천 대구 포항 경주 구미 안동 울산 부산 창원 김해 진주 거제 제주 서귀포 ' +
+  '시흥 안산 오산 이천 여주 양평 속초 동해 제천 공주 논산 익산 정읍 나주'
+).split(' ');
+const VIRTUAL_SUFFIX = ['FC', '시티', '유나이티드', 'SC'];
+const isVirtual = (id: ClubId) => id.startsWith('v');
+const virtualIds = (g: number): ClubId[] => Array.from({ length: 14 }, (_, i) => `v${g}-${String(i).padStart(2, '0')}`);
+const userIds = (s: GameState): ClubId[] => Object.keys(s.clubs).filter((id) => !isVirtual(id));
+const hasVirtual = (s: GameState) => !!s.clubs['v0-00'];
+/** 가상 그룹 g 의 티어 = 사용자 티어를 뺀 나머지 티어 순서 */
+const otherTiers = (s: GameState): Tier[] => TIERS.filter((t) => t !== s.settings.tier);
+type LiteSide = Pick<TeamSummaryLite, 'clubId' | 'goals' | 'xg' | 'xPts'>;
+
+/** 결과 목록 → 순위표. 구역 인원은 티어별(PROMOTE/RELEGATE) */
+function tableOf(s: GameState, ids: ClubId[], results: { home: LiteSide; away: LiteSide }[], tier: Tier): StandingRow[] {
+  const rows: Record<ClubId, StandingRow> = {};
+  for (const id of ids) {
+    rows[id] = { position: 0, clubId: id, played: 0, won: 0, drawn: 0, lost: 0, goalsFor: 0, goalsAgainst: 0, goalDiff: 0, points: 0, xgFor: 0, xgAgainst: 0, xPts: 0, form: [], zone: 'NONE' };
+  }
+  for (const m of results) {
+    for (const [me, op] of [[m.home, m.away], [m.away, m.home]] as const) {
+      const r = rows[me.clubId];
+      if (!r) continue;
+      r.played++;
+      r.goalsFor += me.goals;
+      r.goalsAgainst += op.goals;
+      r.xgFor = round2(r.xgFor + me.xg);
+      r.xgAgainst = round2(r.xgAgainst + op.xg);
+      r.xPts = round2(r.xPts + me.xPts);
+      const res: FormLetter = me.goals > op.goals ? 'W' : me.goals === op.goals ? 'D' : 'L';
+      if (res === 'W') {
+        r.won++;
+        r.points += 3;
+      } else if (res === 'D') {
+        r.drawn++;
+        r.points += 1;
+      } else r.lost++;
+      r.form = [...r.form, res].slice(-5);
+    }
+  }
+  const list = Object.values(rows);
+  for (const r of list) r.goalDiff = r.goalsFor - r.goalsAgainst;
+  list.sort(
+    (a, b) =>
+      b.points - a.points ||
+      b.goalDiff - a.goalDiff ||
+      b.goalsFor - a.goalsFor ||
+      (s.clubs[a.clubId]?.name ?? '').localeCompare(s.clubs[b.clubId]?.name ?? ''),
+  );
+  list.forEach((r, i) => {
+    r.position = i + 1;
+    r.zone = i < PROMOTE[tier] ? 'PROMOTION' : i >= list.length - RELEGATE[tier] ? 'RELEGATION' : 'NONE';
+  });
+  return list;
+}
 
 interface FakeSave {
   state: GameState;
@@ -538,6 +610,13 @@ export class FakeGameService implements GameService {
     const clubIds = Object.keys(clubs);
     const finances: GameState['finances'] = {};
     for (const id of clubIds) finances[id] = { clubId: id, balance: 0, transferOnlyBudget: 0, ledger: [] };
+    for (let g = 0; g < 4; g++) {
+      virtualIds(g).forEach((id, i) => {
+        const place = VIRTUAL_PLACES[g * 14 + i] ?? id;
+        clubs[id] = { id, name: `${place} ${VIRTUAL_SUFFIX[i % 4]}`, shortName: place, isHuman: false, playerIds: [], tactics: { A: mkSlot('A', 'BALANCED', 50), B: mkSlot('B', 'BALANCED', 50) } };
+      });
+    }
+    const startTier = opts.startTier ?? opts.tier ?? 'T5';
     const s: GameState = {
       schemaVersion: SCHEMA,
       engineVersion: 'fake-0',
@@ -546,7 +625,7 @@ export class FakeGameService implements GameService {
       time: { season: 1, day: 1 },
       phase: 'MATCHDAY',
       seq: 0,
-      settings: { tier: opts.tier ?? 'T3', tacCap: opts.tacCap ?? 0.7, devMode: opts.devMode ?? true },
+      settings: { tier: startTier, startTier, tacCap: opts.tacCap ?? 0.7, devMode: opts.devMode ?? true },
       userClubId: USER_CLUB,
       actorUserId: OWNER_ID,
       clubs,
@@ -711,60 +790,96 @@ export class FakeGameService implements GameService {
     if (!p) throw new GameError('NOT_FOUND', `선수 없음: ${playerId}`);
     return p;
   }
-  getStandings(): StandingRow[] {
-    return this.standingsOf(this.req());
+  getStandings(leagueId?: LeagueId): StandingRow[] {
+    const s = this.req();
+    if (leagueId === undefined || leagueId === leagueIdOf(s.settings.tier)) return this.standingsOf(s);
+    const g = this.groupOf(s, leagueId);
+    if (g < 0) throw new GameError('NOT_FOUND', `리그 없음: ${leagueId}`);
+    return this.virtualLeague(s, g).table;
   }
   private standingsOf(s: GameState): StandingRow[] {
-    const rows: Record<ClubId, StandingRow> = {};
-    for (const id of Object.keys(s.clubs)) {
-      rows[id] = { position: 0, clubId: id, played: 0, won: 0, drawn: 0, lost: 0, goalsFor: 0, goalsAgainst: 0, goalDiff: 0, points: 0, xgFor: 0, xgAgainst: 0, xPts: 0, form: [], zone: 'NONE' };
-    }
     const sums = Object.values(s.summaries)
       .filter((m) => m.season === s.time.season)
       .sort((a, b) => a.day - b.day);
-    for (const m of sums) {
-      for (const [me, op] of [[m.home, m.away], [m.away, m.home]] as const) {
-        const r = rows[me.clubId];
-        if (!r) continue;
-        r.played++;
-        r.goalsFor += me.goals;
-        r.goalsAgainst += op.goals;
-        r.xgFor = round2(r.xgFor + me.xg);
-        r.xgAgainst = round2(r.xgAgainst + op.xg);
-        r.xPts = round2(r.xPts + me.xPts);
-        const res: FormLetter = me.goals > op.goals ? 'W' : me.goals === op.goals ? 'D' : 'L';
-        if (res === 'W') {
-          r.won++;
-          r.points += 3;
-        } else if (res === 'D') {
-          r.drawn++;
-          r.points += 1;
-        } else r.lost++;
-        r.form = [...r.form, res].slice(-5);
+    return tableOf(s, userIds(s), sums, s.settings.tier);
+  }
+  private groupOf(s: GameState, leagueId: LeagueId): number {
+    return hasVirtual(s) ? otherTiers(s).findIndex((t) => leagueIdOf(t) === leagueId) : -1;
+  }
+  /** 가상 리그 한 시즌: 시드·시즌·그룹으로 결정적. allPlayed 가 아니면 지난 날짜만 반영 */
+  private virtualLeague(s: GameState, g: number, allPlayed = s.phase !== 'MATCHDAY'): { tier: Tier; fixtures: Fixture[]; table: StandingRow[] } {
+    const tier = otherTiers(s)[g] ?? 'T5';
+    const ids = virtualIds(g);
+    const rng = mulberry32(s.gameSeed ^ hashString(`${s.time.season}/${g}`));
+    const str: Record<ClubId, number> = {};
+    for (const id of ids) str[id] = 0.8 + rng() * 0.4;
+    const results: { home: LiteSide; away: LiteSide }[] = [];
+    const fixtures = genFixtures(s.time.season, ids, rng).map((f) => {
+      const h = str[f.homeId] ?? 1;
+      const a = str[f.awayId] ?? 1;
+      const lh = (1.45 * h) / a;
+      const la = (1.15 * a) / h;
+      const hg = poisson(rng, lh);
+      const ag = poisson(rng, la);
+      const played = allPlayed || f.day < s.time.day;
+      if (played) {
+        results.push({
+          home: { clubId: f.homeId, goals: hg, xg: round2(lh), xPts: xPoints(lh, la) },
+          away: { clubId: f.awayId, goals: ag, xg: round2(la), xPts: xPoints(la, lh) },
+        });
       }
-    }
-    const list = Object.values(rows);
-    for (const r of list) r.goalDiff = r.goalsFor - r.goalsAgainst;
-    list.sort(
-      (a, b) =>
-        b.points - a.points ||
-        b.goalDiff - a.goalDiff ||
-        b.goalsFor - a.goalsFor ||
-        (s.clubs[a.clubId]?.name ?? '').localeCompare(s.clubs[b.clubId]?.name ?? ''),
-    );
-    list.forEach((r, i) => {
-      r.position = i + 1;
-      r.zone = i < 2 ? 'PROMOTION' : i >= list.length - 3 ? 'RELEGATION' : 'NONE';
+      return { ...f, leagueId: leagueIdOf(tier), played };
     });
-    return list;
+    return { tier, fixtures, table: tableOf(s, ids, results, tier) };
+  }
+  private pyr: { s: GameState; p: Pyramid } | null = null;
+  getPyramid(): Pyramid {
+    const s = this.req();
+    if (this.pyr?.s === s) return this.pyr.p;
+    const info = (tier: Tier, clubIds: ClubId[], isUserLeague: boolean): LeagueInfo => ({
+      id: leagueIdOf(tier), tier, name: TIER_NAME[tier], clubIds, promoteCount: PROMOTE[tier], relegateCount: RELEGATE[tier], isUserLeague,
+    });
+    const leagues = TIERS.flatMap((t) => {
+      if (t === s.settings.tier) return [info(t, userIds(s).sort(), true)];
+      return hasVirtual(s) ? [info(t, virtualIds(otherTiers(s).indexOf(t)), false)] : [];
+    });
+    const p: Pyramid = { season: s.time.season, leagues, userLeagueId: leagueIdOf(s.settings.tier) };
+    this.pyr = { s, p };
+    return p;
+  }
+  getCareer(): CareerRecord {
+    const s = this.req();
+    const outs = [...s.seasonHistory, ...(s.pendingOutcome ? [s.pendingOutcome] : [])];
+    const seasons: CareerSeason[] = outs.flatMap((o) => {
+      const r = o.finalTable.find((x) => x.clubId === s.userClubId);
+      if (!r) return [];
+      return [{
+        season: o.season, tier: o.tier, leagueId: o.leagueId ?? leagueIdOf(o.tier), position: r.position, points: r.points,
+        won: r.won, drawn: r.drawn, lost: r.lost, goalsFor: r.goalsFor, goalsAgainst: r.goalsAgainst,
+        label: o.labels[s.userClubId] ?? 'STAYED', champion: o.championId === s.userClubId,
+      }];
+    });
+    const highestTier = [s.settings.tier, ...seasons.map((x) => x.tier)].sort()[0] ?? s.settings.tier;
+    return {
+      clubId: s.userClubId,
+      startTier: s.settings.startTier ?? seasons[0]?.tier ?? s.settings.tier,
+      currentTier: s.settings.tier,
+      seasons,
+      trophies: seasons.filter((x) => x.champion).map((x) => ({ season: x.season, tier: x.tier, kind: 'LEAGUE_TITLE' as const })),
+      highestTier,
+    };
   }
   getFixtures(filter: FixtureFilter = {}): Fixture[] {
-    return this.req().fixtures.filter(
-      (f) =>
-        (filter.clubId === undefined || f.homeId === filter.clubId || f.awayId === filter.clubId) &&
-        (filter.day === undefined || f.day === filter.day) &&
-        (filter.played === undefined || f.played === filter.played),
-    );
+    const s = this.req();
+    const match = (f: Fixture) =>
+      (filter.clubId === undefined || f.homeId === filter.clubId || f.awayId === filter.clubId) &&
+      (filter.day === undefined || f.day === filter.day) &&
+      (filter.played === undefined || f.played === filter.played);
+    if (filter.leagueId !== undefined && filter.leagueId !== leagueIdOf(s.settings.tier)) {
+      const g = this.groupOf(s, filter.leagueId);
+      return g < 0 ? [] : this.virtualLeague(s, g).fixtures.filter(match);
+    }
+    return s.fixtures.filter(match);
   }
   getNextMatch(): Fixture | null {
     return this.nextFixture(this.req());
@@ -1006,8 +1121,17 @@ export class FakeGameService implements GameService {
   startNewSeason(): GameSnapshot {
     const s = clone(this.req());
     if (s.phase !== 'SEASON_OVER') throw new GameError('INVALID_PHASE', '시즌이 끝나지 않았습니다');
-    if (s.pendingOutcome) s.seasonHistory.push(s.pendingOutcome);
+    const out = s.pendingOutcome;
+    if (out) s.seasonHistory.push(out);
     s.pendingOutcome = undefined;
+    // 성장 기록(Player.history) + 가짜 성장·노화
+    const grow = mulberry32(s.gameSeed + s.time.season * 7919);
+    for (const p of Object.values(s.players)) {
+      p.history = [...(p.history ?? []), { season: s.time.season, age: p.age, ovr: p.ovr, clubId: p.clubId, tier: s.settings.tier, apps: p.season.apps, goals: p.season.goals }];
+      p.ovr = clamp(p.ovr + (p.age <= 23 ? 2 : p.age >= 31 ? -2 : 0) + Math.round(grow() * 2 - 1), 30, 99);
+    }
+    const mv = out?.movements?.find((m) => m.clubId === s.userClubId);
+    if (mv) s.settings.tier = mv.to;
     s.summaries = {};
     s.records = {};
     this.reports = {};
@@ -1020,9 +1144,9 @@ export class FakeGameService implements GameService {
       p.season = { apps: 0, starts: 0, minutes: 0, goals: 0, shots: 0, keyPasses: 0, tackles: 0, redCards: 0 };
       p.condition = 100;
     }
-    s.fixtures = genFixtures(s.time.season, Object.keys(s.clubs), mulberry32(s.gameSeed + s.time.season));
+    s.fixtures = genFixtures(s.time.season, userIds(s), mulberry32(s.gameSeed + s.time.season));
     s.plans = {};
-    for (const id of Object.keys(s.clubs)) {
+    for (const id of userIds(s)) {
       this.ledger(s, id, 'SEASON_BUDGET', ECON.budget);
       this.paySalary(s, id);
     }
@@ -1176,6 +1300,7 @@ export class FakeGameService implements GameService {
       if (p.availability.injuryDays > 0) p.availability.injuryDays -= 1;
     }
     for (const club of Object.values(s.clubs)) {
+      if (isVirtual(club.id)) continue;
       for (const k of ['A', 'B'] as const) {
         const used = club.lastUsedPlan?.startSlot === k;
         if (!used) club.tactics[k].familiarity = clamp(club.tactics[k].familiarity - 2, 0, 100);
@@ -1194,7 +1319,23 @@ export class FakeGameService implements GameService {
       const rate = r.position === 1 ? 0.2 : r.position <= 3 ? 0.15 : r.position <= 6 ? 0.1 : r.position <= 10 ? 0.06 : 0.03;
       prizes[r.clubId] = Math.round(ECON.budget * rate);
     }
-    return { season: s.time.season, tier: s.settings.tier, finalTable: table, championId: table[0]?.clubId ?? '', labels, prizes };
+    const movements: ClubMovement[] = [];
+    const push = (rows: StandingRow[], tier: Tier) => {
+      for (const r of rows) {
+        const up = r.position <= PROMOTE[tier];
+        const down = r.position > rows.length - RELEGATE[tier];
+        if (!up && !down) continue;
+        const to = TIERS[TIERS.indexOf(tier) + (up ? -1 : 1)] ?? tier;
+        movements.push({ clubId: r.clubId, from: tier, to, kind: up ? 'PROMOTED' : 'RELEGATED', position: r.position, isHuman: !!s.clubs[r.clubId]?.isHuman });
+      }
+    };
+    push(table, s.settings.tier);
+    if (hasVirtual(s)) otherTiers(s).forEach((t, g) => push(this.virtualLeague(s, g, true).table, t));
+    return {
+      season: s.time.season, tier: s.settings.tier, leagueId: leagueIdOf(s.settings.tier), finalTable: table, championId: table[0]?.clubId ?? '', labels, prizes,
+      // 구 가짜 세이브(가상 구단 없음)는 실제 이동 없음 → UI 는 labels 폴백
+      ...(hasVirtual(s) ? { movements } : {}),
+    };
   }
 
   private strengthOf(s: GameState, rp: ResolvedPlan): number {

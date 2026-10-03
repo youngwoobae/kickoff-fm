@@ -164,6 +164,64 @@ function PlayerDetail({ p, attrs }: { p: Player; attrs: AttrDef[] }) {
       <p className="small">
         출전 {p.season.apps} (선발 {p.season.starts}) · {p.season.minutes}분 · 골 {p.season.goals} · 슈팅 {p.season.shots} · 키패스 {p.season.keyPasses} · 태클 {p.season.tackles}
       </p>
+      <GrowthHistory p={p} />
     </div>
+  );
+}
+
+/** 성장 기록 (2.1.0 Player.history, 시즌 경계에서 쌓인다): OVR 추이 선 + 시즌 목록 */
+function GrowthHistory({ p }: { p: Player }) {
+  const hist = p.history ?? [];
+  if (!hist.length) {
+    return (
+      <>
+        <h3 className="h3">성장 기록</h3>
+        <p className="small muted">시즌이 끝나면 OVR 기록이 쌓여요 (지금 OVR {p.ovr})</p>
+      </>
+    );
+  }
+  const pts = [...hist.map((h) => ({ label: `S${h.season}`, ovr: h.ovr })), { label: '현재', ovr: p.ovr }];
+  const lo = Math.min(...pts.map((x) => x.ovr)) - 2;
+  const hi = Math.max(...pts.map((x) => x.ovr)) + 2;
+  const W = 300;
+  const H = 90;
+  const x = (i: number) => 20 + (i * (W - 40)) / Math.max(1, pts.length - 1);
+  const y = (v: number) => 20 + ((hi - v) * (H - 40)) / (hi - lo);
+  const delta = (cur: number, prev?: number) => {
+    if (prev === undefined) return '';
+    const d = cur - prev;
+    return d > 0 ? ` ▲+${d}` : d < 0 ? ` ▼${d}` : ' –';
+  };
+  return (
+    <>
+      <h3 className="h3">성장 기록</h3>
+      <svg className="ovr-spark" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`OVR 추이: ${pts.map((q) => `${q.label} ${q.ovr}`).join(', ')}`}>
+        <polyline points={pts.map((q, i) => `${x(i)},${y(q.ovr)}`).join(' ')} />
+        {pts.map((q, i) => (
+          <g key={q.label}>
+            <circle cx={x(i)} cy={y(q.ovr)} r={4} />
+            <text x={x(i)} y={y(q.ovr) - 8} textAnchor="middle">
+              {q.ovr}
+            </text>
+            <text x={x(i)} y={H - 4} textAnchor="middle" className="ovr-spark-axis">
+              {q.label}
+            </text>
+          </g>
+        ))}
+      </svg>
+      <ul className="list compact">
+        {[...hist].reverse().map((h, i, arr) => (
+          <li key={h.season} className="list-row small">
+            <span>
+              S{h.season} · {h.age}세{h.tier && ` · ${h.tier}`} · {h.apps}경기 {h.goals}골
+            </span>
+            <span>
+              OVR <strong>{h.ovr}</strong>
+              {delta(h.ovr, arr[i + 1]?.ovr)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }

@@ -10,6 +10,7 @@ import { formatKc } from '../format';
 import { PlanEditorProvider } from '../plan/PlanEditor';
 import { ServiceProvider, useAction, useActor, useAsyncAction, useQuery, useSaveStatus, useService, useServiceCtx, useSnapshot } from '../service/ServiceContext';
 import { DEV_TOOLS, createServiceFor, resolveServiceMode, type ServiceMode } from '../service/serviceHost';
+import { CareerScreen } from '../screens/CareerScreen';
 import { CoachScreen } from '../screens/CoachScreen';
 import { FinanceScreen } from '../screens/FinanceScreen';
 import { HomeScreen } from '../screens/HomeScreen';
@@ -193,7 +194,7 @@ function TabContent({ tab }: { tab: TabId }) {
       const dev = !!DevPanel && (snap?.settings.devMode ?? true);
       const cur = !dev && nav.club === 'dev' ? 'league' : nav.club;
       const body =
-        cur === 'league' ? <LeagueScreen /> : cur === 'finance' ? <FinanceScreen /> : cur === 'coach' ? <CoachScreen /> : DevPanel && (
+        cur === 'league' ? <LeagueScreen /> : cur === 'career' ? <CareerScreen /> : cur === 'finance' ? <FinanceScreen /> : cur === 'coach' ? <CoachScreen /> : DevPanel && (
           <Suspense fallback={<div className="boot">불러오는 중…</div>}>
             <DevPanel />
           </Suspense>
@@ -207,6 +208,7 @@ function TabContent({ tab }: { tab: TabId }) {
           onChange={(v) => go({ club: v })}
           options={[
             { value: 'league', label: '리그' },
+            { value: 'career', label: '커리어' },
             { value: 'finance', label: '재정' },
             { value: 'coach', label: '코치실' },
             ...(dev ? [{ value: 'dev' as const, label: '개발자' }] : []),

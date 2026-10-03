@@ -4,7 +4,7 @@ import { createContext, useContext } from 'react';
 export type TabId = 'home' | 'squad' | 'tactics' | 'match' | 'club';
 export type SquadSub = 'list' | 'lineup';
 export type TacticsSub = 'team' | 'plan';
-export type ClubSub = 'league' | 'finance' | 'coach' | 'dev';
+export type ClubSub = 'league' | 'career' | 'finance' | 'coach' | 'dev';
 
 export interface NavState {
   tab: TabId;

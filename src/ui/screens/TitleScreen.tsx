@@ -1,9 +1,9 @@
 /** S01 타이틀/슬롯 화면: 슬롯 3개 이어하기·새 게임·가져오기·내보내기·삭제 (소유: B, 계약 2.0.0) */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { SAVE_SLOT_IDS, isGameError } from '../../services';
-import type { GamePhase, SaveSlotId, SaveSlotMeta } from '../../types';
-import { Badge, Card } from '../components/kit';
-import { downloadText } from '../format';
+import type { GamePhase, SaveSlotId, SaveSlotMeta, Tier } from '../../types';
+import { Badge, Card, Segmented } from '../components/kit';
+import { TIER_NAME, downloadText } from '../format';
 import { useAsyncAction, useService, useServiceCtx } from '../service/ServiceContext';
 
 /**
@@ -185,12 +185,13 @@ function NewGameForm({ slotId, overwrite, onCancel, run }: { slotId: SaveSlotId;
   const act = useAsyncAction();
   const [clubName, setClubName] = useState('성수 유나이티드');
   const [seed, setSeed] = useState('');
+  const [startTier, setStartTier] = useState<Tier>('T5');
 
   const start = () => {
     if (overwrite && !confirm(`슬롯 ${slotId} 의 기존 세이브를 지우고 새 게임을 시작할까요?`)) return;
     const n = Number(seed);
     void run('새 게임을 만드는 중…', () =>
-      act((s) => s.newGame({ clubName: clubName.trim() || undefined, seed: seed && Number.isFinite(n) ? n : undefined, devMode: true, slotId }), '새 시즌을 시작합니다!'),
+      act((s) => s.newGame({ clubName: clubName.trim() || undefined, seed: seed && Number.isFinite(n) ? n : undefined, devMode: true, slotId, startTier }), '새 시즌을 시작합니다!'),
     );
   };
 
@@ -201,6 +202,19 @@ function NewGameForm({ slotId, overwrite, onCancel, run }: { slotId: SaveSlotId;
         <span>구단 이름</span>
         <input value={clubName} maxLength={16} onChange={(e) => setClubName(e.target.value)} />
       </label>
+      <div className="field">
+        <span>시작 리그</span>
+        <Segmented
+          label="시작 리그"
+          value={startTier}
+          onChange={setStartTier}
+          options={[
+            { value: 'T5', label: `T5 ${TIER_NAME.T5} (기본)` },
+            { value: 'T3', label: `T3 ${TIER_NAME.T3} (도전)` },
+          ]}
+        />
+        <small className="muted">{startTier === 'T5' ? '가장 아래 리그에서 차근차근 올라가요.' : '중간 리그에서 시작해요. 첫 시즌부터 강등 위험이 있어요.'}</small>
+      </div>
       <label className="field">
         <span>시드 (비우면 무작위)</span>
         <input inputMode="numeric" value={seed} onChange={(e) => setSeed(e.target.value.replace(/[^0-9]/g, ''))} placeholder="예: 42" />

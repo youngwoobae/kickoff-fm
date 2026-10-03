@@ -12,6 +12,9 @@ import type {
   FormationDef,
   Kc,
   LedgerKind,
+  PromotionLabel,
+  PromotionLedgerKind,
+  Tier,
   PlanAdjustmentKind,
   PlanSource,
   Player,
@@ -101,7 +104,8 @@ export const ADJ_LABEL: Record<PlanAdjustmentKind, string> = {
   CONDITIONAL_DISABLED: '조건부 지시 비활성',
 };
 
-export const LEDGER_LABEL: Record<LedgerKind, string> = {
+/** 2.1.0: PromotionLedgerKind 는 M3.3 이 LedgerKind 에 합칠 때까지 별도 유니온 */
+export const LEDGER_LABEL: Record<LedgerKind | PromotionLedgerKind, string> = {
   SEASON_BUDGET: '시즌 배정금',
   SALARY: '연봉',
   MATCH_WIN: '승리 수당',
@@ -111,7 +115,16 @@ export const LEDGER_LABEL: Record<LedgerKind, string> = {
   CHAMPION_BONUS: '우승 수당',
   CARRY_EXCESS_SPLIT: '이월 초과분 분리',
   TRANSFER_BUDGET_EXPIRED: '한정 예산 소멸',
+  PROMOTION_BONUS: '승격 보너스',
+  PARACHUTE: '강등 완충금',
 };
+
+/** 2.1.0 피라미드 (기획서 6.1). 표시용 이름만, 규칙은 서비스(LeagueInfo)가 정한다 */
+export const TIER_NAME: Record<Tier, string> = { T1: '프리미어 디비전', T2: '디비전 1', T3: '디비전 2', T4: '디비전 3', T5: '루키 리그' };
+export const tierText = (t: Tier) => `${t} ${TIER_NAME[t]}`;
+/** 색과 함께 쓰는 기호·문구 (색만으로 구분하지 않는다) */
+export const LABEL_TEXT: Record<PromotionLabel, string> = { PROMOTED: '▲ 승격', RELEGATED: '▼ 강등', STAYED: '– 잔류' };
+export const LABEL_TONE: Record<PromotionLabel, 'good' | 'bad' | 'neutral'> = { PROMOTED: 'good', RELEGATED: 'bad', STAYED: 'neutral' };
 
 export const PROPOSAL_STATUS_LABEL: Record<ProposalStatus, string> = {
   OPEN: '대기', APPROVED: '승인됨', REJECTED: '거절됨', EXPIRED: '만료', SUPERSEDED: '대체됨', STALE: '무효(재검증 실패)',

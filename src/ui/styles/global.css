@@ -1896,3 +1896,80 @@ button.fx-row {
   background: var(--bad-soft);
   color: var(--bad);
 }
+
+/* 2.1.0 피라미드·승강·커리어·성장 (M3.5) */
+.league-head {
+  margin: 0 2px;
+}
+.h4 {
+  font-size: 14px;
+  margin: 10px 0 2px;
+}
+.list-row.is-me {
+  background: var(--accent-soft);
+}
+.promo-banner {
+  border: 2px solid currentColor;
+  border-radius: var(--radius);
+  padding: 16px;
+  text-align: center;
+  animation: promo-pop 0.6s ease-out both;
+}
+.promo-good {
+  background: var(--good-soft);
+  color: var(--good);
+}
+.promo-bad {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+.promo-neutral {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.promo-title {
+  font-size: 28px;
+  font-weight: 800;
+}
+.promo-sub {
+  color: var(--text);
+  font-weight: 600;
+}
+.card .promo-banner {
+  margin-bottom: 8px;
+}
+@keyframes promo-pop {
+  from {
+    transform: scale(0.85);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.04);
+    opacity: 1;
+  }
+  to {
+    transform: none;
+  }
+}
+.ovr-spark {
+  width: 100%;
+  height: auto;
+  max-height: 120px;
+}
+.ovr-spark polyline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+.ovr-spark circle {
+  fill: var(--accent);
+}
+.ovr-spark text {
+  fill: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+}
+.ovr-spark .ovr-spark-axis {
+  fill: var(--muted);
+  font-weight: 400;
+}

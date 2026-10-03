@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import type { DayResult, Fixture, MatchSummary } from '../../types';
 import { Badge, Card, Empty, Meter, Sheet, StickyActions } from '../components/kit';
+import { PromotionBanner } from './LeagueScreen';
 import { ADJ_LABEL, BOT_STYLE_LABEL, PLAN_SOURCE_LABEL, formatKc, LEDGER_LABEL } from '../format';
 import { useNav } from '../app/nav';
 import { usePlanEditor } from '../plan/PlanEditor';
@@ -274,15 +275,10 @@ function SeasonOverCard() {
   const { go } = useNav();
   const out = useQuery((s) => s.getSeasonOutcome()).data;
   if (!out) return null;
-  const row = out.finalTable.find((r) => r.clubId === snap.userClubId);
-  const label = out.labels[snap.userClubId];
   return (
     <Card title={`시즌 ${out.season} 종료`}>
-      <p className="big">
-        {row?.position}위 · 승점 {row?.points}{' '}
-        {label === 'PROMOTED' ? <Badge tone="good">▲ 승격</Badge> : label === 'RELEGATED' ? <Badge tone="bad">▼ 강등</Badge> : <Badge>잔류</Badge>}
-      </p>
-      <p className="muted small">우승: {snap.clubs[out.championId]?.name} · 상금 {formatKc(out.prizes[snap.userClubId] ?? 0)} (Phase 0: 실제 티어 이동 없음)</p>
+      <PromotionBanner out={out} />
+      <p className="muted small">우승: {snap.clubs[out.championId]?.name} · 상금 {formatKc(out.prizes[snap.userClubId] ?? 0)}</p>
       <div className="btn-row">
         <button type="button" className="btn btn-secondary" onClick={() => go({ tab: 'club', club: 'league' })}>
           시즌 결산 보기
