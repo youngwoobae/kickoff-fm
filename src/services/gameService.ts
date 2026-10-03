@@ -4,6 +4,7 @@
  * → (3) storage.save → (4) snapshot 교체 → (5) 리스너 통지 순서. 중간 실패 시 이전 상태 유지(원자성).
  * 2.0.0: 슬롯이 열려 있으면 (3) 대신 (4)·(5) 뒤에 슬롯 저장소 쓰기를 예약한다(write-behind, scheduleWrite = 자동 저장 훅 지점).
  * 쓰기 실패는 상태를 되돌리지 않고 SaveStatus.error 로 알리며, flush() 가 재시도한다.
+ * 2.0.1: 포트에 로그 저장소(readLog/writeLog)가 있으면 본문에서 actionLog 를 빼고 따로 쓴다. logEvent 는 로그만 쓴다.
  */
 import type {
   ActionKind,
@@ -128,12 +129,12 @@ import {
 } from './api';
 import { SAVE_SLOT_IDS } from './api';
 import { GameError } from './errors';
-import { createMemorySlotStorage, createMemoryStorage, systemClock, type Clock, type LegacyStoragePort, type StoragePort } from './ports';
+import { createMemorySlotStorage, createMemoryStorage, slotMetaOf, systemClock, type Clock, type LegacyStoragePort, type StoragePort } from './ports';
 
 export interface GameServiceDeps {
   /** @deprecated 1.x 동기 단일 세이브 (loadGame/resetGame, 슬롯이 열려 있지 않을 때의 저장). 기본: 메모리 */
   storage?: LegacyStoragePort;
-  /** 2.0.0 슬롯 저장소. 기본: 메모리. 브라우저는 createLocalStorageSlotStorage() (M2.2 부터 IndexedDB) */
+  /** 2.0.0 슬롯 저장소. 기본: 메모리. 브라우저는 createIndexedDbSlotStorage() (IndexedDB, 불가 시 localStorage 폴백) */
   slots?: StoragePort;
   clock?: Clock;
 }
@@ -239,16 +240,22 @@ function saveProblem(x: unknown): string | null {
   return null;
 }
 
+interface PendingWrite {
+  s: GameState;
+  /** 본문(세이브)도 쓴다. false = 로그만 (logEvent) */
+  save: boolean;
+}
+
 class LocalGameService implements GameService {
   readonly contractVersion = CONTRACT_VERSION;
   private readonly storage: LegacyStoragePort;
   private readonly slots: StoragePort;
   private readonly clock: Clock;
   private activeSlot: SaveSlotId | null = null;
-  /** 쓰기 대기 (슬롯별 최신 상태만 = 합치기) */
-  private readonly pendingWrites = new Map<SaveSlotId, GameState>();
+  /** 쓰기 대기 (슬롯별 최신 상태만 = 합치기). save=false 면 행동 로그만 쓴다 */
+  private readonly pendingWrites = new Map<SaveSlotId, PendingWrite>();
   /** 쓰기 실패한 최신 상태. 새 변경이 오면 대체되고, flush 가 재시도한다 */
-  private readonly failedWrites = new Map<SaveSlotId, GameState>();
+  private readonly failedWrites = new Map<SaveSlotId, PendingWrite>();
   private writing: Promise<void> | null = null;
   private saveStatus: SaveStatus = { slotId: null, pending: false, lastSavedAt: null, error: null };
   private readonly listeners = new Set<() => void>();
@@ -300,11 +307,16 @@ class LocalGameService implements GameService {
 
   // ── 슬롯 저장 (write-behind) ───────────────────────────────────
 
-  /** 자동 저장 훅 지점: 슬롯이 열려 있으면 현재 상태 쓰기를 예약한다. 매 변경(= 매일 처리 직후 포함)마다 불린다 */
-  private scheduleWrite(): void {
+  /**
+   * 자동 저장 훅 지점: 슬롯이 열려 있으면 현재 상태 쓰기를 예약한다. 매 변경(= 매일 처리 직후 포함)마다 불린다.
+   * saveBody=false(logEvent): 로그 저장소가 있으면 로그만 쓴다. 이미 대기 중인 본문 쓰기는 유지된다.
+   */
+  private scheduleWrite(saveBody = true): void {
     if (this.activeSlot === null || !this.state) return;
-    this.failedWrites.delete(this.activeSlot);
-    this.pendingWrites.set(this.activeSlot, this.state);
+    const id = this.activeSlot;
+    const prev = this.pendingWrites.get(id) ?? this.failedWrites.get(id);
+    this.failedWrites.delete(id);
+    this.pendingWrites.set(id, { s: this.state, save: saveBody || !this.slots.writeLog || (prev?.save ?? false) });
     this.writing ??= this.drain();
     this.updateStatus();
   }
@@ -312,13 +324,17 @@ class LocalGameService implements GameService {
   private async drain(): Promise<void> {
     try {
       while (this.pendingWrites.size > 0) {
-        const [slotId, s] = this.pendingWrites.entries().next().value as [SaveSlotId, GameState];
+        const [slotId, w] = this.pendingWrites.entries().next().value as [SaveSlotId, PendingWrite];
         this.pendingWrites.delete(slotId);
         try {
-          await this.slots.write(slotId, JSON.stringify(s), this.metaOf(slotId, s));
+          // 로그 먼저, 본문+메타 나중 (메타 = 커밋 표식). ponytail: 로그는 통째로 다시 쓴다(≤ ACTION_LOG_LIMIT), 커지면 키별 append 저장소로
+          if (this.slots.writeLog) await this.slots.writeLog(slotId, JSON.stringify(w.s.actionLog));
+          if (w.save) await this.slots.write(slotId, this.bodyOf(w.s), slotMetaOf(slotId, w.s, this.clock.nowIso()));
           this.updateStatus({ lastSavedAt: this.clock.nowIso(), error: null });
         } catch (e) {
-          if (!this.pendingWrites.has(slotId)) this.failedWrites.set(slotId, s);
+          const newer = this.pendingWrites.get(slotId);
+          if (newer) newer.save ||= w.save;
+          else this.failedWrites.set(slotId, w);
           this.updateStatus({ error: e instanceof Error ? e.message : String(e) });
         }
       }
@@ -328,17 +344,34 @@ class LocalGameService implements GameService {
     }
   }
 
-  private metaOf(slotId: SaveSlotId, s: GameState): SaveSlotMeta {
-    return {
-      slotId,
-      clubName: s.clubs[s.userClubId]?.name ?? '',
-      tier: s.settings.tier,
-      season: s.time.season,
-      day: s.time.day,
-      phase: s.phase,
-      savedAt: this.clock.nowIso(),
-      schemaVersion: s.schemaVersion,
-    };
+  /** 슬롯 본문. 로그 저장소가 있으면 actionLog 를 뺀다 */
+  private bodyOf(s: GameState): string {
+    if (!this.slots.writeLog) return JSON.stringify(s);
+    const { actionLog: _log, ...rest } = s;
+    return JSON.stringify(rest);
+  }
+
+  /** 슬롯 본문 + 로그 → 세이브 JSON. 로그가 없거나 깨졌으면 본문의 actionLog(없으면 []) — 로그 손상이 세이브를 막지 않는다 */
+  private async readSlot(slotId: SaveSlotId): Promise<string | null> {
+    const body = await this.slots.read(slotId);
+    if (body === null || !this.slots.readLog) return body;
+    let x: unknown;
+    try {
+      x = JSON.parse(body);
+    } catch {
+      return body; // parseSave 가 SAVE_INCOMPATIBLE 로 알린다
+    }
+    if (!isObj(x)) return body;
+    let log: unknown = null;
+    try {
+      const raw = await this.slots.readLog(slotId);
+      if (raw !== null) log = JSON.parse(raw);
+    } catch {
+      /* 로그 손상·읽기 실패 */
+    }
+    if (Array.isArray(log)) x.actionLog = log;
+    else if (!Array.isArray(x.actionLog)) x.actionLog = [];
+    return JSON.stringify(x);
   }
 
   /** 상태 객체는 바뀔 때만 교체한다. 리스너 통지는 error 가 바뀔 때만 (logEvent 무통지 계약 유지) */
@@ -537,7 +570,7 @@ class LocalGameService implements GameService {
     this.assertSlot(slotId);
     await this.writing; // 진행 중 쓰기가 끝난 뒤 읽는다 (실패분은 failedWrites 에 남아 flush 가 재시도)
     const unsaved = this.pendingWrites.get(slotId) ?? this.failedWrites.get(slotId);
-    const raw = unsaved ? JSON.stringify(unsaved) : await this.slots.read(slotId);
+    const raw = unsaved ? JSON.stringify(unsaved.s) : await this.readSlot(slotId);
     if (raw === null) throw new GameError('NOT_FOUND', `슬롯 ${slotId} 이 비어 있습니다`);
     const s = this.parseSave(raw);
     this.activeSlot = slotId;
@@ -564,7 +597,11 @@ class LocalGameService implements GameService {
   }
 
   async flush(): Promise<void> {
-    for (const [id, st] of this.failedWrites) if (!this.pendingWrites.has(id)) this.pendingWrites.set(id, st);
+    for (const [id, w] of this.failedWrites) {
+      const newer = this.pendingWrites.get(id);
+      if (newer) newer.save ||= w.save;
+      else this.pendingWrites.set(id, w);
+    }
     this.failedWrites.clear();
     if (this.pendingWrites.size > 0) this.writing ??= this.drain();
     await this.writing;
@@ -573,9 +610,9 @@ class LocalGameService implements GameService {
 
   async exportSlot(slotId: SaveSlotId): Promise<string> {
     this.assertSlot(slotId);
-    const mem = slotId === this.activeSlot ? this.state : (this.pendingWrites.get(slotId) ?? this.failedWrites.get(slotId));
+    const mem = slotId === this.activeSlot ? this.state : (this.pendingWrites.get(slotId) ?? this.failedWrites.get(slotId))?.s;
     if (mem) return JSON.stringify(mem);
-    const raw = await this.slots.read(slotId);
+    const raw = await this.readSlot(slotId);
     if (raw === null) throw new GameError('NOT_FOUND', `슬롯 ${slotId} 이 비어 있습니다`);
     return raw;
   }
@@ -1057,7 +1094,7 @@ class LocalGameService implements GameService {
     if (log.length > ACTION_LOG_LIMIT) log = log.slice(-ACTION_LOG_LIMIT);
     (s as GameState).actionLog = log;
     if (this.activeSlot !== null) {
-      this.scheduleWrite(); // ponytail: 로그 1건에 세이브 전체 재직렬화 — M2.2 가 logs 저장소를 분리해 없앤다
+      this.scheduleWrite(false); // 로그 저장소에만 쓴다 (세이브 재직렬화 없음)
       return;
     }
     try {

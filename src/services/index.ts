@@ -20,11 +20,15 @@ export {
   createMemoryStorage,
   createMemorySlotStorage,
   createLocalStorageSlotStorage,
+  kvSlotStorage,
+  localStorageKv,
   systemClock,
   SAVE_KEY,
   SLOT_KEY_PREFIX,
   type StoragePort,
   type LegacyStoragePort,
   type Clock,
+  type KeyValue,
 } from './ports';
+export { createIndexedDbSlotStorage, migrateLocalSaves } from './idbStorage';
 export { createGameService, type GameServiceDeps } from './gameService';

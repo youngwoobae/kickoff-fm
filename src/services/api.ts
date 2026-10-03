@@ -67,7 +67,11 @@ import type {
  * NewGameOptions.slotId, importSave(json, slotId?). 슬롯이 열려 있으면 모든 변경은 메모리에 즉시 반영되고
  * 저장소에는 뒤에서 쓴다(write-behind). loadGame·resetGame 은 deprecated(UI 이전 M2.3 뒤 제거). 아키텍처 16장.
  */
-export const CONTRACT_VERSION = '2.0.0';
+/**
+ * 2.0.1 (패치, 추가만): IndexedDB 슬롯 저장소 createIndexedDbSlotStorage()(불가 시 localStorage 폴백, 1.x 세이브 → 슬롯 1 이전),
+ * StoragePort 선택 메서드 readLog/writeLog(행동 로그 분리: logEvent 가 세이브 본문을 다시 쓰지 않는다). 아키텍처 16장.
+ */
+export const CONTRACT_VERSION = '2.0.1';
 
 /** 슬롯 번호 목록 (D28: 3개) */
 export const SAVE_SLOT_IDS: readonly SaveSlotId[] = [1, 2, 3];
