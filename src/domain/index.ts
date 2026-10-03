@@ -1,6 +1,23 @@
 /** 도메인 공개 API. services 는 이 파일만 import 한다. 소유: A. */
 export { makeMatchId, parseMatchId, generateDoubleRoundRobin } from './league/schedule';
-export { computeStandings } from './league/standings';
+export { computeStandings, resultsOfFixtures, type ResultLike } from './league/standings';
+export {
+  TIERS,
+  TIER_NAMES,
+  BOUNDARY_MOVES,
+  DEFAULT_START_TIER,
+  leagueIdOf,
+  movesOf,
+  leagueInfo,
+  buildCareer,
+  leaguesOf,
+  userLeagueOf,
+  findLeague,
+  clubTierMap,
+  clubLeagueMap,
+  buildPyramid,
+} from './league/pyramid';
+export { QUICK_SIM, teamStrength, quickSimScore } from './league/quickSim';
 export { judgeSeason } from './league/promotion';
 export { expectedPoints } from './league/xpts';
 export { buildOpponentScout, summarizeInstructions, lastTacticOf, botStyleOf } from './league/scout';
@@ -11,6 +28,8 @@ export {
   computeOvr,
   assignSalaries,
   scoutGrade,
+  salaryFor,
+  botName,
   TIER_REFERENCE_OVR,
   type GenerateSquadOptions,
 } from './squad/generator';
@@ -18,7 +37,7 @@ export { ovrAt, OVR_WEIGHTS } from './squad/ovr';
 export { applyDailyRecovery, applyMatchLine, applyMoraleResult, staminaRecoveryBonus } from './squad/condition';
 export { resolvePlan, validatePlan, remapLineup, pickCandidate, stripOpponentOrders, type ResolvePlanContext } from './plan/resolvePlan';
 export { toEngineTeamInput, toEnginePlayer } from './plan/engineInput';
-export { TIER_ECONOMY, SEASON_DAYS, dailySalary, matchBonus, prizeFor, prizeRate, carryOver, spendable, postLedger } from './economy/economy';
+export { TIER_ECONOMY, SEASON_DAYS, S_REF, TIER_GAP, baseSalary, startingBalance, dailySalary, matchBonus, prizeFor, prizeRate, carryOver, spendable, postLedger } from './economy/economy';
 export { checkAction, isNewCoach, type PermissionContext } from './coach/permissions';
 export {
   createProposal,
@@ -76,6 +95,7 @@ export {
   OWNER_ID,
   COACH_ID,
   SYSTEM_ACTOR,
+  TIER_BAND,
   type AdvanceOutcome,
 } from './day/advanceDay';
 export { DomainError, isDomainError } from './errors';

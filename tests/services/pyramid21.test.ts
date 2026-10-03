@@ -21,35 +21,48 @@ describe('피라미드·커리어 (2.1.0)', () => {
     expect(CONTRACT_VERSION).toBe('2.1.0');
   });
 
-  it('단일 리그 상태: 피라미드 = 사용자 리그 하나, 같은 상태면 같은 참조', () => {
+  it('피라미드: 5리그 × 14구단(70, 겹침 없음), 기본 시작 T5, 같은 상태면 같은 참조 (M3.2)', () => {
     const s = svc();
     s.newGame({ seed: 1 });
     const p = s.getPyramid();
-    expect(p.leagues).toHaveLength(1);
-    expect(p.leagues[0]).toMatchObject({ id: 'L-T3', tier: 'T3', name: '디비전 2', promoteCount: 2, relegateCount: 3, isUserLeague: true });
-    expect(p.leagues[0]!.clubIds).toHaveLength(14);
-    expect(p.userLeagueId).toBe('L-T3');
+    expect(p.leagues.map((l) => l.tier)).toEqual(['T1', 'T2', 'T3', 'T4', 'T5']);
+    expect(p.userLeagueId).toBe('L-T5');
+    expect(p.leagues.filter((l) => l.isUserLeague).map((l) => l.id)).toEqual(['L-T5']);
+    expect(p.leagues[2]).toMatchObject({ id: 'L-T3', tier: 'T3', name: '디비전 2', promoteCount: 2, relegateCount: 3, isUserLeague: false });
+    const all = p.leagues.flatMap((l) => l.clubIds);
+    expect(new Set(all).size).toBe(70);
+    for (const l of p.leagues) expect(l.clubIds).toHaveLength(14);
+    expect(all.sort()).toEqual(Object.keys(s.getSnapshot()!.clubs).sort());
+    expect(p.leagues[4]!.clubIds).toContain(s.getSnapshot()!.userClubId);
+    expect(s.getSnapshot()!.settings).toMatchObject({ tier: 'T5', startTier: 'T5' });
     expect(s.getPyramid()).toBe(p);
   });
 
-  it('startTier 가 리그 티어가 되고 tier 보다 우선한다. 승강 인원은 메인 결정 U-1', () => {
+  it('startTier 가 사용자 리그 티어가 되고 tier 보다 우선한다. 승강 인원은 메인 결정 U-1', () => {
     const s = svc();
     const counts: Record<string, [number, number]> = { T1: [0, 2], T2: [2, 2], T3: [2, 3], T4: [3, 3], T5: [3, 0] };
     for (const t of ['T1', 'T2', 'T3', 'T4', 'T5'] as const) {
       s.newGame({ seed: 2, startTier: t, tier: 'T1' });
       expect(s.getSnapshot()!.settings).toMatchObject({ tier: t, startTier: t });
-      const l = s.getPyramid().leagues[0]!;
-      expect([l.promoteCount, l.relegateCount]).toEqual(counts[t]);
+      const p = s.getPyramid();
+      expect(p.userLeagueId).toBe(`L-${t}`);
+      for (const l of p.leagues) expect([l.promoteCount, l.relegateCount]).toEqual(counts[l.tier]);
     }
   });
 
-  it('getStandings(leagueId) / getFixtures({leagueId})', () => {
+  it('getStandings(leagueId) / getFixtures({leagueId}): 전 리그, 없는 리그는 NOT_FOUND / []', () => {
     const s = svc();
     s.newGame({ seed: 3 });
-    expect(s.getStandings('L-T3')).toBe(s.getStandings());
-    expect(errCode(() => s.getStandings('L-T1'))).toBe('NOT_FOUND');
-    expect(s.getFixtures({ leagueId: 'L-T3' })).toEqual(s.getFixtures());
-    expect(s.getFixtures({ leagueId: 'L-T5' })).toEqual([]);
+    expect(s.getStandings('L-T5')).toBe(s.getStandings());
+    const t1 = s.getStandings('L-T1');
+    expect(t1).toHaveLength(14);
+    expect(t1.map((r) => r.clubId).sort()).toEqual(s.getPyramid().leagues[0]!.clubIds);
+    expect(errCode(() => s.getStandings('L-T9'))).toBe('NOT_FOUND');
+    expect(s.getFixtures({ leagueId: 'L-T5' })).toEqual(s.getFixtures());
+    const f1 = s.getFixtures({ leagueId: 'L-T1' });
+    expect(f1).toHaveLength(182);
+    expect(f1.every((f) => f.leagueId === 'L-T1')).toBe(true);
+    expect(s.getFixtures({ leagueId: 'L-T9' })).toEqual([]);
   });
 
   it('커리어: 판정 전 빈 기록, 시즌 판정 후 순위·라벨·트로피', () => {

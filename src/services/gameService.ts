@@ -82,13 +82,20 @@ import {
 } from '../engine';
 import {
   COACH_ID,
+  DEFAULT_START_TIER,
   OWNER_ID,
   SCHEMA_VERSION,
   TIER_ECONOMY,
   advanceDayState,
   applyPatch,
   botStyleOf,
+  buildCareer,
   buildOpponentScout,
+  buildPyramid,
+  clubTierMap,
+  findLeague,
+  resultsOfFixtures,
+  userLeagueOf,
   buildReplay,
   buildReport,
   carryOver,
@@ -118,8 +125,6 @@ import {
   validatePlan as validatePlanDomain,
   type PlanBundle,
 } from '../domain';
-// ponytail: domain/index.ts 는 이 단위 소유 밖이라 직접 import. M3.2 가 index 로 옮긴다
-import { buildCareer, leagueIdOf, leagueInfo } from '../domain/league/pyramid';
 import {
   CONTRACT_VERSION,
   type FixtureFilter,
@@ -240,6 +245,21 @@ function saveProblem(x: unknown): string | null {
   for (const f of x.fixtures as unknown[]) {
     if (!isObj(f) || typeof f.id !== 'string' || !isNum(f.season) || !isNum(f.day) || !isObj(clubs[f.homeId as string]) || !isObj(clubs[f.awayId as string])) return '일정 형식 오류';
   }
+  if (x.leagues !== undefined) {
+    // 2.1.0 피라미드: 리그마다 고유 티어, 구단은 존재하고 한 리그에만, 사용자 구단 포함
+    if (!Array.isArray(x.leagues) || x.leagues.length === 0) return '리그 형식 오류';
+    const seen = new Set<unknown>();
+    const tiers = new Set<unknown>();
+    for (const l of x.leagues as unknown[]) {
+      if (!isObj(l) || typeof l.id !== 'string' || !TIER_ECONOMY[l.tier as keyof typeof TIER_ECONOMY] || tiers.has(l.tier) || !Array.isArray(l.clubIds)) return '리그 형식 오류';
+      tiers.add(l.tier);
+      for (const id of l.clubIds) {
+        if (!isObj(clubs[id as string]) || seen.has(id)) return `리그 ${l.id} 구단 오류`;
+        seen.add(id);
+      }
+    }
+    if (!seen.has(x.userClubId)) return '사용자 구단이 리그에 없습니다';
+  }
   const ms = x.memberships as unknown[];
   if (!ms.some((m) => isObj(m) && m.userId === x.actorUserId && m.clubId === x.userClubId)) return '현재 사용자 멤버십이 없습니다';
   return null;
@@ -267,7 +287,7 @@ class LocalGameService implements GameService {
   private saveStatus: SaveStatus = { slotId: null, pending: false, lastSavedAt: null, error: null };
   private readonly listeners = new Set<() => void>();
   private state: GameState | null = null;
-  private standingsCache: { state: GameState; rows: StandingRow[] } | null = null;
+  private standingsCache: { state: GameState; rows: Map<LeagueId, StandingRow[]> } | null = null;
   private pyramidCache: { state: GameState; pyramid: Pyramid } | null = null;
   private readonly replayCache = new Map<string, MatchReplay>();
 
@@ -518,8 +538,7 @@ class LocalGameService implements GameService {
   // ── 수명 주기 ──────────────────────────────────────────────────
 
   newGame(opts: NewGameOptions = {}): GameSnapshot {
-    // 단일 리그 상태: 시작 티어 = 이 리그 티어. 기본 T3 유지(DEFAULT_START_TIER=T5 는 M3.2 피라미드부터)
-    const tier = opts.startTier ?? opts.tier ?? 'T3';
+    const tier = opts.startTier ?? opts.tier ?? DEFAULT_START_TIER;
     const seed = opts.seed ?? hashString(`${this.clock.nowIso()}|${Date.now()}`);
     const s0 = createInitialState(
       seed,
@@ -686,19 +705,35 @@ class LocalGameService implements GameService {
 
   getStandings(leagueId?: LeagueId): StandingRow[] {
     const s = this.require();
-    if (leagueId !== undefined && leagueId !== leagueIdOf(s.settings.tier)) throw new GameError('NOT_FOUND', `리그 없음: ${leagueId}`);
-    if (this.standingsCache?.state === s) return this.standingsCache.rows;
-    const rows = computeStandings(Object.keys(s.clubs).sort(), Object.values(s.summaries), s.time.season, hashString(`${s.gameSeed}|tiebreak|${s.time.season}`));
-    this.standingsCache = { state: s, rows };
+    const user = userLeagueOf(s);
+    const league = leagueId === undefined ? user : findLeague(s, leagueId);
+    if (!league) throw new GameError('NOT_FOUND', `리그 없음: ${leagueId}`);
+    if (this.standingsCache?.state !== s) this.standingsCache = { state: s, rows: new Map() };
+    const hit = this.standingsCache.rows.get(league.id);
+    if (hit) return hit;
+    // 사용자 리그 = 엔진 요약(xG 포함), 다른 리그 = 경량 시뮬 스코어(D7). 타이브레이크 시드는 advanceDay 판정과 같다
+    const rows =
+      league.id === user.id
+        ? computeStandings([...league.clubIds].sort(), Object.values(s.summaries), s.time.season, hashString(`${s.gameSeed}|tiebreak|${s.time.season}`))
+        : computeStandings(
+            league.clubIds,
+            resultsOfFixtures(s.fixtures.filter((f) => f.leagueId === league.id && f.season === s.time.season)),
+            s.time.season,
+            hashString(`${s.gameSeed}|tiebreak|${s.time.season}|${league.id}`),
+          );
+    this.standingsCache.rows.set(league.id, rows);
     return rows;
   }
 
   getFixtures(filter: FixtureFilter = {}): Fixture[] {
     const s = this.require();
-    if (filter.leagueId !== undefined && filter.leagueId !== leagueIdOf(s.settings.tier)) return [];
+    const user = userLeagueOf(s);
+    const leagueId = filter.leagueId ?? user.id;
+    // leagueId 없는 일정(스키마 2) = 사용자 리그
     return s.fixtures
       .filter(
         (f) =>
+          (f.leagueId ?? user.id) === leagueId &&
           (filter.clubId === undefined || f.homeId === filter.clubId || f.awayId === filter.clubId) &&
           (filter.day === undefined || f.day === filter.day) &&
           (filter.played === undefined || f.played === filter.played),
@@ -709,9 +744,7 @@ class LocalGameService implements GameService {
   getPyramid(): Pyramid {
     const s = this.require();
     if (this.pyramidCache?.state === s) return this.pyramidCache.pyramid;
-    // 단일 리그 상태: 사용자 리그 하나. M3.2 가 GameState 피라미드로 5리그를 채운다
-    const league = leagueInfo(s.settings.tier, Object.keys(s.clubs), true);
-    const pyramid: Pyramid = { season: s.time.season, leagues: [league], userLeagueId: league.id };
+    const pyramid = buildPyramid(s);
     this.pyramidCache = { state: s, pyramid };
     return pyramid;
   }
@@ -738,7 +771,8 @@ class LocalGameService implements GameService {
     const id = clubId ?? s.userClubId;
     const f = s.finances[id];
     if (!f) throw new GameError('NOT_FOUND', `재정 없음: ${id}`);
-    const econ = TIER_ECONOMY[s.settings.tier];
+    const tier = clubTierMap(s).get(id) ?? s.settings.tier;
+    const econ = TIER_ECONOMY[tier];
     const total = salaryTotal(s, id);
     const daysLeft = Math.max(0, 28 - s.time.day);
     const B = spendable(f.balance, total, daysLeft);
@@ -747,7 +781,7 @@ class LocalGameService implements GameService {
     const expense = season.filter((e) => e.amount < 0).reduce((a, e) => a - e.amount, 0);
     return {
       clubId: id,
-      tier: s.settings.tier,
+      tier,
       balance: f.balance,
       transferOnlyBudget: f.transferOnlyBudget,
       spendable: B,

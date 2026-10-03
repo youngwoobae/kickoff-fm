@@ -6,7 +6,7 @@ import type { ClubId, Day, GameTime, GameTimestamp, MatchId, PlayerId, ProposalI
 import type { Membership, Proposal } from './coach';
 import type { EngineTeamInput } from './engine';
 import type { Finance, LedgerEntry } from './economy';
-import type { Club, Fixture, MatchSummary, SeasonOutcome, Tier } from './league';
+import type { Club, Fixture, LeagueState, MatchSummary, SeasonOutcome, Tier } from './league';
 import type { PlanRecord, ResolvedPlan } from './plan';
 import type { Player } from './player';
 import type { MatchReport } from './report';
@@ -102,9 +102,17 @@ export interface GameState {
   userClubId: ClubId;
   /** 현재 로컬에서 행동 중인 사용자 (역할 전환 토글) */
   actorUserId: UserId;
+  /** 사용자 리그 + 다른 4리그의 모든 구단 (2.1.0 피라미드 세이브는 70) */
   clubs: Record<ClubId, Club>;
   players: Record<PlayerId, Player>;
+  /**
+   * 2.1.0 (M3.2): 5티어 피라미드(T1 → T5, 리그당 14구단). 없으면 단일 리그 세이브(스키마 2, clubs 전부가 사용자 리그).
+   * M3.3 의 스키마 2→3 변환이 채운다.
+   */
+  leagues?: LeagueState[];
+  /** 이번 시즌 전 리그 일정 (피라미드 세이브는 leagueId 가 채워져 있다) */
   fixtures: Fixture[];
+  /** 사용자 리그 경기만 (다른 리그 결과는 Fixture.score) */
   summaries: Record<MatchId, MatchSummary>;
   records: Record<MatchId, StoredMatchRecord>;
   /** 다음 경기 기준 구단별 초안·확정본. 경기 처리 후 비운다 */

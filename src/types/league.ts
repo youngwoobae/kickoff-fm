@@ -27,6 +27,17 @@ export interface LeagueInfo {
   isUserLeague: boolean;
 }
 
+/**
+ * 2.1.0 (M3.2): GameState 안의 리그 한 개. 사용자 리그만 풀 엔진, 나머지는 경량 시뮬(D7) 결과를 Fixture.score 로만 남긴다.
+ * 순서·승강 인원은 domain/league/pyramid.ts 가 티어로 계산한다(저장하지 않는다).
+ */
+export interface LeagueState {
+  id: LeagueId;
+  tier: Tier;
+  /** 정렬된 구단 ID (14) */
+  clubIds: ClubId[];
+}
+
 /** 2.1.0: 피라미드 전체 (T1 → T5 순) */
 export interface Pyramid {
   season: SeasonNo;
@@ -75,6 +86,11 @@ export interface Fixture {
   homeId: ClubId;
   awayId: ClubId;
   played: boolean;
+  /**
+   * 2.1.0 (M3.2): 치른 경기 스코어. 피라미드 세이브는 모든 리그의 치른 경기에 채운다(다른 리그는 MatchSummary 가 없으므로 유일한 결과).
+   * 없으면(스키마 2 세이브) 사용자 리그는 summaries[id] 를 본다.
+   */
+  score?: { home: number; away: number };
 }
 
 export interface TeamSummaryLite {

@@ -10,9 +10,9 @@ import type {
   ScoutGrade,
   Tier,
 } from '../../types';
-import { clamp, type Rng } from '../../engine';
+import { clamp, hashString, type Rng } from '../../engine';
 import { styleTactics } from '../ai/managerAi';
-import { TIER_ECONOMY } from '../economy/economy';
+import { baseSalary } from '../economy/economy';
 import { OVR_WEIGHTS, computeOvr } from './ovr';
 
 export { OVR_WEIGHTS, computeOvr };
@@ -91,7 +91,7 @@ const FAMILY = ['김', '이', '박', '최', '정', '강', '조', '윤', '장', '
 const GIVEN_A = ['민', '서', '도', '준', '현', '지', '태', '우', '승', '재', '하', '시', '건', '유', '동', '성', '은', '영', '진', '한'];
 const GIVEN_B = ['준', '호', '윤', '우', '민', '혁', '빈', '수', '훈', '원', '석', '규', '찬', '환', '결', '율', '겸', '온', '철', '범'];
 
-function gauss(rng: Rng): number {
+export function gauss(rng: Rng): number {
   const u = Math.max(1e-9, rng());
   const v = rng();
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
@@ -171,7 +171,16 @@ export function generatePlayer(rng: Rng, position: Position, targetOvr: number, 
   };
 }
 
-/** 연봉 총액을 OVR² 비례로 배분 (사람 팀 ≈ 캡 94%, 7.5) */
+/**
+ * 경제 설계 K2: 연봉 = S(OVR) × U(0.9, 1.1), 합계 보정 없음 (기준 스쿼드 ≈ 캡 85~88%).
+ * U 는 선수 ID·이름 해시에서 뽑는다 — 주입 rng 를 소비하면 같은 시드의 능력치가 바뀌어 보정 배치(generateSquad 사용)가 흔들린다.
+ */
+export function salaryFor(p: Pick<Player, 'id' | 'name' | 'ovr'>): number {
+  const u = hashString(`${p.id}|${p.name}|salary`) / 0x100000000;
+  return Math.round((baseSalary(p.ovr) * (0.9 + 0.2 * u)) / 1000) * 1000;
+}
+
+/** @deprecated Phase 0: 연봉 총액을 OVR² 비례로 배분. 생성은 salaryFor(K2) 를 쓴다 */
 export function assignSalaries(players: Player[], total: number): Player[] {
   const w = players.map((p) => p.ovr * p.ovr);
   const sum = w.reduce((a, b) => a + b, 0);
@@ -199,10 +208,7 @@ export function generateSquad(rng: Rng, opts: GenerateSquadOptions): Player[] {
     const id = `${opts.clubId}p${String(i + 1).padStart(2, '0')}`;
     return { ...p, id, clubId: opts.clubId };
   });
-  const econ = TIER_ECONOMY[opts.tier];
-  const ref = TIER_REFERENCE_OVR[opts.tier];
-  const scale = clamp(Math.pow(opts.targetOvr / ref, 2), 0.6, 1);
-  return assignSalaries(players, Math.round(econ.salaryCap * 0.94 * scale));
+  return players.map((p) => ({ ...p, contract: { ...p.contract, salary: salaryFor(p) } }));
 }
 
 const BOT_NAMES = [
@@ -226,9 +232,23 @@ const BOT_NAMES = [
   ['덕유 레드', '덕유'],
 ] as const;
 
+/** 피라미드 70구단용 추가 지명 (BOT_NAMES 뒤로 이어 붙인다, 2.1.0 M3.2) */
+const MORE_PLACES = [
+  '청계', '관악', '북한', '도봉', '수락', '팔공', '가야', '월악', '계룡', '내장', '변산', '월출', '주왕', '치악', '칠갑', '대둔', '천마', '명지',
+  '용문', '운악', '감악', '마니', '화악', '가리', '백운', '황매', '민주', '두륜', '조계', '선운', '모악', '천관', '능가', '금오', '비슬', '운문',
+  '가지', '신불', '영취', '토함', '남한', '북악', '인왕', '아차', '불암', '용마', '검단', '청량', '광교', '수리', '소요', '천보',
+];
+const MORE_SUFFIX = ['FC', '유나이티드', '시티', 'SC', '로버스', '애슬레틱', '레인저스', '워리어스'];
+
+/** 봇 이름. 0~17 은 Phase 0 이름 그대로, 그 뒤는 지명 + 접미사 (index 0~69 에서 서로 다름) */
 export function botName(index: number): { name: string; shortName: string } {
-  const n = BOT_NAMES[index % BOT_NAMES.length]!;
-  return { name: n[0], shortName: n[1] };
+  if (index < BOT_NAMES.length) {
+    const n = BOT_NAMES[index]!;
+    return { name: n[0], shortName: n[1] };
+  }
+  const k = (index - BOT_NAMES.length) % MORE_PLACES.length;
+  const place = MORE_PLACES[k]!;
+  return { name: `${place} ${MORE_SUFFIX[k % MORE_SUFFIX.length]}`, shortName: place };
 }
 
 export function createBotClub(rng: Rng, id: string, style: BotStyle, players: readonly Player[]): Club {

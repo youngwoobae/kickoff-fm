@@ -368,7 +368,8 @@ describe('advanceDay 상태 머신', () => {
     expect(state.time).toEqual({ season: 1, day: 2 });
     expect(state.phase).toBe('MATCHDAY');
     expect(state.records[result.userMatchId!]?.report.clubId).toBe(s.userClubId);
-    expect(state.fixtures.filter((f) => f.played)).toHaveLength(7);
+    expect(state.fixtures.filter((f) => f.played)).toHaveLength(35); // 사용자 리그 7 (엔진) + 다른 4리그 28 (경량 시뮬)
+    expect(state.fixtures.filter((f) => f.played).every((f) => f.score && f.leagueId)).toBe(true);
     // 경기 수당 + 2일차 연봉이 원장에 기록
     expect(result.ledger.some((e) => e.kind.startsWith('MATCH_'))).toBe(true);
     expect(result.ledger.some((e) => e.kind === 'SALARY' && e.day === 2)).toBe(true);
@@ -387,7 +388,8 @@ describe('advanceDay 상태 머신', () => {
       }
     }
     expect(results).toHaveLength(28);
-    expect(Object.keys(s.summaries)).toHaveLength(182);
+    expect(Object.keys(s.summaries)).toHaveLength(182); // 사용자 리그만 엔진 요약
+    expect(s.fixtures.filter((f) => f.played)).toHaveLength(910);
     const ledger = s.finances[s.userClubId]!.ledger;
     expect(ledger.filter((e) => e.kind === 'PRIZE')).toHaveLength(1);
     expect(ledger.find((e) => e.kind === 'PRIZE')!.day).toBe(27);
@@ -402,11 +404,11 @@ describe('advanceDay 상태 머신', () => {
     expect(next.time).toEqual({ season: 2, day: 1 });
     expect(next.phase).toBe('MATCHDAY');
     expect(next.seasonHistory).toHaveLength(1);
-    expect(next.fixtures).toHaveLength(182);
+    expect(next.fixtures).toHaveLength(910);
     expect(Object.keys(next.summaries)).toHaveLength(0);
     const p0 = s.players[s.clubs[s.userClubId]!.playerIds[0]!]!;
     expect(next.players[p0.id]!.age).toBe(p0.age + 1);
-    expect(Object.keys(next.players)).toHaveLength(14 * 22);
+    expect(Object.keys(next.players)).toHaveLength(70 * 22); // 피라미드: AI 구단 영구 존재(D6), 재생성 없음
   });
 
   it('SEASON_OVER 가 아니면 startNewSeason 은 INVALID_PHASE', () => {

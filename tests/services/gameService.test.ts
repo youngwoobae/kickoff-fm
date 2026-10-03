@@ -234,7 +234,7 @@ describe('GameService', () => {
 
   it('재정 요약, 상대 분석, 카탈로그', () => {
     const s = svc();
-    s.newGame({ seed: 12 });
+    s.newGame({ seed: 12, startTier: 'T3' });
     s.advanceDays(3);
     const f = s.getFinance();
     expect(f.salaryCap).toBe(64_000_000);

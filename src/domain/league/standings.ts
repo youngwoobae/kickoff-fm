@@ -1,5 +1,5 @@
 /** 순위 결정 (6.2): 승점 → 득실차 → 다득점 → 승자승 → 승자승 득실 → 누적 xG 차 → 추첨(시드). 소유: A. */
-import type { ClubId, FormLetter, MatchSummary, SeasonNo, StandingRow, TableZone } from '../../types';
+import type { ClubId, Fixture, FormLetter, MatchSummary, SeasonNo, StandingRow, TableZone } from '../../types';
 import { hashString } from '../../engine';
 
 interface Acc extends Omit<StandingRow, 'position' | 'zone' | 'form'> {
@@ -30,9 +30,26 @@ function zoneFor(position: number, total: number): TableZone {
   return 'NONE';
 }
 
+/** 순위 계산에 필요한 경기 결과 최소형. MatchSummary 그대로, 또는 경량 시뮬 결과(xg·xPts 없음, 2.1.0 M3.2) */
+export interface ResultLike {
+  season: SeasonNo;
+  day: number;
+  home: Pick<MatchSummary['home'], 'clubId' | 'goals'> & Partial<Pick<MatchSummary['home'], 'xg' | 'xPts'>>;
+  away: Pick<MatchSummary['away'], 'clubId' | 'goals'> & Partial<Pick<MatchSummary['away'], 'xg' | 'xPts'>>;
+}
+
+/** 스코어가 있는 일정 → 순위 계산 입력 (경량 시뮬 리그) */
+export function resultsOfFixtures(fixtures: readonly Fixture[]): ResultLike[] {
+  const out: ResultLike[] = [];
+  for (const f of fixtures) {
+    if (f.played && f.score) out.push({ season: f.season, day: f.day, home: { clubId: f.homeId, goals: f.score.home }, away: { clubId: f.awayId, goals: f.score.away } });
+  }
+  return out;
+}
+
 export function computeStandings(
   clubIds: readonly ClubId[],
-  summaries: readonly MatchSummary[],
+  summaries: readonly ResultLike[],
   season: SeasonNo,
   tieBreakSeed: number,
 ): StandingRow[] {
@@ -48,9 +65,9 @@ export function computeStandings(
       a.played += 1;
       a.goalsFor += me.goals;
       a.goalsAgainst += op.goals;
-      a.xgFor += me.xg;
-      a.xgAgainst += op.xg;
-      a.xPts += me.xPts;
+      a.xgFor += me.xg ?? 0;
+      a.xgAgainst += op.xg ?? 0;
+      a.xPts += me.xPts ?? 0;
       const letter: FormLetter = me.goals > op.goals ? 'W' : me.goals === op.goals ? 'D' : 'L';
       if (letter === 'W') {
         a.won += 1;

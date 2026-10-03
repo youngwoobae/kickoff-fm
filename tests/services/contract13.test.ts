@@ -7,7 +7,7 @@ import type { MatchId } from '../../src/types';
 const clock = { nowIso: () => '2026-09-27T00:00:00.000Z' };
 const mk = (seed: number): GameService => {
   const s = createGameService({ storage: createMemoryStorage(), clock });
-  s.newGame({ seed });
+  s.newGame({ seed, startTier: 'T3' }); // 시드별 기대값이 T3 사람 스쿼드 기준
   return s;
 };
 

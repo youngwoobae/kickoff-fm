@@ -44,7 +44,7 @@ describe('세이브 슬롯 (2.0.0)', () => {
     const store = createMemorySlotStorage();
     const a = svc(store);
     expect(await a.listSlots()).toEqual([]);
-    a.newGame({ seed: 7, clubName: '슬롯 FC', slotId: 2 });
+    a.newGame({ seed: 7, clubName: '슬롯 FC', slotId: 2, startTier: 'T3' });
     expect(a.getActiveSlot()).toBe(2);
     a.advanceDay();
     await a.flush();

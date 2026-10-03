@@ -15,6 +15,18 @@ export const TIER_ECONOMY: Record<Tier, TierEconomy> = {
 
 export const SEASON_DAYS = 28;
 
+/** 경제 설계 3.2 (K1) [PH]: S(OVR) = S_REF × 1.55^((OVR − 60) / TIER_GAP), 1,000 KC 반올림 */
+export const S_REF = 3.0 * M;
+export const TIER_GAP = 6;
+export function baseSalary(ovr: number): Kc {
+  return Math.round((S_REF * Math.pow(1.55, (ovr - 60) / TIER_GAP)) / 1000) * 1000;
+}
+
+/** 경제 설계 3.3 (K3): 새 게임 시작 잔액 = 배정금 × 이월 비율(20%), 모든 구단 */
+export function startingBalance(econ: TierEconomy): Kc {
+  return Math.round(econ.seasonBudget * econ.carryRate);
+}
+
 /** 일할 연봉 = round(salaryTotal / 28). 28일 합계 오차는 Day 28 에 보정 */
 export function dailySalary(salaryTotal: Kc, day: number): Kc {
   const per = Math.round(salaryTotal / SEASON_DAYS);
