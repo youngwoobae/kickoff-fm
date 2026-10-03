@@ -5,6 +5,46 @@ import type { BotStyle, BotStyleTag, FormationId, SlotKey, StyleId, TacticSlot, 
 
 export type Tier = 'T1' | 'T2' | 'T3' | 'T4' | 'T5';
 
+/**
+ * 2.1.0: 리그 ID. 1리그/티어(D3)라 티어와 1:1이다. 형식 `L-{tier}` (예: `L-T3`, domain/league/pyramid.ts leagueIdOf).
+ * 서버 트랙(2:1 피라미드)에서는 티어당 여러 리그가 되므로 UI 는 ID 를 해석하지 말고 LeagueInfo.tier 를 쓴다.
+ */
+export type LeagueId = string;
+
+/** 2.1.0: getPyramid() 의 리그 한 줄 */
+export interface LeagueInfo {
+  id: LeagueId;
+  tier: Tier;
+  /** 기획서 6.1 명칭 (T1 프리미어 디비전 … T5 루키 리그) */
+  name: string;
+  /** 정렬된 구단 ID (14) */
+  clubIds: ClubId[];
+  /** 이 리그에서 위 티어로 올라가는 팀 수 (T1 = 0). 경계별 인원(메인 결정 U-1): T1↔T2·T2↔T3 = 2, T3↔T4·T4↔T5 = 3 */
+  promoteCount: number;
+  /** 아래 티어로 내려가는 팀 수 (T5 = 0) */
+  relegateCount: number;
+  /** 사용자 구단이 있는 리그. 이 리그만 풀 엔진, 나머지는 경량 시뮬(D7) */
+  isUserLeague: boolean;
+}
+
+/** 2.1.0: 피라미드 전체 (T1 → T5 순) */
+export interface Pyramid {
+  season: SeasonNo;
+  leagues: LeagueInfo[];
+  userLeagueId: LeagueId;
+}
+
+/** 2.1.0: 시즌 경계 실제 티어 이동 한 건 (사람·AI 구단 모두, D6) */
+export interface ClubMovement {
+  clubId: ClubId;
+  from: Tier;
+  to: Tier;
+  kind: 'PROMOTED' | 'RELEGATED';
+  /** 떠나는 리그의 최종 순위 */
+  position: number;
+  isHuman: boolean;
+}
+
 export interface Club {
   id: ClubId;
   name: string;
@@ -27,6 +67,8 @@ export interface Club {
 
 export interface Fixture {
   id: MatchId;
+  /** 2.1.0: 소속 리그. 없으면 사용자 리그(스키마 2 세이브) */
+  leagueId?: LeagueId;
   season: SeasonNo;
   /** 경기일 = 라운드 (1..26) */
   day: Day;
@@ -98,6 +140,50 @@ export interface SeasonOutcome {
   labels: Record<ClubId, PromotionLabel>;
   /** 순위 상금 + 우승 수당 */
   prizes: Record<ClubId, Kc>;
+  /** 2.1.0: 판정한 리그. 없으면 사용자 리그 */
+  leagueId?: LeagueId;
+  /**
+   * 2.1.0: 이 시즌 경계에서 실제로 일어난 티어 이동(전 리그). M3.3 이 채운다.
+   * 없으면 실제 이동 없음(단일 리그 세이브) — UI 는 labels 로 사람 구단 라벨만 보인다.
+   */
+  movements?: ClubMovement[];
+}
+
+/** 2.1.0: 커리어 기록의 트로피 (컵 대회는 v1 범위 밖이라 리그 우승뿐) */
+export interface CareerTrophy {
+  season: SeasonNo;
+  tier: Tier;
+  kind: 'LEAGUE_TITLE';
+}
+
+/** 2.1.0: 사용자 구단의 한 시즌 기록 (판정이 끝난 시즌만) */
+export interface CareerSeason {
+  season: SeasonNo;
+  tier: Tier;
+  leagueId: LeagueId;
+  position: number;
+  points: number;
+  won: number;
+  drawn: number;
+  lost: number;
+  goalsFor: number;
+  goalsAgainst: number;
+  label: PromotionLabel;
+  champion: boolean;
+}
+
+/** 2.1.0: getCareer() 반환. 다시즌 커리어 화면용 */
+export interface CareerRecord {
+  clubId: ClubId;
+  /** 새 게임에서 고른 시작 티어 */
+  startTier: Tier;
+  /** 지금 시즌의 티어 */
+  currentTier: Tier;
+  /** 판정이 끝난 시즌들, 오래된 순 (진행 중인 시즌은 빠진다) */
+  seasons: CareerSeason[];
+  trophies: CareerTrophy[];
+  /** 도달한 가장 높은 티어 (T1 이 가장 높음) */
+  highestTier: Tier;
 }
 
 export interface OpponentRecentMatch {

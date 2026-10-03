@@ -27,6 +27,14 @@ export type LedgerKind =
   | 'CARRY_EXCESS_SPLIT'
   | 'TRANSFER_BUDGET_EXPIRED';
 
+/**
+ * 2.1.0 (경제 설계 4.2·14장): 승격 보너스, 강등 낙하산(연봉 전용 계정).
+ * 아직 LedgerKind 에 합치지 않는다 — UI `LEDGER_LABEL: Record<LedgerKind, string>`(src/ui/format.ts)이 키 누락으로
+ * 컴파일 실패하기 때문. 처음 기록하는 단위(M3.3)가 UI 라벨 두 줄(M3.5 소유)과 같은 변경에서
+ * `LedgerKind = … | PromotionLedgerKind` 로 합친다(아키텍처 16장 2.1.0).
+ */
+export type PromotionLedgerKind = 'PROMOTION_BONUS' | 'PARACHUTE';
+
 export interface LedgerEntry {
   season: SeasonNo;
   day: Day;

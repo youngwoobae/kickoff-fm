@@ -31,7 +31,10 @@ export type DayStep =
   | 'DAILY_PROCESSING'; // 00:00 회복·연봉·숙련도 감쇠·(Day27 상금, Day28 이월)
 
 export interface GameSettings {
+  /** 사용자 리그의 현재 티어 (경제 수치 기준). 승강 시 M3.3 이 바꾼다 */
   tier: Tier;
+  /** 2.1.0: 새 게임에서 고른 시작 티어. 없으면(스키마 2 세이브) 첫 시즌 판정의 티어 또는 tier */
+  startTier?: Tier;
   tacCap: TacticCap;
   /** 개발자 패널 표시 여부 (테스터 빌드는 false) */
   devMode: boolean;

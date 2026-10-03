@@ -9,6 +9,9 @@
  */
 import type {
   ApproveResult,
+  CareerRecord,
+  LeagueId,
+  Pyramid,
   CalibrationOptions,
   CalibrationProgress,
   CalibrationReport,
@@ -71,7 +74,13 @@ import type {
  * 2.0.1 (패치, 추가만): IndexedDB 슬롯 저장소 createIndexedDbSlotStorage()(불가 시 localStorage 폴백, 1.x 세이브 → 슬롯 1 이전),
  * StoragePort 선택 메서드 readLog/writeLog(행동 로그 분리: logEvent 가 세이브 본문을 다시 쓰지 않는다). 아키텍처 16장.
  */
-export const CONTRACT_VERSION = '2.0.1';
+/**
+ * 2.1.0 (M3.1, 추가만): 5티어 피라미드·다시즌 커리어 계약. LeagueId·LeagueInfo·Pyramid·ClubMovement·CareerRecord,
+ * 선택 메서드 getPyramid / getCareer, getStandings(leagueId?), FixtureFilter.leagueId, Fixture.leagueId?,
+ * SeasonOutcome.leagueId?·movements?, NewGameOptions.startTier, GameSettings.startTier?, Player.history?,
+ * PromotionLedgerKind(아직 LedgerKind 미포함). 실제 70구단·승강은 M3.2·M3.3. 아키텍처 16장.
+ */
+export const CONTRACT_VERSION = '2.1.0';
 
 /** 슬롯 번호 목록 (D28: 3개) */
 export const SAVE_SLOT_IDS: readonly SaveSlotId[] = [1, 2, 3];
@@ -80,8 +89,16 @@ export interface NewGameOptions {
   /** 미지정 시 Date.now() 기반 */
   seed?: number;
   clubName?: string;
-  /** 경제 수치 기준 티어 (기본 T3: 승격·강등 라벨이 모두 나오는 티어) */
+  /**
+   * 경제 수치 기준 티어 (기본 T3: 승격·강등 라벨이 모두 나오는 티어).
+   * @deprecated 2.1.0: startTier 사용. 둘 다 주면 startTier 가 이긴다
+   */
   tier?: Tier;
+  /**
+   * 2.1.0: 사용자 구단이 시작할 티어(D4). 피라미드(M3.2) 이후 기본 T5(루키 리그), T3 = "도전 모드".
+   * 단일 리그 상태(지금)에서는 이 리그의 티어가 되며 기본값은 기존과 같은 T3 다.
+   */
+  startTier?: Tier;
   tacCap?: TacticCap;
   devMode?: boolean;
   /**
@@ -118,6 +135,8 @@ export interface StyleApplyResult extends TacticUpdateResult {
 }
 
 export interface FixtureFilter {
+  /** 2.1.0: 리그. 생략 = 사용자 리그. 피라미드에 없는 리그면 빈 배열 */
+  leagueId?: LeagueId;
   clubId?: ClubId;
   day?: number;
   played?: boolean;
@@ -156,7 +175,7 @@ export interface GameService {
    * 빈 슬롯 = GameError('NOT_FOUND'), 손상·호환 불가 = GameError('SAVE_INCOMPATIBLE')(슬롯은 지우지 않는다).
    */
   openSlot?(slotId: SaveSlotId): Promise<GameSnapshot>;
-  /** 슬롯 삭제. 열린 슬롯이면 게임도 닫힌다(getSnapshot() = null, 리스너 통지) */
+  /** 슬롯 삭제. 열린 슬롯이면 remove 완료 뒤 게임도 닫힌다(getSnapshot() = null, 리스너 통지). 2.1.0: 통지가 remove 뒤로 */
   deleteSlot?(slotId: SaveSlotId): Promise<void>;
   /** flush 후 게임을 닫는다(타이틀 화면으로). 실패 시 닫지 않고 reject */
   closeSlot?(): Promise<void>;
@@ -178,12 +197,25 @@ export interface GameService {
   /** 기본값: 사용자 구단 */
   getSquad(clubId?: ClubId): Player[];
   getPlayer(playerId: PlayerId): Player;
-  getStandings(): StandingRow[];
+  /**
+   * 2.1.0: leagueId 생략 = 사용자 리그. 피라미드에 없는 리그면 GameError('NOT_FOUND').
+   * 다른 리그(경량 시뮬, D7)도 같은 StandingRow 모양이다(xG·xPts 는 0일 수 있다).
+   */
+  getStandings(leagueId?: LeagueId): StandingRow[];
   getFixtures(filter?: FixtureFilter): Fixture[];
   /** 사용자 구단의 다음 경기. 시즌 경기 종료 후 null */
   getNextMatch(): Fixture | null;
   getOpponentScout(clubId: ClubId): OpponentScout;
   getFinance(clubId?: ClubId): FinanceSummary;
+
+  // ── 피라미드·커리어 (2.1.0, 선택 메서드: 실제 서비스는 구현) ──────
+  /**
+   * 리그 목록(T1 → T5)과 사용자 리그. 같은 상태면 같은 참조.
+   * 단일 리그 세이브(M3.2 전)에서는 사용자 리그 하나만 들어 있다.
+   */
+  getPyramid?(): Pyramid;
+  /** 사용자 구단 커리어: 판정 끝난 시즌별 티어·순위·라벨·트로피. 진행 중 시즌은 빠진다 */
+  getCareer?(): CareerRecord;
 
   // ── 전술·플랜 (OWNER 전용, COACH 는 PERMISSION_DENIED) ──────────
   updateTacticSlot(slot: SlotKey, next: TacticSlotInput): TacticUpdateResult;

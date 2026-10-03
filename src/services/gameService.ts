@@ -11,6 +11,9 @@ import type {
   ActionLogEntry,
   ActionLogKind,
   ApproveResult,
+  CareerRecord,
+  LeagueId,
+  Pyramid,
   AttrDef,
   CalibrationOptions,
   CalibrationProgress,
@@ -115,6 +118,8 @@ import {
   validatePlan as validatePlanDomain,
   type PlanBundle,
 } from '../domain';
+// ponytail: domain/index.ts 는 이 단위 소유 밖이라 직접 import. M3.2 가 index 로 옮긴다
+import { buildCareer, leagueIdOf, leagueInfo } from '../domain/league/pyramid';
 import {
   CONTRACT_VERSION,
   type FixtureFilter,
@@ -257,10 +262,13 @@ class LocalGameService implements GameService {
   /** 쓰기 실패한 최신 상태. 새 변경이 오면 대체되고, flush 가 재시도한다 */
   private readonly failedWrites = new Map<SaveSlotId, PendingWrite>();
   private writing: Promise<void> | null = null;
+  /** 삭제 중인 슬롯: remove 가 끝나기 전 변경이 쓰기를 예약해 슬롯을 되살리지 않게 한다 */
+  private readonly deleting = new Set<SaveSlotId>();
   private saveStatus: SaveStatus = { slotId: null, pending: false, lastSavedAt: null, error: null };
   private readonly listeners = new Set<() => void>();
   private state: GameState | null = null;
   private standingsCache: { state: GameState; rows: StandingRow[] } | null = null;
+  private pyramidCache: { state: GameState; pyramid: Pyramid } | null = null;
   private readonly replayCache = new Map<string, MatchReplay>();
 
   constructor(deps: GameServiceDeps) {
@@ -312,7 +320,7 @@ class LocalGameService implements GameService {
    * saveBody=false(logEvent): 로그 저장소가 있으면 로그만 쓴다. 이미 대기 중인 본문 쓰기는 유지된다.
    */
   private scheduleWrite(saveBody = true): void {
-    if (this.activeSlot === null || !this.state) return;
+    if (this.activeSlot === null || !this.state || this.deleting.has(this.activeSlot)) return;
     const id = this.activeSlot;
     const prev = this.pendingWrites.get(id) ?? this.failedWrites.get(id);
     this.failedWrites.delete(id);
@@ -510,13 +518,19 @@ class LocalGameService implements GameService {
   // ── 수명 주기 ──────────────────────────────────────────────────
 
   newGame(opts: NewGameOptions = {}): GameSnapshot {
+    // 단일 리그 상태: 시작 티어 = 이 리그 티어. 기본 T3 유지(DEFAULT_START_TIER=T5 는 M3.2 피라미드부터)
+    const tier = opts.startTier ?? opts.tier ?? 'T3';
     const seed = opts.seed ?? hashString(`${this.clock.nowIso()}|${Date.now()}`);
     const s0 = createInitialState(
       seed,
-      { clubName: opts.clubName ?? '킥오프 FC', tier: opts.tier ?? 'T3', devMode: opts.devMode ?? true, tacCap: opts.tacCap ?? (EngineConstants.DEFAULT_TAC_CAP as TacticCap) },
+      { clubName: opts.clubName ?? '킥오프 FC', tier, devMode: opts.devMode ?? true, tacCap: opts.tacCap ?? (EngineConstants.DEFAULT_TAC_CAP as TacticCap) },
       this.clock.nowIso(),
     );
-    const s = { ...s0, actionLog: [this.entry(s0, 'SEASON_STARTED', { season: 1, seed: s0.gameSeed }, OWNER_ID)] };
+    const s = {
+      ...s0,
+      settings: { ...s0.settings, startTier: tier },
+      actionLog: [this.entry(s0, 'SEASON_STARTED', { season: 1, seed: s0.gameSeed }, OWNER_ID)],
+    };
     if (opts.slotId !== undefined) {
       this.assertSlot(opts.slotId);
       this.activeSlot = opts.slotId;
@@ -583,12 +597,19 @@ class LocalGameService implements GameService {
 
   async deleteSlot(slotId: SaveSlotId): Promise<void> {
     this.assertSlot(slotId);
-    if (this.activeSlot === slotId) this.close();
-    this.pendingWrites.delete(slotId);
-    this.failedWrites.delete(slotId);
-    await this.writing; // 진행 중 쓰기가 삭제 뒤에 슬롯을 되살리지 않도록
-    await this.slots.remove(slotId);
-    this.updateStatus();
+    const wasOpen = this.activeSlot === slotId;
+    this.deleting.add(slotId);
+    try {
+      this.pendingWrites.delete(slotId);
+      this.failedWrites.delete(slotId);
+      await this.writing; // 진행 중 쓰기가 삭제 뒤에 슬롯을 되살리지 않도록
+      await this.slots.remove(slotId);
+    } finally {
+      this.deleting.delete(slotId);
+    }
+    // 통지는 remove 뒤: 리스너가 listSlots() 를 다시 읽을 때 삭제된 슬롯이 보이지 않게
+    if (wasOpen && this.activeSlot === slotId) this.close();
+    else this.updateStatus();
   }
 
   async closeSlot(): Promise<void> {
@@ -663,8 +684,9 @@ class LocalGameService implements GameService {
     return p;
   }
 
-  getStandings(): StandingRow[] {
+  getStandings(leagueId?: LeagueId): StandingRow[] {
     const s = this.require();
+    if (leagueId !== undefined && leagueId !== leagueIdOf(s.settings.tier)) throw new GameError('NOT_FOUND', `리그 없음: ${leagueId}`);
     if (this.standingsCache?.state === s) return this.standingsCache.rows;
     const rows = computeStandings(Object.keys(s.clubs).sort(), Object.values(s.summaries), s.time.season, hashString(`${s.gameSeed}|tiebreak|${s.time.season}`));
     this.standingsCache = { state: s, rows };
@@ -673,6 +695,7 @@ class LocalGameService implements GameService {
 
   getFixtures(filter: FixtureFilter = {}): Fixture[] {
     const s = this.require();
+    if (filter.leagueId !== undefined && filter.leagueId !== leagueIdOf(s.settings.tier)) return [];
     return s.fixtures
       .filter(
         (f) =>
@@ -681,6 +704,23 @@ class LocalGameService implements GameService {
           (filter.played === undefined || f.played === filter.played),
       )
       .sort((a, b) => a.day - b.day || a.id.localeCompare(b.id));
+  }
+
+  getPyramid(): Pyramid {
+    const s = this.require();
+    if (this.pyramidCache?.state === s) return this.pyramidCache.pyramid;
+    // 단일 리그 상태: 사용자 리그 하나. M3.2 가 GameState 피라미드로 5리그를 채운다
+    const league = leagueInfo(s.settings.tier, Object.keys(s.clubs), true);
+    const pyramid: Pyramid = { season: s.time.season, leagues: [league], userLeagueId: league.id };
+    this.pyramidCache = { state: s, pyramid };
+    return pyramid;
+  }
+
+  getCareer(): CareerRecord {
+    const s = this.require();
+    const outcomes = s.pendingOutcome ? [...s.seasonHistory, s.pendingOutcome] : s.seasonHistory;
+    const startTier = s.settings.startTier ?? outcomes[0]?.tier ?? s.settings.tier;
+    return buildCareer(s.userClubId, outcomes, startTier, s.settings.tier);
   }
 
   getNextMatch(): Fixture | null {

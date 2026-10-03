@@ -1,4 +1,5 @@
-import type { ClubId, Kc, PlayerId, Step } from './common';
+import type { ClubId, Kc, PlayerId, SeasonNo, Step } from './common';
+import type { Tier } from './league';
 
 /** 기획서 4.4 포지션 그룹. WB 는 3백/5백 포메이션의 FB 슬롯으로 표현한다. */
 export type Position = 'GK' | 'CB' | 'FB' | 'DM' | 'CM' | 'AM' | 'W' | 'ST';
@@ -56,6 +57,19 @@ export interface PlayerSeasonStats {
   redCards: number;
 }
 
+/** 2.1.0: 선수 시즌별 기록 한 줄 (시즌 경계에서 끝난 시즌을 추가, M3.3). 성장 추이 화면용 */
+export interface PlayerSeasonLine {
+  season: SeasonNo;
+  /** 그 시즌의 나이 (나이 +1 전) */
+  age: number;
+  /** 시즌 종료 시점 OVR */
+  ovr: number;
+  clubId: ClubId | null;
+  tier?: Tier;
+  apps: number;
+  goals: number;
+}
+
 export interface Player {
   id: PlayerId;
   clubId: ClubId | null;
@@ -78,4 +92,6 @@ export interface Player {
   /** 18명 미만 시 자동 충원된 임시 계약 선수 */
   isTemporary: boolean;
   season: PlayerSeasonStats;
+  /** 2.1.0: 지난 시즌 기록, 오래된 순. 없으면 [] (스키마 2 세이브·첫 시즌) */
+  history?: PlayerSeasonLine[];
 }
