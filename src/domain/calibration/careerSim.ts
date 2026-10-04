@@ -1,6 +1,6 @@
 /**
  * CAREER_SIM (로드맵 M3.6): 새 게임(T5) → 사람 구단 자동 운영(플랜 미설정 = 감독 AI, M4.4: 재계약·입찰도 AI 규칙 aggr 0.75) → N시즌 × 시드 M.
- * 판정표: 오프라인_경제 11장(M3.6 열) + 선수_수명주기 16.2. scripts/sim-career.ts 와 Vitest 축약 게이트가 공유한다. 소유: A.
+ * 판정표: 오프라인_경제 11장(M4.8 열, 2판) + 선수_수명주기 16.2. scripts/sim-career.ts 와 Vitest 축약 게이트가 공유한다. 소유: A.
  * "S10"은 마지막 시즌(seasons), "S2"는 2시즌. 시즌 시작 = Day 1(경계 처리 뒤), 시즌 말 = SEASON_OVER(Day 28 정산 뒤).
  */
 import type { ClubMovement, GameState, Tier } from '../../types';
@@ -45,6 +45,8 @@ interface SeasonStart {
   onClubs: number;
   aiSizes: number[];
   humanSize: number;
+  /** 정규 창 정산(Day 2) 뒤 사람 구단 인원·소속 선수 수. 정규 창 영입은 Day 2 에 들어오므로 인원 판정(L-C1·H1)은 이 값 (M4.8) */
+  afterSettle?: { humanSize: number; onClubs: number };
   allSizesOk: boolean;
   structureOk: boolean;
   fa: number;
@@ -69,6 +71,8 @@ export interface SeedRun {
   feeRatios: number[];
   /** E9: 정산 시즌별 이적료 매물 낙찰 구단 수 */
   sinkClubs: number[];
+  /** E4: 실제 LP 전환 = 다음 시즌 Day 2 정산 뒤 남은 한정 예산 / 끝난 시즌 티어 배정금 (Day 3 에 LP) */
+  lpShare: Record<Tier, number[]>;
 }
 
 export interface CareerSimReport {
@@ -123,7 +127,7 @@ function measureEnd(s: GameState): SeasonEnd {
 }
 
 export function runCareerSeed(seed: number, seasons: number, startTier: Tier, onSeason?: (season: number) => void): SeedRun {
-  const run: SeedRun = { seed, starts: [], ends: [], negClubDays: 0, clubDays: 0, negStreaks: 0, youthProspect: [0, 0], feeRatios: [], sinkClubs: [] };
+  const run: SeedRun = { seed, starts: [], ends: [], negClubDays: 0, clubDays: 0, negStreaks: 0, youthProspect: [0, 0], feeRatios: [], sinkClubs: [], lpShare: { T1: [], T2: [], T3: [], T4: [], T5: [] } };
   const streak = new Map<string, number>();
   try {
     let s = createInitialState(seed, { clubName: 'AUTO', tier: startTier, devMode: false }, '2026-10-04T00:00:00.000Z');
@@ -155,7 +159,12 @@ export function runCareerSeed(seed: number, seasons: number, startTier: Tier, on
           }
           run.sinkClubs.push(winners.size);
         }
-        if (s.phase !== 'SEASON_OVER') s = autoManageDay(s, HUMAN); // 7.7 자동 운영: 재계약(Day 20)·입찰(Day 11·28), aggr 0.75
+        if (s.time.day === 2 && !s.transferMarket) {
+          const m0 = measureStart(s);
+          run.starts[run.starts.length - 1]!.afterSettle = { humanSize: m0.humanSize, onClubs: m0.onClubs };
+          for (const [id, m] of run.ends[run.ends.length - 1]?.money ?? []) run.lpShare[m.tier].push(s.finances[id]!.transferOnlyBudget / TIER_ECONOMY[m.tier].seasonBudget);
+        }
+        if (s.phase !== 'SEASON_OVER') s = autoManageDay(s, HUMAN); // 7.7 자동 운영: 재계약(Day 20)·입찰(Day 11·14·28), aggr 0.75
         if (`${s.time.season}/${s.time.day}/${s.phase}` === before) throw new Error(`교착: ${before} 에서 진전 없음`);
         for (const [id, f] of Object.entries(s.finances)) {
           run.clubDays++;
@@ -212,7 +221,7 @@ export function judgeCareer(runs: readonly SeedRun[], seasons: number): CareerGa
   const ends = ok.flatMap((r) => r.ends);
   const tierPairs = TIERS.slice(1).map((t, i) => [TIERS[i]!, t] as const);
 
-  // ─ 오프라인_경제 11.1 하드 게이트 (M3.6 열)
+  // ─ 오프라인_경제 11.1 하드 게이트 (M4.8 열)
   const errs = runs.filter((r) => r.error);
   g('C1', 'ECON', 'HARD', '예외·교착', `exceptions=${errs.length}${errs.length ? ` (${errs.map((r) => `seed ${r.seed}: ${r.error}`).join('; ')})` : ''}`, '0', errs.length === 0);
   const struct = runs.flatMap((r) => r.starts);
@@ -228,9 +237,9 @@ export function judgeCareer(runs: readonly SeedRun[], seasons: number): CareerGa
   const p1hi = Math.max(...p1dev);
   g('P1', 'ECON', 'HARD', '티어 평균 XI − REF (모든 시드·시즌·티어)', `min=${f2(p1lo)} max=${f2(p1hi)}`, '[-1.5, +2.5]', p1dev.length ? p1lo >= -1.5 && p1hi <= 2.5 : null);
   const p2 = ok.map((r) => Math.max(...TIERS.map((t) => Math.abs(r.starts[last]!.xi[t] - r.starts[0]!.xi[t]))));
-  g('P2', 'ECON', 'HARD', `전력 드리프트 |XI(S${seasons}) − XI(S1)| 시드별 최대`, `p95=${f2(quantile(p2, 0.95))}`, '<= 2.0', within(quantile(p2, 0.95), 0, 2.0));
+  g('P2', 'ECON', 'HARD', `전력 드리프트 |XI(S${seasons}) − XI(S1)| 시드별 최대`, `p95=${f2(quantile(p2, 0.95))}`, '<= 2.5', within(quantile(p2, 0.95), 0, 2.5));
   const p3 = ok.map((r) => Math.max(...r.starts.slice(1).flatMap((x, i) => TIERS.map((t) => Math.abs(x.xi[t] - r.starts[i]!.xi[t])))));
-  g('P3', 'ECON', 'HARD', '시즌 간 전력 변화 시드별 최대', `p95=${f2(quantile(p3, 0.95))}`, '<= 1.5', seasons > 1 ? within(quantile(p3, 0.95), 0, 1.5) : null);
+  g('P3', 'ECON', 'HARD', '시즌 간 전력 변화 시드별 최대', `p95=${f2(quantile(p3, 0.95))}`, '<= 1.8', seasons > 1 ? within(quantile(p3, 0.95), 0, 1.8) : null);
   const p4 = ok.map((r) => Math.min(...tierPairs.map(([a, b]) => r.starts[last]!.xi[a] - r.starts[last]!.xi[b])));
   g('P4', 'ECON', 'HARD', `S${seasons} 인접 티어 XI 간격 최소`, `p5=${f2(quantile(p4, 0.05))}`, '>= 4.0', within(quantile(p4, 0.05), 4.0, Infinity));
 
@@ -245,13 +254,14 @@ export function judgeCareer(runs: readonly SeedRun[], seasons: number): CareerGa
       }
     });
   }
-  g('E1', 'ECON', 'HARD', '순유입 비율 티어 중앙값 (M3.6 측정만)', TIERS.map((t) => `${t} ${f2(median(e1[t]))}`).join(' '), '— (M4.8 [0.95, 1.20])', null);
+  const e1m = TIERS.map((t) => median(e1[t]));
+  g('E1', 'ECON', 'HARD', '순유입 비율 티어 중앙값', TIERS.map((t, i) => `${t} ${f2(e1m[i]!)}`).join(' '), '[0.95, 1.55]', e1m.every((x) => within(x, 0.95, 1.55)));
   const tierMed = (e: SeasonEnd, t: Tier, f: (m: { balance: number; tob: number }) => number) =>
     median([...e.money.values()].filter((m) => m.tier === t).map((m) => f(m) / TIER_ECONOMY[t].seasonBudget));
   const e2 = ok.map((r) => Math.max(...TIERS.map((t) => Math.abs(tierMed(r.ends[last]!, t, (m) => m.balance) - tierMed(r.ends[1]!, t, (m) => m.balance)))));
-  g('E2', 'ECON', 'HARD', `잔액 안정 |S${seasons} − S2| (잔액/배정금 티어 중앙값)`, `p95=${f2(quantile(e2, 0.95))}`, '<= 0.20', seasons >= 2 ? within(quantile(e2, 0.95), 0, 0.2) : null);
+  g('E2', 'ECON', 'HARD', `잔액 안정 |S${seasons} − S2| (잔액/배정금 티어 중앙값)`, `p95=${f2(quantile(e2, 0.95))}`, '<= 0.15', seasons >= 2 ? within(quantile(e2, 0.95), 0, 0.15) : null);
   const e3 = ends.flatMap((e) => TIERS.map((t) => tierMed(e, t, (m) => m.balance + m.tob)));
-  g('E3', 'ECON', 'HARD', '잔액 수준 (잔액+한정 예산)/배정금 티어 중앙값, 모든 시즌', `max=${f2(Math.max(...e3))}`, '<= 0.90', e3.length ? Math.max(...e3) <= 0.9 : null);
+  g('E3', 'ECON', 'HARD', '잔액 수준 (잔액+한정 예산)/배정금 티어 중앙값, 모든 시즌', `max=${f2(Math.max(...e3))}`, '<= 0.85', e3.length ? Math.max(...e3) <= 0.85 : null);
 
   // B1/B2: 시즌 s 말 승격(강등) → 시즌 s+1 말 강등(승격)
   let b1n = 0, b1k = 0, b2n = 0, b2k = 0;
@@ -265,7 +275,7 @@ export function judgeCareer(runs: readonly SeedRun[], seasons: number): CareerGa
     }
   }
   g('B1', 'ECON', 'HARD', '승격 직후 강등률', `promoted_relegated=${pct(b1k / b1n)} n=${b1n}`, '<= 45%', b1n ? b1k / b1n <= 0.45 : null);
-  g('B2', 'ECON', 'HARD', '강등팀 즉시 재승격률', `relegated_promoted=${pct(b2k / b2n)} n=${b2n}`, '<= 45%', b2n ? b2k / b2n <= 0.45 : null);
+  g('B2', 'ECON', 'HARD', '강등팀 즉시 재승격률', `relegated_promoted=${pct(b2k / b2n)} n=${b2n}`, '<= 40%', b2n ? b2k / b2n <= 0.4 : null);
   const b3 = ok.filter((r) => {
     const c = new Map<string, number>();
     for (const e of r.ends) c.set(e.t1Champion, (c.get(e.t1Champion) ?? 0) + 1);
@@ -276,8 +286,10 @@ export function judgeCareer(runs: readonly SeedRun[], seasons: number): CareerGa
   g('U1', 'ECON', 'HARD', '사람 구단(AUTO) 무승격 시드 비율', `${pct(u1 / ok.length)} (${u1}/${ok.length})`, '<= 50%', ok.length ? u1 / ok.length <= 0.5 : null);
 
   // ─ 11.2 경고
-  const e4 = TIERS.map((t) => median(ends.flatMap((e) => [...e.money.values()].filter((m) => m.tier === t).map((m) => m.tob / TIER_ECONOMY[t].seasonBudget))));
-  g('E4', 'ECON', 'WARN', 'LP 전환/배정금 티어 중앙값', TIERS.map((t, i) => `${t} ${f2(e4[i]!)}`).join(' '), '<= 0.30 (M4.8)', e4.every((x) => x <= 0.3));
+  // 실제 LP = 정규 창 정산(다음 시즌 Day 2) 뒤 남은 한정 예산. 시즌 말 한정 예산(정산 전)은 참고로 출력
+  const e4 = TIERS.map((t) => median(ok.flatMap((r) => r.lpShare[t])));
+  const e4pre = TIERS.map((t) => median(ends.flatMap((e) => [...e.money.values()].filter((m) => m.tier === t).map((m) => m.tob / TIER_ECONOMY[t].seasonBudget))));
+  g('E4', 'ECON', 'WARN', 'LP 전환/배정금 티어 중앙값', `${TIERS.map((t, i) => `${t} ${f2(e4[i]!)}`).join(' ')} (정산 전 한정 예산 ${e4pre.map(f2).join('/')})`, '<= 0.30', e4.every((x) => !(x > 0.3)));
   const fees = ok.flatMap((r) => r.feeRatios);
   const e5 = median(fees);
   g('E5', 'ECON', 'WARN', '낙찰가/V', fees.length ? `median=${f2(e5)} n=${fees.length}` : '이적 없음', '[1.00, 1.20]', fees.length ? within(e5, 1, 1.2) : null);
@@ -298,14 +310,18 @@ export function judgeCareer(runs: readonly SeedRun[], seasons: number): CareerGa
 
   // ─ 선수_수명주기 16.2
   const s5 = ok.flatMap((r) => r.starts.slice(4));
-  g('L-C1', 'LIFE', 'HARD', '소속 선수 수 (임시 제외)', `min=${Math.min(...starts.map((x) => x.onClubs))} max=${Math.max(...starts.map((x) => x.onClubs))}`, '[1540, 1750]', starts.every((x) => x.onClubs >= 1540 && x.onClubs <= 1750));
+  const onClubs = starts.map((x) => x.afterSettle?.onClubs ?? x.onClubs);
+  g('L-C1', 'LIFE', 'HARD', '소속 선수 수 (임시 제외, Day 2 정산 뒤)', `min=${Math.min(...onClubs)} max=${Math.max(...onClubs)} (Day 1 min ${Math.min(...starts.map((x) => x.onClubs))})`, '[1540, 1750]', onClubs.every((n) => n >= 1540 && n <= 1750));
   const ai = starts.flatMap((x) => x.aiSizes);
   g('L-C2', 'LIFE', 'HARD', 'AI 구단 인원', `min=${Math.min(...ai)} max=${Math.max(...ai)}`, '[22, 25]', ai.every((n) => n >= 22 && n <= 25));
   const lc3 = s5.flatMap((x) => TIERS.map((t) => Math.abs(x.xi[t] - TIER_REFERENCE_OVR[t])));
   g('L-C3', 'LIFE', 'HARD', '시즌 ≥ 5 티어 평균 str − ref 최대 |편차|', lc3.length ? f2(Math.max(...lc3)) : 'n/a', '<= 3', lc3.length ? Math.max(...lc3) <= 3 : null);
   const lc4 = s5.flatMap((x) => tierPairs.map(([a, b]) => x.xi[a] - x.xi[b]));
   g('L-C4', 'LIFE', 'HARD', '시즌 ≥ 5 인접 티어 str 차', lc4.length ? `min=${f2(Math.min(...lc4))} max=${f2(Math.max(...lc4))}` : 'n/a', '[3.5, 8.5]', lc4.length ? Math.min(...lc4) >= 3.5 && Math.max(...lc4) <= 8.5 : null);
-  // 세계(소속 + FA) 선수 ID 집합의 경계 전후 차. 모델(13.2)처럼 시드별 경계 평균으로 판정 — 초반엔 빈 FA 풀이 차오르며 +가 크다
+  // 세계(소속 + FA) 선수 ID 집합의 경계 전후 차. 모델(13.2, 마지막 10시즌 평균)처럼 정상 상태에서 판정: 시즌 ≥ 5 로 들어가는 경계의 시드별 평균.
+  // 초반 경계는 빈 FA 풀(새 게임 0명)이 만료 FA 로 차오르는 과도기라 +가 크다(M4.8) — 첫 경계·전체 평균은 참고로 출력
+  const steadyFrom = Math.min(4, seasons - 1);
+  const netAll: number[] = [];
   const netBySeed: number[] = [];
   const netFirst: number[] = [];
   const flowIn: number[] = [];
@@ -317,16 +333,18 @@ export function judgeCareer(runs: readonly SeedRun[], seasons: number): CareerGa
       const b = r.starts[s]!.ids;
       const inn = [...b].filter((id) => !a.has(id)).length;
       const out = [...a].filter((id) => !b.has(id)).length;
-      flowIn.push(inn), flowOut.push(out), net.push(inn - out);
+      flowIn.push(inn), flowOut.push(out), netAll.push(inn - out);
+      if (s >= steadyFrom) net.push(inn - out);
+      if (s === 1) netFirst.push(inn - out);
     }
-    netBySeed.push(mean(net)), netFirst.push(net[0]!);
+    netBySeed.push(mean(net));
   }
   g(
     'L-C5',
     'LIFE',
     'HARD',
-    '시즌당 유입 − 유출 (시드별 경계 평균)',
-    netBySeed.length ? `min=${f2(Math.min(...netBySeed))} max=${f2(Math.max(...netBySeed))} (첫 경계 평균 ${mean(netFirst).toFixed(1)}, 유입 평균 ${mean(flowIn).toFixed(1)}, 유출 평균 ${mean(flowOut).toFixed(1)})` : 'n/a',
+    `시즌당 유입 − 유출 (S${steadyFrom + 1}~ 경계, 시드별 평균)`,
+    netBySeed.length ? `min=${f2(Math.min(...netBySeed))} max=${f2(Math.max(...netBySeed))} (첫 경계 평균 ${mean(netFirst).toFixed(1)}, 전체 경계 평균 ${mean(netAll).toFixed(1)}, 유입 평균 ${mean(flowIn).toFixed(1)}, 유출 평균 ${mean(flowOut).toFixed(1)})` : 'n/a',
     '±15',
     netBySeed.length ? netBySeed.every((x) => Math.abs(x) <= 15) : null,
   );
@@ -354,8 +372,8 @@ export function judgeCareer(runs: readonly SeedRun[], seasons: number): CareerGa
   g('L-C11', 'LIFE', 'HARD', '사람 구단 유스 유망주 제안 시즌 비율', `${pct(yk / yn)} n=${yn}`, '[15%, 40%]', yn ? within(yk / yn, 0.15, 0.4) : null);
 
   // ─ 알려진 문제: 사람 구단은 AI 보충(11장)이 없어 이적 없이 인원이 줄어든다 (M4 이적·M5 유스 UI 로 해소)
-  const hs = starts.map((x) => x.humanSize);
-  const below = starts.filter((x) => x.humanSize < 22).length;
+  const hs = starts.map((x) => x.afterSettle?.humanSize ?? x.humanSize);
+  const below = hs.filter((n) => n < 22).length;
   g('H1', 'KNOWN', 'WARN', '사람 구단 인원 22명 미만', `min=${Math.min(...hs)} 22명 미만 시즌 ${pct(below / starts.length)}`, '>= 22', below === 0);
   return gates;
 }

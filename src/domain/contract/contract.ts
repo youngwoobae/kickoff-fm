@@ -22,7 +22,7 @@ export const CONTRACT = {
   freeReleasesOnRelegation: 2,
   emergency: { minRegistered: 18, minAvailable: 16, perSeason: 2 },
   /** 7.5 AI 재계약 */
-  ai: { keepRank: 18, keepMaxAge: 31, vetRank: 11, vetMinAge: 32, capUseMax: 0.97, maxSeasons: 3 },
+  ai: { keepRank: 20, keepMaxAge: 31, vetRank: 18, vetMinAge: 32, capUseMax: 0.97, maxSeasons: 3 },
 } as const;
 
 /** @deprecated 2.2.1 (M4.4): TransferLedgerKind 가 LedgerKind 에 합쳐져 LedgerEntry 와 같다 */
@@ -168,8 +168,10 @@ export function offerRenewal(p: Player, offer: RenewalOffer, ctx: RenewalContext
 
 /**
  * 7.5 AI 재계약 (Day 20): 만료 예정자 중 OVR 순위 ≤ 18 & 나이 ≤ 31 → ask, min(허용 최대, 3)시즌 /
- * 순위 ≤ 11 & 나이 ≥ 32 → ask, 1시즌. 계약 후 캡 사용 > 캡 × 0.97 이면 OVR 낮은 대상부터 제외.
- * AI 는 갱신 보너스를 받지 않는다고 해석 [해석] — 보너스는 사람 구단 협상 비용.
+ * 순위 ≤ 18 & 나이 ≥ 32 → ask, 1시즌 (M4.8: 순위 18 → 20, 베테랑 11 → 18).
+ * 캡: OVR 높은 대상부터 "계약 후 캡 사용 ≤ max(캡 × 0.97, 지금 캡 사용)" 이면 넣고 아니면 건너뛴다(M4.8).
+ * 성장 재계산으로 이미 캡을 넘은 구단도 만료자가 비우는 몫 안에서는 주전을 붙잡는다(5.1 "재계산 초과는 늘리는 계약만 막는다" — 총 사용은 늘지 않음).
+ * 갱신 보너스는 사람과 같다(M4.8, 경제 1장 "AI 전용 보정 없음"): bonusPerSeason 을 캡에 산입하고, 지급은 호출자(flow.payAiRenewalBonuses).
  */
 export function aiRenewals(squad: readonly Player[], ctx: AskContext & { capLimit: Kc }): PendingRenewal[] {
   const A = CONTRACT.ai;
@@ -179,16 +181,20 @@ export function aiRenewals(squad: readonly Player[], ctx: AskContext & { capLimi
     if (p.contract.seasonsLeft !== 1) return;
     const rank = i + 1;
     const salary = renewalAsk(p, ctx);
-    if (rank <= A.keepRank && p.age <= A.keepMaxAge) picks.push({ playerId: p.id, salary, seasons: Math.min(seasonsRange(p.age)[1], A.maxSeasons), bonusPerSeason: 0 });
-    else if (rank <= A.vetRank && p.age >= A.vetMinAge) picks.push({ playerId: p.id, salary, seasons: 1, bonusPerSeason: 0 });
+    const pick = (seasons: number) => picks.push({ playerId: p.id, salary, seasons, bonusPerSeason: Math.round(renewalBonus(salary, seasons) / seasons) });
+    if (rank <= A.keepRank && p.age <= A.keepMaxAge) pick(Math.min(seasonsRange(p.age)[1], A.maxSeasons));
+    else if (rank <= A.vetRank && p.age >= A.vetMinAge) pick(1);
   });
-  // 계약 후 캡 사용 = 비만료자 + 재계약자 새 산입액 (picks 는 OVR 내림차순이라 뒤에서부터 뺀다)
+  // 계약 후 캡 사용 = 비만료자 + 재계약자 새 산입액. picks 는 OVR 내림차순
   const byId = new Map(squad.map((p) => [p.id, p]));
-  const staying = squad.filter((p) => p.contract.seasonsLeft > 1 || p.isTemporary);
-  const after = () =>
-    capUsage(staying) + picks.reduce((s, r) => s + capCharge({ ovr: byId.get(r.playerId)!.ovr, contract: { seasonsLeft: r.seasons, salary: r.salary } }), 0);
-  while (picks.length && after() > ctx.capLimit * A.capUseMax) picks.pop();
-  return picks;
+  const limit = Math.max(ctx.capLimit * A.capUseMax, capUsage(squad));
+  let used = capUsage(squad.filter((p) => p.contract.seasonsLeft > 1 || p.isTemporary));
+  return picks.filter((r) => {
+    const charge = capCharge({ ovr: byId.get(r.playerId)!.ovr, contract: { seasonsLeft: r.seasons, salary: r.salary, bonusPerSeason: r.bonusPerSeason } });
+    if (used + charge > limit) return false;
+    used += charge;
+    return true;
+  });
 }
 
 // ── 5.3 방출 ──

@@ -393,7 +393,8 @@ export function aiSquadMaintenance(input: AiSquadInput): AiSquadResult {
     for (let n = 1; size() < A.minSquad || count('GK') < A.minGk; n++) {
       const need =
         count('GK') < A.minGk ? 'GK' : POSITIONS.reduce((b, pos) => (LIFECYCLE.squadTemplate[pos] - count(pos) > LIFECYCLE.squadTemplate[b] - count(b) ? pos : b));
-      const x = takeFromPool((p) => p.primary === need && p.age <= A.poolMaxAge && Math.abs(p.ovr - ref) <= A.poolBand);
+      // M4.8: ref − 6 ≤ ovr ≤ ref (위쪽 절반을 빼야 만료 FA 로 커진 풀이 하위 티어 전력을 올리지 않는다)
+      const x = takeFromPool((p) => p.primary === need && p.age <= A.poolMaxAge && p.ovr <= ref && p.ovr >= ref - A.poolBand);
       if (x) { add(sign(x, c.id, c.rng), 'SIGNED_FROM_POOL'); continue; }
       add(regenPlayer(c.rng, c.id, need, ref, input.season, n), 'REGENERATED');
     }

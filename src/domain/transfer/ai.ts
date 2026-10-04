@@ -1,6 +1,6 @@
 /**
  * AI 구단 이적 행동 (M4.3, 경제 7.1~7.4 + 수명주기 U4). 모든 결정은 해시 균등값 h(...) — 입찰 순서와 무관.
- * C3(티어 평균 str − ref ±3) 보호: 영입 뒤 주전 전력이 대역 상한(ref + bandHi)을 넘으면 필요 포지션 외 영입 안 함
+ * C3(티어 평균 str − ref ±3) 보호: 영입 뒤 주전 전력이 대역 상한(ref + bandHi)을 넘으면 영입 안 함(필요 포지션은 OVR ≤ ref 선수만 예외)
  * (넘는 영입은 다음 경계에서 수명주기 대역 상한 판매 대상이 되므로).
  */
 import type { Bid, ClubId, Kc, Player, Position, Tier, TransferListing, TransferWindow } from '../../types';
@@ -33,8 +33,8 @@ type Group = 'GK' | 'DF' | 'MF' | 'FW';
 const GROUP: Record<Position, Group> = { GK: 'GK', CB: 'DF', FB: 'DF', DM: 'MF', CM: 'MF', AM: 'MF', W: 'FW', ST: 'FW' };
 
 const byOvrDesc = (a: Player, b: Player) => b.ovr - a.ovr || (a.id < b.id ? -1 : 1);
-/** 다음 시즌에도 남는 선수: 정규 창(정산 = 다음 시즌 Day 2)은 잔여 1시즌(재계약 안 된 만료자)을 뺀다 */
-const staying = (w: TransferWindow, ps: readonly Player[]) => ps.filter((p) => !p.isTemporary && !(w.kind === 'REGULAR' && p.contract.seasonsLeft <= 1));
+/** 다음 시즌에도 남는 선수: 정규 창(정산 = 다음 시즌 Day 2)은 잔여 1시즌(재계약 안 된 만료자)과 은퇴 예정자(Day 20 발표, 경계에서 은퇴)를 뺀다 */
+const staying = (w: TransferWindow, ps: readonly Player[]) => ps.filter((p) => !p.isTemporary && !(w.kind === 'REGULAR' && (p.contract.seasonsLeft <= 1 || p.retiring)));
 const starterIds = (ps: readonly Player[]) => new Set(ps.filter((p) => !p.isTemporary).sort(byOvrDesc).slice(0, 11).map((p) => p.id));
 
 /** 7.1 성향 0.5~1.0, 커리어 고정 (자동 운영 사용자 구단은 0.75 고정을 호출자가 넘긴다) */
@@ -137,9 +137,11 @@ export function aiBids(args: {
     const p = args.listingPlayers[l.playerId];
     if (!p || l.sellerClubId === club.id || p.age > AI_TRANSFER.maxAge) continue;
     const g = GROUP[p.primary];
-    const need = deficit(g) > 0;
+    const need = deficit(g) > 0 || own.length < A.minSquad; // M4.8: 22명 미만이면 모든 그룹이 필요 (사람 자동 운영 구단은 경계 보충이 없다)
     const gain = p.ovr - weakest(g);
-    if (!need && (gain < AI_TRANSFER.upgradeMin || squadStrength([...own, p]) > ref + A.bandHi)) continue;
+    if (!need && gain < AI_TRANSFER.upgradeMin) continue;
+    // 대역: 영입 뒤 주전 전력 > ref + bandHi 이면 안 산다. 필요 포지션 보충만 ref 이하 선수로 예외 (M4.8, 11.4 보충과 같은 상한)
+    if (squadStrength([...own, p]) > ref + A.bandHi && !(need && p.ovr <= ref)) continue;
     const u = h(args.gameSeed >>> 0, w.season, w.kind, club.id, l.id);
     const s = baseSalary(p.ovr);
     let bid: Bid;
@@ -168,7 +170,7 @@ export function aiBids(args: {
   const out: Bid[] = [];
   for (const c of cands) {
     if (out.length >= maxBids || own.length + out.length >= TRANSFER.maxSquad || club.signings + out.length >= club.signingLimit) break;
-    if ((perGroup.get(c.g) ?? 0) >= Math.max(1, deficit(c.g))) continue;
+    if ((perGroup.get(c.g) ?? 0) >= Math.max(1, deficit(c.g)) && own.length + out.length >= A.minSquad) continue;
     if (reserved + c.res > budget || capNow + c.cap > capMax) continue;
     reserved += c.res;
     capNow += c.cap;

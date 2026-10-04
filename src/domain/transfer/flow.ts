@@ -8,7 +8,7 @@ import type { ClubId, GameState, Kc, LedgerEntry, PendingRenewal, Player, Player
 import { TIER_ECONOMY, SEASON_DAYS, promotionBonus } from '../economy/economy';
 import { clubTierMap } from '../league/pyramid';
 import { TIER_REFERENCE_OVR } from '../squad/generator';
-import { CONTRACT, aiRenewals, capLimit, contractBoundary, emergencyFaSign, releaseQuote, type ContractEvent } from '../contract/contract';
+import { CONTRACT, aiRenewals, capLimit, contractBoundary, emergencyFaSign, releaseQuote, renewalBonus, type ContractEvent } from '../contract/contract';
 import { appendInbox, contractDraft, lifecycleDraft, type InboxContext, type InboxDraft, type InboxLifecycleEvent } from '../inbox/inbox';
 import { clubPlayers, post } from '../day/advanceDay';
 import { aiAggr, aiBids, aiSellListings, aiTransferBudget } from './ai';
@@ -169,7 +169,7 @@ export function registerExpiringFa(state: GameState): void {
   if (add.length) state.transferMarket = { ...m, listings: [...m.listings, ...add] };
 }
 
-/** 7.3 AI 입찰. clubIds 생략 = 모든 AI 구단. aggr 생략 = 구단 성향(7.1) */
+/** 7.3 AI 입찰. clubIds 생략 = 모든 AI 구단. aggr 생략 = 구단 성향(7.1). 그 구단의 이전 입찰은 새 판단으로 바꾼다(중간 창 2차 입찰) */
 export function placeAiBids(state: GameState, clubIds?: readonly ClubId[], aggr?: number): void {
   const m = state.transferMarket;
   if (!m) return;
@@ -192,6 +192,7 @@ export function placeAiBids(state: GameState, clubIds?: readonly ClubId[], aggr?
       ...(o.relegated ? { relegatedBudget: TIER_ECONOMY[o.tier].seasonBudget } : {}),
     });
     const mine = aiBids({ gameSeed: state.gameSeed, window: m.window, club, aggr: a, F, players: aiView(state, id), listings: m.listings, listingPlayers, placedDay: state.time.day });
+    bids = bids.filter((b) => b.clubId !== id);
     for (const b of mine) bids = upsertBid(bids, b);
   }
   state.transferMarket = { ...m, bids };
@@ -364,9 +365,19 @@ export function aiRenewalsFor(state: GameState, clubIds: readonly ClubId[]): Pen
   });
 }
 
-/** Day 20: AI 재계약 결정, 사람 구단에 재계약 창 편지 */
+/** AI 재계약 갱신 보너스 즉시 지급(사람 offerRenewal 과 같은 금액·원장, M4.8) */
+export function payAiRenewalBonuses(state: GameState, picks: readonly PendingRenewal[]): void {
+  for (const r of picks) {
+    const clubId = state.players[r.playerId]?.clubId;
+    const bonus = renewalBonus(r.salary, r.seasons);
+    if (clubId && bonus > 0) post(state, clubId, { kind: 'RENEWAL_BONUS', amount: -bonus, memo: r.playerId });
+  }
+}
+
+/** Day 20: AI 재계약 결정·갱신 보너스 지급, 사람 구단에 재계약 창 편지 */
 export function openRenewals(state: GameState): void {
   const ai = aiRenewalsFor(state, sortedIds(state).filter((id) => !isHuman(state, id)));
+  payAiRenewalBonuses(state, ai);
   state.pendingRenewals = [...(state.pendingRenewals ?? []), ...ai];
   const user = state.userClubId;
   const expiring = clubPlayers(state, user).filter((p) => p.contract.seasonsLeft === 1 && !p.isTemporary && !p.retiring).map((p) => p.id);
@@ -439,7 +450,7 @@ export function fillHumanSquads(state: GameState): void {
 
 /**
  * advanceDay DAILY_PROCESSING 끝(연봉·수명주기·이월 뒤)에 호출. 날짜 = 처리 중인 새 날.
- * Day 11 중간 창 열림 + AI 입찰 / Day 15 정산 / Day 20 재계약 창 / Day 25 정규 창 열림 / Day 28 만료 FA 등록 + AI 입찰 / 다음 시즌 Day 2 정산 / 매일 D18.
+ * Day 11 중간 창 열림 + AI 입찰 / Day 14 AI 2차 입찰(사람이 Day 11~14 에 올린 매물 포함, M4.8) / Day 15 정산 / Day 20 재계약 창 / Day 25 정규 창 열림 / Day 28 만료 FA 등록 + AI 입찰 / 다음 시즌 Day 2 정산 / 매일 D18.
  */
 export function transferDaily(state: GameState, sink: LedgerEntry[], notices: string[]): void {
   const d = state.time.day;
@@ -449,6 +460,7 @@ export function transferDaily(state: GameState, sink: LedgerEntry[], notices: st
     openWindow(state, 'MID');
     placeAiBids(state);
   }
+  if (d === W.MID.settleDay - 1 && state.transferMarket?.window.kind === 'MID') placeAiBids(state);
   if (d === W.REGULAR.openDay) openWindow(state, 'REGULAR');
   if (d === SEASON_DAYS) {
     registerExpiringFa(state);
@@ -459,14 +471,20 @@ export function transferDaily(state: GameState, sink: LedgerEntry[], notices: st
 }
 
 /**
- * 자동 운영 구단(CAREER_SIM 의 사람 구단, 7.7): 그날 AI 와 같은 규칙으로 재계약(Day 20)·입찰(Day 11·28), aggr 고정.
+ * 자동 운영 구단(CAREER_SIM 의 사람 구단, 7.7): 그날 AI 와 같은 규칙으로 재계약(Day 20)·입찰(Day 11·14·28), aggr 고정.
  * 새 상태를 돌려준다(입력 불변).
  */
 export function autoManageDay(input: GameState, clubId: ClubId, aggr = 0.75): GameState {
   const d = input.time.day;
-  if (d !== CONTRACT.renewalOpenDay && d !== TRANSFER.window.MID.openDay && d !== SEASON_DAYS) return input;
+  const W = TRANSFER.window;
+  if (d !== CONTRACT.renewalOpenDay && d !== W.MID.openDay && d !== W.MID.settleDay - 1 && d !== SEASON_DAYS) return input;
   const state: GameState = { ...input };
-  if (d === CONTRACT.renewalOpenDay) state.pendingRenewals = [...(state.pendingRenewals ?? []), ...aiRenewalsFor(state, [clubId])];
-  else placeAiBids(state, [clubId], aggr);
+  if (d === CONTRACT.renewalOpenDay) {
+    const picks = aiRenewalsFor(state, [clubId]);
+    state.finances = { ...state.finances };
+    payAiRenewalBonuses(state, picks);
+    state.pendingRenewals = [...(state.pendingRenewals ?? []), ...picks];
+  }
+  else if (state.transferMarket) placeAiBids(state, [clubId], aggr);
   return state;
 }
