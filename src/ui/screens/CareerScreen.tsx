@@ -7,7 +7,7 @@ export function CareerScreen() {
   const q = useQuery((s) => s.getCareer?.() ?? null);
   const c = q.data;
   if (q.error) return <Empty>커리어 기록을 불러오지 못했어요 ({q.error.message})</Empty>;
-  if (!c) return <Empty>이 서비스는 아직 커리어 기록을 지원하지 않아요</Empty>;
+  if (!c) return <Empty>커리어 기록은 아직 볼 수 없어요</Empty>;
   const seasons = [...c.seasons].reverse(); // 최신 시즌이 위
   return (
     <div className="screen career">
@@ -53,7 +53,7 @@ export function CareerScreen() {
             <tbody>
               {seasons.map((x) => (
                 <tr key={x.season}>
-                  <td>S{x.season}</td>
+                  <td>{x.season}</td>
                   <td title={TIER_NAME[x.tier]}>{x.tier}</td>
                   <td>{x.position}위</td>
                   <td>

@@ -937,7 +937,7 @@ export class FakeGameService implements GameService {
       });
     const style = club.style ?? nearestStyle(STYLES, club.tactics.A.instructions)?.style.id;
     const st = style ? styleOf(style) : undefined;
-    const weakness = st ? st.weaknesses.map((r: string) => `${RULES.find((x) => x.id === r)?.label ?? r} (${r})`).join(' · ') + '에 약해요' : '특이점 없음';
+    const weakness = st ? st.weaknesses.map((r: string) => `${RULES.find((x) => x.id === r)?.label ?? r}`).join(' · ') + '에 약해요' : '특이점 없음';
     return { clubId, botStyle: club.style ? FOLD_TAG[club.style] : undefined, style, styleEstimated: !club.style, last5, weakness };
   }
   getFinance(clubId?: ClubId): FinanceSummary {

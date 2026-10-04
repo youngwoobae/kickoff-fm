@@ -30,7 +30,7 @@ export function PlanScreen() {
   const oppSquad = useQuery((s) => (oppId ? s.getSquad(oppId) : []), [oppId]).data ?? [];
   const mySquad = useQuery((s) => s.getSquad()).data ?? [];
 
-  if (!plan || !planState?.matchId) return <Empty>다음 경기가 없어요. 오프시즌에는 플랜을 제출하지 않습니다.</Empty>;
+  if (!plan || !planState?.matchId) return <Empty>다음 경기가 없어요. 오프시즌에는 플랜을 제출하지 않아요.</Empty>;
   const club = snap.clubs[snap.userClubId];
   const opp = oppId ? snap.clubs[oppId] : undefined;
   const oo = plan.opponentOrders?.opponentId === oppId ? plan.opponentOrders : undefined;
@@ -83,7 +83,7 @@ export function PlanScreen() {
       {oppId && <MatchupCard slot={plan.startSlot} oppId={oppId} />}
 
       <Card title="조건부 지시" extra={<span className="small muted">{plan.conditionals.length}/3 · 위에서부터 우선</span>}>
-        {plan.conditionals.length === 0 && <Empty>아직 없어요. 템플릿으로 시작해 보세요.</Empty>}
+        {plan.conditionals.length === 0 && <Empty>아직 없어요. 아래 예시를 눌러 시작해 보세요.</Empty>}
         <ol className="cond-list">
           {plan.conditionals.map((c, i) => (
             <li key={c.id} className={`cond-item ${c.enabled ? '' : 'is-off'}`}>
@@ -184,7 +184,7 @@ export function PlanScreen() {
             ))}
           </select>
         </label>
-        {!isOwner && <p className="small muted">자동 교체·로테이션·키커는 제안 항목에 포함되지 않아요 (계약 제한)</p>}
+        {!isOwner && <p className="small muted">자동 교체·로테이션·키커는 제안에 담을 수 없어요</p>}
       </Card>
 
       {(errors.length > 0 || warnings.length > 0) && (
@@ -216,7 +216,7 @@ export function PlanScreen() {
         {planState.defaultPlan ? <p className="small muted">기본 플랜 지정됨 · 슬롯 {planState.defaultPlan.startSlot}</p> : <p className="small muted">기본 플랜이 없으면 직전 경기 플랜이 쓰여요</p>}
         {dirty && (
           <button type="button" className="btn btn-ghost btn-sm" onClick={reset}>
-            편집 취소 (서버 기준으로)
+            편집 취소 (저장된 플랜으로)
           </button>
         )}
       </Card>
@@ -243,7 +243,7 @@ function MatchupCard({ slot, oppId }: { slot: SlotKey; oppId: ClubId }) {
         상대 스타일: <strong>{styleLabel ?? '알 수 없음'}</strong> {styleLabel && estimated && <Badge tone="warn">추정</Badge>}
       </p>
       {!mp ? (
-        <p className="small muted">{q.error ? q.error.message : '이 서비스는 상성 미리보기를 제공하지 않아요'}</p>
+        <p className="small muted">{q.error ? q.error.message : '상성 미리보기를 볼 수 없어요'}</p>
       ) : (
         <>
           <div className="edge" role="img" aria-label={`전체 판정 ${EDGE_LABEL[mp.styleEdge]}`}>
@@ -329,19 +329,19 @@ function ConditionalBuilder({ open, onClose, onAdd }: { open: boolean; onClose: 
           {(
             [
               ['SLOT_A', '슬롯 A로 전환'], ['SLOT_B', '슬롯 B로 전환'], ['M+1', '공격 성향 +1'], ['M+2', '공격 성향 +2'], ['M-1', '공격 성향 −1'], ['M-2', '공격 성향 −2'],
-              ['HT_TEMPO+', '템포 +1 (HT)'], ['HT_TEMPO-', '템포 −1 (HT)'], ['HT_PRESS+', '압박 +1 (HT)'], ['HT_PRESS-', '압박 −1 (HT)'],
+              ['HT_TEMPO+', '템포 +1 (하프타임)'], ['HT_TEMPO-', '템포 −1 (하프타임)'], ['HT_PRESS+', '압박 +1 (하프타임)'], ['HT_PRESS-', '압박 −1 (하프타임)'],
             ] as [ActOpt, string][]
           ).map(([v, l]) => {
             const disabled = v.startsWith('HT_') && !isHT;
             return (
-              <button key={v} type="button" className={`chip ${act === v ? 'is-active' : ''}`} aria-pressed={act === v} disabled={disabled} title={disabled ? '하프타임 조건을 고른 경우에만' : undefined} onClick={() => setAct(v)}>
+              <button key={v} type="button" className={`chip ${act === v ? 'is-active' : ''}`} aria-pressed={act === v} disabled={disabled} title={disabled ? '하프타임 조건을 골라야 쓸 수 있어요' : undefined} onClick={() => setAct(v)}>
                 {l}
               </button>
             );
           })}
         </div>
       </div>
-      <p className="summary-box">{valid ? `요약: 만약 ${conditionalText(preview)}` : conditions.length === 0 ? '조건을 하나 이상 고르세요' : '하프타임 조정은 하프타임 조건과만 쓸 수 있어요'}</p>
+      <p className="summary-box">{valid ? `요약: 만약 ${conditionalText(preview)}` : conditions.length === 0 ? '조건을 하나 이상 골라 주세요' : '하프타임 조정은 하프타임 조건과만 쓸 수 있어요'}</p>
     </Sheet>
   );
 }

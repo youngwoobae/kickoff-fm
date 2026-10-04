@@ -42,7 +42,7 @@ export function useSnapshot(): GameSnapshot | null {
 /** 게임 안 화면 전용: 스냅샷이 반드시 있다 */
 export function useGame(): GameSnapshot {
   const s = useSnapshot();
-  if (!s) throw new Error('게임이 없습니다');
+  if (!s) throw new Error('열린 게임이 없어요');
   return s;
 }
 

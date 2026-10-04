@@ -99,7 +99,7 @@ export const PLAN_SOURCE_LABEL: Record<PlanSource, string> = {
   CONFIRMED: '확정 제출한 플랜',
   DEFAULT: '기본 플랜',
   LAST_USED: '직전 경기 플랜',
-  SYSTEM: '감독 AI 기본 편성',
+  SYSTEM: '자동 편성 플랜',
 };
 export const ADJ_LABEL: Record<PlanAdjustmentKind, string> = {
   OPP_ORDERS_CLEARED: '맞춤 지시 제거',
@@ -119,7 +119,7 @@ export const LEDGER_LABEL: Record<LedgerKind | PromotionLedgerKind | TransferLed
   PRIZE: '순위 상금',
   CHAMPION_BONUS: '우승 수당',
   CARRY_EXCESS_SPLIT: '이월 초과분 분리',
-  TRANSFER_BUDGET_EXPIRED: '한정 예산 소멸',
+  TRANSFER_BUDGET_EXPIRED: '이적 한정 예산 소멸',
   PROMOTION_BONUS: '승격 보너스',
   PARACHUTE: '강등 완충금',
   TRANSFER_FEE_PAID: '이적료 지급',
@@ -166,7 +166,7 @@ export const LABEL_TEXT: Record<PromotionLabel, string> = { PROMOTED: '▲ 승�
 export const LABEL_TONE: Record<PromotionLabel, 'good' | 'bad' | 'neutral'> = { PROMOTED: 'good', RELEGATED: 'bad', STAYED: 'neutral' };
 
 export const PROPOSAL_STATUS_LABEL: Record<ProposalStatus, string> = {
-  OPEN: '대기', APPROVED: '승인됨', REJECTED: '거절됨', EXPIRED: '만료', SUPERSEDED: '대체됨', STALE: '무효(재검증 실패)',
+  OPEN: '대기', APPROVED: '승인됨', REJECTED: '거절됨', EXPIRED: '만료', SUPERSEDED: '대체됨', STALE: '무효',
 };
 
 export function conditionalText(c: ConditionalOrder): string {

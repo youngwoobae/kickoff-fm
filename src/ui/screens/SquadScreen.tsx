@@ -5,6 +5,7 @@ import type { AttrDef, Player, PlayerId } from '../../types';
 import { Badge, Card, ConditionBar, Empty, ErrorNote, FitMark, MoneyField, Segmented, Sheet } from '../components/kit';
 import { FIT_LABEL, MORALE_LABEL, MORALE_SHORT, POS_LABEL, POS_NAME, POS_ORDER, TRANSFER_ERROR_TEXT, fitOf, formatKc, isAvailable } from '../format';
 import { useGame, useInlineAction, useIsOwner, useQuery } from '../service/ServiceContext';
+import { josa } from '../josa';
 
 type SortKey = 'pos' | 'ovr' | 'cond' | 'form';
 
@@ -51,7 +52,7 @@ export function SquadScreen() {
         ]}
       />
       {sorted.length === 0 ? (
-        <Empty>선수가 없습니다</Empty>
+        <Empty>선수가 없어요</Empty>
       ) : (
         <ul className="player-list" aria-label="선수 목록">
           {sorted.map((p) => (
@@ -68,7 +69,7 @@ export function SquadScreen() {
                   <span className="pr-sub">
                     {p.age}세 · 폼 {MORALE_SHORT[p.morale]} · {p.season.apps}경기 {p.season.goals}골
                     {p.availability.injuryDays > 0 && <Badge tone="bad">🩹 부상 {p.availability.injuryDays}일</Badge>}
-                    {p.availability.suspendedMatches > 0 && <Badge tone="bad">🟥 정지 {p.availability.suspendedMatches}</Badge>}
+                    {p.availability.suspendedMatches > 0 && <Badge tone="bad">🟥 정지 {p.availability.suspendedMatches}경기</Badge>}
                   </span>
                 </span>
                 <span className="pr-cond">
@@ -161,7 +162,7 @@ function PlayerDetail({ p, attrs, onClose }: { p: Player; attrs: AttrDef[]; onCl
       ))}
       <h3 className="h3">이번 시즌</h3>
       <p className="small">
-        출전 {p.season.apps} (선발 {p.season.starts}) · {p.season.minutes}분 · 골 {p.season.goals} · 슈팅 {p.season.shots} · 키패스 {p.season.keyPasses} · 태클 {p.season.tackles}
+        출전 {p.season.apps}경기 (선발 {p.season.starts}) · {p.season.minutes}분 · 골 {p.season.goals} · 슈팅 {p.season.shots} · 키패스 {p.season.keyPasses} · 태클 {p.season.tackles}
       </p>
       <GrowthHistory p={p} />
     </div>
@@ -194,7 +195,7 @@ function GrowthHistory({ p }: { p: Player }) {
   return (
     <>
       <h3 className="h3">성장 기록</h3>
-      <svg className="ovr-spark" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`OVR 추이: ${pts.map((q) => `${q.label} ${q.ovr}`).join(', ')}`}>
+      <svg className="ovr-spark" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`OVR 추이: ${pts.map((q) => `${q.label.replace(/^S/, '시즌 ')} ${q.ovr}`).join(', ')}`}>
         <polyline points={pts.map((q, i) => `${x(i)},${y(q.ovr)}`).join(' ')} />
         {pts.map((q, i) => (
           <g key={q.label}>
@@ -212,7 +213,7 @@ function GrowthHistory({ p }: { p: Player }) {
         {[...hist].reverse().map((h, i, arr) => (
           <li key={h.season} className="list-row small">
             <span>
-              S{h.season} · {h.age}세{h.tier && ` · ${h.tier}`} · {h.apps}경기 {h.goals}골
+              시즌 {h.season} · {h.age}세{h.tier && ` · ${h.tier}`} · {h.apps}경기 {h.goals}골
             </span>
             <span>
               OVR <strong>{h.ovr}</strong>
@@ -245,7 +246,7 @@ function ContractSection({ p, onClose }: { p: Player; onClose: () => void }) {
         </li>
         {c.capCharge !== undefined && (
           <li className="list-row">
-            <span>캡 산입액</span>
+            <span>연봉 캡 산입액</span>
             <span>{formatKc(c.capCharge)}</span>
           </li>
         )}
@@ -288,7 +289,7 @@ function RenewalPanel({ p }: { p: Player }) {
   if (result?.accepted)
     return (
       <p className="small">
-        <Badge tone="good">✓ 수락</Badge> 재계약했어요. 재계약 보너스 {formatKc(result.bonus)}를 지급했어요.
+        <Badge tone="good">✓ 수락</Badge> 재계약했어요. 재계약 보너스 {josa(formatKc(result.bonus), '을/를')} 지급했어요.
       </p>
     );
   if (q.error) return <p className="small muted">{(isGameError(q.error) && TRANSFER_ERROR_TEXT[q.error.code]) || q.error.message}</p>;
@@ -321,7 +322,7 @@ function RenewalPanel({ p }: { p: Player }) {
       </button>
       {result && (
         <p className="small">
-          <Badge tone="bad">✕ 거절</Badge> 선수가 거절했어요. 요구 연봉은 {formatKc(result.ask)}예요.
+          <Badge tone="bad">✕ 거절</Badge> 선수가 거절했어요 (요구 연봉 {formatKc(result.ask)}).
         </p>
       )}
       <ErrorNote error={error} dev={snap.settings.devMode} />
@@ -345,7 +346,7 @@ function ReleasePanel({ p, onDone }: { p: Player; onDone: () => void }) {
   };
   return (
     <div className="form-stack">
-      <p>{quote.exempt ? '위약금 없이 방출할 수 있어요.' : <>위약금 <strong className="neg">{formatKc(quote.penalty)}</strong>를 바로 내야 해요 (남은 연봉의 절반).</>}</p>
+      <p>{quote.exempt ? '위약금 없이 방출할 수 있어요.' : <>바로 내야 할 위약금: <strong className="neg">{formatKc(quote.penalty)}</strong> (남은 연봉의 절반)</>}</p>
       <p className="small muted">방출한 선수는 FA가 되고 연봉 캡에서 빠져요. 18명보다 적어지면 임시 계약 선수가 채워요.</p>
       <button type="button" className="btn btn-danger" onClick={release}>
         {quote.exempt ? '방출하기' : `위약금 ${formatKc(quote.penalty)} 내고 방출`}

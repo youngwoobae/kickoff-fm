@@ -63,7 +63,7 @@ export function SettingsSheet({ open, onClose, inGame }: { open: boolean; onClos
               { value: '1.25', label: '아주 크게' },
             ]}
           />
-          <small className="muted">아주 크게에서는 선발 화면이 리스트 보기로 열려요.</small>
+          <small className="muted">아주 크게에서는 선발 화면이 목록 보기로 열려요.</small>
         </div>
         <div className="field">
           <span>모션 줄이기</span>

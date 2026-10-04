@@ -308,7 +308,7 @@ function SaveBanner() {
   if (!status.error) return null;
   return (
     <div className="save-banner" role="alert">
-      <span>⚠ 저장 실패: {status.error}</span>
+      <span title={status.error}>⚠ 저장하지 못했어요. 저장 공간이 부족할 수 있어요.</span>
       <button type="button" className="btn btn-secondary btn-sm" onClick={() => void act((s) => s.flush?.(), '저장했어요')}>
         다시 저장
       </button>

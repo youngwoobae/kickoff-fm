@@ -9,7 +9,7 @@ import { diffPatch, isEmptyPatch, usePlanEditor } from './PlanEditor';
 export function PlanStatusLine() {
   const { planState, dirty } = usePlanEditor();
   const snap = useSnapshot();
-  if (!planState?.matchId) return <span className="muted">다음 경기가 없습니다</span>;
+  if (!planState?.matchId) return <span className="muted">다음 경기가 없어요</span>;
   const c = planState.confirmed;
   const d = planState.draft;
   return (
@@ -25,7 +25,7 @@ export function PlanStatusLine() {
         </>
       ) : (
         <>
-          <span className="badge badge-bad">미제출</span> 마감 시 {planState.preview ? '4.7 규칙 플랜' : '기본 플랜'} 적용
+          <span className="badge badge-bad">미제출</span> 마감 시 {planState.preview ? '자동 적용 플랜' : '기본 플랜'}으로 경기해요
         </>
       )}
       {dirty && <span className="badge badge-accent">편집 중</span>}
@@ -39,7 +39,7 @@ export function ProposeSheet({ open, onClose, patch, title = '코치 제안 보�
   const [reason, setReason] = useState('');
   const submit = () => {
     if (!planState?.matchId) return;
-    const r = run((s) => s.propose({ payload: { kind: 'PLAN_CHANGE', matchId: planState.matchId as string, patch }, reason }), '제안을 보냈어요. 구단주 승인을 기다립니다');
+    const r = run((s) => s.propose({ payload: { kind: 'PLAN_CHANGE', matchId: planState.matchId as string, patch }, reason }), '제안을 보냈어요. 구단주 승인을 기다려요');
     if (r) {
       setReason('');
       onClose();
@@ -114,7 +114,7 @@ export function PlanActions() {
         className="btn btn-primary"
         data-tour="plan.submit"
         onClick={() => {
-          if (run((s) => s.submitPlan(plan), '확정 제출 완료 · 넘기기 전까지 수정 가능')) markSaved();
+          if (run((s) => s.submitPlan(plan), '확정 제출했어요 · ‘다음 날로 넘기기’ 전까지 고칠 수 있어요')) markSaved();
         }}
       >
         확정 제출

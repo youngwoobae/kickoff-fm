@@ -94,11 +94,11 @@ export function LineupScreen() {
             ]}
           />
         </div>
-        <p className="small muted">숙련도 {Math.round(slot.familiarity)} · 포메이션·역할은 전술 탭에서 바꿉니다</p>
+        <p className="small muted">숙련도 {Math.round(slot.familiarity)} · 포메이션·역할은 전술 탭에서 바꿔요</p>
       </Card>
 
       <div className="row-between">
-        <Segmented label="보기" size="sm" value={view} onChange={setView} options={[{ value: 'pitch', label: '피치' }, { value: 'list', label: '리스트' }]} />
+        <Segmented label="보기" size="sm" value={view} onChange={setView} options={[{ value: 'pitch', label: '피치' }, { value: 'list', label: '목록' }]} />
         <span className="legend small">◎주 ○숙련 △가능 ✕부적합 · ★역할 적합</span>
       </div>
 
@@ -106,7 +106,7 @@ export function LineupScreen() {
         {pick ? (
           <>
             <span>
-              선택됨: <strong>{pickedPlayer?.name ?? '빈 벤치 자리'}</strong> → 바꿀 자리를 탭하세요
+              선택됨: <strong>{pickedPlayer?.name ?? '빈 벤치 자리'}</strong> → 바꿀 자리를 탭해 주세요
             </span>
             {pickedPlayer && (
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDetail(pickedPlayer.id)}>
@@ -156,7 +156,7 @@ export function LineupScreen() {
           ))}
         </div>
       ) : (
-        <ul className="slot-list" data-tour="lineup.pitch" aria-label="선발 리스트">
+        <ul className="slot-list" data-tour="lineup.pitch" aria-label="선발 목록">
           {plan.lineup.starters.map((id, i) => {
             const fs = formation?.slots[i];
             const p = byId.get(id);

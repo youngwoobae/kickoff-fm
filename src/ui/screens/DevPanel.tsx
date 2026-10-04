@@ -95,7 +95,7 @@ export function DevPanel() {
             className="btn btn-ghost"
             onClick={() => {
               if (slot === null) void act((s) => s.closeSlot?.());
-              else if (confirm(`슬롯 ${slot} 세이브를 지우고 타이틀로 갈까요?`)) void trackSlotOp(act((s) => s.deleteSlot?.(slot), `슬롯 ${slot} 을 비웠어요`));
+              else if (confirm(`슬롯 ${slot} 세이브를 지우고 타이틀로 갈까요?`)) void trackSlotOp(act((s) => s.deleteSlot?.(slot), `슬롯 ${slot} 세이브를 지웠어요`));
             }}
           >
             {slot === null ? '타이틀로' : `슬롯 ${slot} 삭제`}

@@ -59,5 +59,5 @@ export function IosInstallHint() {
   const nav = globalThis.navigator as (Navigator & { standalone?: boolean }) | undefined;
   const ios = !!nav && (/iP(hone|ad|od)/.test(nav.userAgent) || (nav.platform === 'MacIntel' && nav.maxTouchPoints > 1));
   if (!ios || nav.standalone || globalThis.matchMedia?.('(display-mode: standalone)').matches) return null;
-  return <p className="warn-line">아이폰·아이패드: 사파리 공유 버튼 → "홈 화면에 추가"로 설치하면 오프라인에서도 열리고 세이브가 안전하게 보관돼요.</p>;
+  return <p className="warn-line">아이폰·아이패드: 사파리 공유 버튼 → ‘홈 화면에 추가’로 설치하면 오프라인에서도 열리고 세이브가 안전하게 보관돼요.</p>;
 }

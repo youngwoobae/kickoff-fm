@@ -357,7 +357,6 @@ function StyleSheet({
         )
       }
     >
-      <p className="small muted">실제 모델: {style.realModel}</p>
       <p>{style.principle}</p>
       <p className="small">
         권장 포메이션 <strong>{style.formation}</strong> · 체력 비용 <Stamina n={style.staminaCost} /> {style.staminaCost}/4 (경기당 +{style.drainExtra})
@@ -386,7 +385,7 @@ function StyleSheet({
         <strong>조심할 상대:</strong> {style.badAgainst.map(styleName).join(', ') || '없음'}
       </p>
       <p className="small muted">
-        "지시만 적용"은 숙련도를 유지해요. "포메이션·역할까지"는 {halves ? `숙련도가 절반이 돼요 (${halfText}).` : '포메이션이 같아 숙련도가 유지돼요.'}
+        ‘지시만 적용’은 숙련도를 유지해요. ‘포메이션·역할까지 적용’은 {halves ? `숙련도가 절반이 돼요 (${halfText}).` : '포메이션이 같아 숙련도가 유지돼요.'}
         {!canFull && ' 코치는 지시만 바꿔 제안할 수 있어요.'}
         {dirty && ' 저장하지 않은 편집은 덮어써져요.'}
       </p>
@@ -415,7 +414,7 @@ function RoleSheet({
   const attrLabel = (k: string) => attrs.find((a) => a.key === k)?.label ?? k;
   return (
     <Sheet open title={title} onClose={onClose}>
-      {player && <p className="small muted">★ = {player.name} 의 역할 핵심 능력 평균 (1~20 → 5단계)</p>}
+      {player && <p className="small muted">★ = {player.name}의 역할 핵심 능력 평균 (1~20 → 5단계)</p>}
       <ul className="list">
         {allowed.map((r) => {
           const fit = player ? roleFit(player, r.keyAttrs) : undefined;

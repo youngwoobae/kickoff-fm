@@ -70,7 +70,7 @@ export function TitleScreen() {
   const remove = (id: SaveSlotId, name: string) => {
     if (!confirm(`슬롯 ${id} (${name}) 세이브를 삭제할까요? 되돌릴 수 없어요.`)) return;
     void withBusy('삭제하는 중…', async () => {
-      await act((s) => s.deleteSlot?.(id), `슬롯 ${id} 을 비웠어요`);
+      await act((s) => s.deleteSlot?.(id), `슬롯 ${id} 세이브를 지웠어요`);
       setCorrupt((c) => ({ ...c, [id]: undefined }));
       reload();
     });
@@ -91,7 +91,7 @@ export function TitleScreen() {
     if (fileRef.current) fileRef.current.value = '';
     if (!file || id === null) return;
     const filled = metas?.some((m) => m.slotId === id) || corrupt[id];
-    if (filled && !confirm(`슬롯 ${id} 의 세이브를 가져온 파일로 덮어쓸까요?`)) return;
+    if (filled && !confirm(`슬롯 ${id} 세이브를 가져온 파일로 덮어쓸까요?`)) return;
     const json = await file.text();
     await withBusy('세이브를 가져오는 중…', () => act((s) => s.importSave(json, id), '세이브를 불러왔어요'));
   };
@@ -119,7 +119,7 @@ export function TitleScreen() {
         </div>
         <h1 className="hero">킥오프 FM</h1>
         <p className="muted">
-          매일 경기 플랜을 제출하고 하루씩 진행하는 축구 구단 운영 게임입니다. 진행은 매일 자동 저장돼요.
+          매일 경기 플랜을 제출하고 하루씩 진행하는 축구 구단 운영 게임이에요. 진행은 매일 자동 저장돼요.
           {mode === 'fake' && ' (가짜 서비스 모드)'}
         </p>
         <IosInstallHint />
@@ -143,7 +143,7 @@ export function TitleScreen() {
               )}
               {bad && (
                 <p className="slot-warn" role="alert">
-                  이 세이브를 열 수 없어요({bad}). 파일로 내보내 보관하거나 삭제한 뒤 새로 시작하세요.
+                  이 세이브를 열 수 없어요({bad}). 파일로 내보내 보관하거나 삭제한 뒤 새로 시작해 주세요.
                 </p>
               )}
               {formSlot === id ? (
@@ -196,11 +196,11 @@ function NewGameForm({ slotId, overwrite, onCancel, run }: { slotId: SaveSlotId;
   const [startTier, setStartTier] = useState<Tier>('T5');
 
   const start = () => {
-    if (overwrite && !confirm(`슬롯 ${slotId} 의 기존 세이브를 지우고 새 게임을 시작할까요?`)) return;
+    if (overwrite && !confirm(`슬롯 ${slotId}의 기존 세이브를 지우고 새 게임을 시작할까요?`)) return;
     const n = Number(seed);
     tourHint.newGame = true;
     void run('새 게임을 만드는 중…', () =>
-      act((s) => s.newGame({ clubName: clubName.trim() || undefined, seed: seed && Number.isFinite(n) ? n : undefined, devMode: DEV_TOOLS, slotId, startTier }), '새 시즌을 시작합니다!'),
+      act((s) => s.newGame({ clubName: clubName.trim() || undefined, seed: seed && Number.isFinite(n) ? n : undefined, devMode: DEV_TOOLS, slotId, startTier }), '창단했어요. 첫 시즌을 시작해요'),
     );
   };
 
@@ -224,10 +224,12 @@ function NewGameForm({ slotId, overwrite, onCancel, run }: { slotId: SaveSlotId;
         />
         <small className="muted">{startTier === 'T5' ? '가장 아래 리그에서 차근차근 올라가요.' : '중간 리그에서 시작해요. 첫 시즌부터 강등 위험이 있어요.'}</small>
       </div>
-      <label className="field">
-        <span>시드 (비우면 무작위)</span>
-        <input inputMode="numeric" value={seed} onChange={(e) => setSeed(e.target.value.replace(/[^0-9]/g, ''))} placeholder="예: 42" />
-      </label>
+      {DEV_TOOLS && (
+        <label className="field">
+          <span>시드 (비우면 무작위)</span>
+          <input inputMode="numeric" value={seed} onChange={(e) => setSeed(e.target.value.replace(/[^0-9]/g, ''))} placeholder="예: 42" />
+        </label>
+      )}
       <div className="btn-row">
         <button type="button" className="btn btn-ghost" onClick={onCancel}>
           취소

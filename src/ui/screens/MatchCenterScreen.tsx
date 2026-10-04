@@ -38,7 +38,7 @@ export function MatchCenterScreen() {
   );
   const matchId = nav.matchId && played.some((f) => f.id === nav.matchId) ? nav.matchId : (played[0]?.id ?? null);
 
-  if (!matchId) return <Empty>아직 치른 경기가 없어요. 홈에서 "다음 날로 넘기기"를 눌러 보세요.</Empty>;
+  if (!matchId) return <Empty>아직 치른 경기가 없어요. 홈에서 ‘다음 날로 넘기기’를 눌러 보세요.</Empty>;
   return (
     <div className="screen match">
       <label className="field">
@@ -50,7 +50,7 @@ export function MatchCenterScreen() {
             const away = snap.clubs[f.awayId]?.shortName;
             return (
               <option key={f.id} value={f.id}>
-                Day {f.day} · {home} {s ? `${s.home.goals}:${s.away.goals}` : 'vs'} {away}
+                Day {f.day} · {home} {s ? `${s.home.goals} : ${s.away.goals}` : 'vs'} {away}
               </option>
             );
           })}
@@ -61,7 +61,7 @@ export function MatchCenterScreen() {
         value={nav.matchView}
         onChange={(v) => go({ matchView: v })}
         options={[
-          { value: 'replay', label: '텍스트 중계' },
+          { value: 'replay', label: '중계' },
           { value: 'report', label: '경기 리포트' },
         ]}
       />
@@ -130,10 +130,10 @@ function ReplayView({ matchId }: { matchId: string }) {
           <span className="sb-team">{away?.shortName}</span>
         </div>
         <div className="sb-min">{done ? '경기 종료' : cur ? minOf(cur) : '0′'}</div>
-        <div className="zone-bar" aria-label={`구역 점유 Z0 ${pct(zone[0])}, Z1 ${pct(zone[1])}, Z2 ${pct(zone[2])}`}>
-          <span style={{ flex: zone[0] }}>Z0 수비</span>
-          <span style={{ flex: zone[1] }}>Z1 중원</span>
-          <span style={{ flex: zone[2] }}>Z2 공격</span>
+        <div className="zone-bar" aria-label={`홈 팀 공격 구역 분포: 수비 진영 ${pct(zone[0])}, 중원 ${pct(zone[1])}, 공격 진영 ${pct(zone[2])}`}>
+          <span style={{ flex: zone[0] }}>수비 진영</span>
+          <span style={{ flex: zone[1] }}>중원</span>
+          <span style={{ flex: zone[2] }}>공격 진영</span>
         </div>
         <div className="momentum" aria-label="모멘텀 (위: 홈 우세, 아래: 원정 우세)">
           {replay.momentum.map((m, i) => (
@@ -264,7 +264,7 @@ function ReportView({ matchId }: { matchId: string }) {
         </p>
       </Card>
 
-      <Card tour="report.keyFactors" title="승부 요인 Top 3">
+      <Card tour="report.keyFactors" title="승부 요인 3가지">
         {r.keyFactors.length === 0 ? (
           <Empty>뚜렷한 전술 요인이 없었어요</Empty>
         ) : (

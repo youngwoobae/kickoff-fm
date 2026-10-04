@@ -19,7 +19,7 @@ export function CoachScreen() {
 
   return (
     <div className="screen coach">
-      <Card title="역할 전환 (로컬 시연)">
+      <Card title="역할 바꾸기">
         <Segmented
           label="현재 역할"
           value={seat === 'OWNER' ? 'OWNER' : 'COACH'}
@@ -32,7 +32,7 @@ export function CoachScreen() {
         <p className="small muted">
           {seat === 'OWNER'
             ? '구단주는 플랜·전술을 직접 바꾸고, 코치 제안을 승인하거나 거절해요.'
-            : '코치는 편집 대신 제안을 보내요. 선발·경기 플랜·전술 화면의 "제안하기" 버튼이나 아래 빠른 제안을 쓰세요.'}
+            : '코치는 편집 대신 제안을 보내요. 선발·경기 플랜·전술 화면의 ‘제안하기’ 버튼이나 아래 빠른 제안을 써 보세요.'}
         </p>
       </Card>
 
@@ -105,13 +105,13 @@ function ProposalCard({ p, seat }: { p: Proposal; seat: string }) {
   })();
   const isOpen = p.status === 'OPEN';
   const approve = (edits?: PlanChangePatch) => {
-    const r = run((s) => s.approve(p.id, edits), (res) => (res.ok ? `승인했어요. 구단주 명의로 확정 제출됨${res.superseded.length ? ` (대체된 제안 ${res.superseded.length}건)` : ''}` : undefined));
+    const r = run((s) => s.approve(p.id, edits), (res) => (res.ok ? `승인했어요. 구단주 이름으로 확정 제출했어요${res.superseded.length ? ` (대체된 제안 ${res.superseded.length}건)` : ''}` : undefined));
     if (!r) return;
     if (r.ok) setStale(null);
     else {
       // STALE 제안은 OPEN 필터에서 바로 사라지므로 카드 안 문구만으로는 보이지 않는다 → 토스트로 알린다
       setStale(r.details);
-      toast.show(`재검증 실패로 무효 처리: ${r.details.join(', ')}`, 'error');
+      toast.show(`상황이 바뀌어 제안이 무효가 됐어요: ${r.details.join(', ')}`, 'error');
     }
   };
   const myReaction = p.reactions.find((r) => r.userId === snap.actorUserId)?.choice;
@@ -144,7 +144,7 @@ function ProposalCard({ p, seat }: { p: Proposal; seat: string }) {
         </p>
       )}
       {p.resolutionNote && <p className="small muted">처리 메모: {p.resolutionNote}</p>}
-      {stale && <p className="warn-line">재검증 실패로 무효 처리: {stale.join(', ')}</p>}
+      {stale && <p className="warn-line">상황이 바뀌어 제안이 무효가 됐어요: {stale.join(', ')}</p>}
       {isOpen && seat === 'OWNER' && (
         <div className="btn-row three">
           <button type="button" className="btn btn-ghost" onClick={() => setRejectOpen(true)}>
@@ -217,7 +217,7 @@ function EditApproveSheet({ p, onClose, onApprove }: { p: Proposal; onClose: () 
         </button>
       }
     >
-      {keys.length === 0 && <p className="muted">슬라이더 항목이 없는 제안입니다</p>}
+      {keys.length === 0 && <p className="muted">팀 지시가 없는 제안이에요</p>}
       {keys.map((k) => {
         const s = SLIDERS.find((x) => x.key === k);
         if (!s) return null;
@@ -244,8 +244,8 @@ const LOG_LABEL: Record<string, string> = {
   REPORT_VIEWED: '리포트 열람',
   REPLAY_VIEWED: '중계 열람',
   SCOUT_VIEWED: '상대 분석 열람',
-  SESSION_START: '세션 시작',
-  SESSION_END: '세션 종료',
+  SESSION_START: '게임 시작',
+  SESSION_END: '게임 종료',
   MANUAL_ROTATION: '수동 로테이션',
 };
 const HIDDEN = new Set(['SESSION_START', 'SESSION_END', 'REPORT_VIEWED', 'REPLAY_VIEWED', 'SCOUT_VIEWED']);
@@ -258,7 +258,7 @@ function ActivityLog({ entries, memberships }: { entries: readonly { at: string;
       {rows.map((e, i) => (
         <li key={i} className="list-row">
           <span className="small muted">
-            S{e.gameTime.season} D{e.gameTime.day}
+            시즌 {e.gameTime.season} · Day {e.gameTime.day}
           </span>
           <span>{LOG_LABEL[e.kind] ?? e.kind}</span>
           <span className="small muted">{seatLabel(memberships, e.actor)}</span>

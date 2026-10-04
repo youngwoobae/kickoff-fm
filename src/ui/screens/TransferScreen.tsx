@@ -29,7 +29,7 @@ export function TransferScreen() {
       <Card title="이적 창" extra={win ? <Badge tone="good">● 열림</Badge> : <Badge>○ 닫힘</Badge>}>
         {win ? (
           <p>
-            <strong>{WINDOW_KIND_LABEL[win.kind]}</strong> · 정산 시즌 {win.settleSeason} Day {win.settleDay}
+            <strong>{WINDOW_KIND_LABEL[win.kind]}</strong> · 정산 시즌 {win.settleSeason} · Day {win.settleDay}
             <span className="muted small"> ({daysLeft > 0 ? `${daysLeft}일 뒤` : '오늘 넘기면 정산'})</span>
           </p>
         ) : (
@@ -381,7 +381,7 @@ function SellView({ all }: { all: TransferListing[] }) {
                     OVR {p.ovr} · {p.age}세 · 계약 {p.contract.seasonsLeft}시즌 · 연봉 {formatKc(p.contract.salary)}
                   </span>
                 </span>
-                <button type="button" className="btn btn-secondary btn-sm" disabled={!isOwner} title={isOwner ? undefined : '구단주 권한 필요'} onClick={() => setSel(p)}>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={!isOwner} title={isOwner ? undefined : '구단주만 할 수 있어요'} onClick={() => setSel(p)}>
                   판매 등록
                 </button>
               </li>

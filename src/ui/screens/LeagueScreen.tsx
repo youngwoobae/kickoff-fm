@@ -124,12 +124,12 @@ export function StandingsTable({ rows: given, leagueId, promote, relegate }: { r
       <p className="legend small">
         {promote !== 0 && (
           <>
-            <span className="zone-mark zone-up">▲</span> 승격권{promote !== undefined && ` ${promote}팀`}{' '}
+            <span className="zone-mark zone-up">▲</span> 승격권{promote !== undefined && ` ${promote}구단`}{' '}
           </>
         )}
         {relegate !== 0 && (
           <>
-            <span className="zone-mark zone-down">▼</span> 강등권{relegate !== undefined && ` ${relegate}팀`}{' '}
+            <span className="zone-mark zone-down">▼</span> 강등권{relegate !== undefined && ` ${relegate}구단`}{' '}
           </>
         )}
         · 사람 구단은 “나”
@@ -235,7 +235,7 @@ function OutcomeView() {
   const snap = useGame();
   const run = useAction();
   const out = useQuery((s) => s.getSeasonOutcome()).data;
-  if (!out) return <Empty>시즌 결산은 Day 26 경기 후 나옵니다</Empty>;
+  if (!out) return <Empty>시즌 결산은 Day 26 경기 뒤에 나와요</Empty>;
   const fin = snap.finances[snap.userClubId];
   const { label, move } = userResult(out, snap.userClubId);
   return (
@@ -249,7 +249,7 @@ function OutcomeView() {
         </p>
         {fin && fin.transferOnlyBudget > 0 && <p className="small">이월 초과분 → 이적 한정 예산 {formatKc(fin.transferOnlyBudget)} (다음 시즌 Day 3 소멸)</p>}
         {snap.phase === 'SEASON_OVER' && (
-          <button type="button" className="btn btn-primary btn-block" onClick={() => run((s) => s.startNewSeason(), '새 시즌이 시작되었습니다')}>
+          <button type="button" className="btn btn-primary btn-block" onClick={() => run((s) => s.startNewSeason(), '새 시즌을 시작했어요')}>
             새 시즌 시작{move ? ` (${tierText(move.to)})` : ''}
           </button>
         )}
@@ -299,7 +299,7 @@ function LabelsCard({ out }: { out: SeasonOutcome }) {
   const labelOf = (r: StandingRow): PromotionLabel =>
     r.clubId === snap.userClubId ? (out.labels[r.clubId] ?? 'STAYED') : r.zone === 'PROMOTION' ? 'PROMOTED' : r.zone === 'RELEGATION' ? 'RELEGATED' : 'STAYED';
   return (
-    <Card title="승강 결과 (라벨)">
+    <Card title="승강 결과">
       <ul className="list compact">
         {out.finalTable.map((r) => (
           <li key={r.clubId} className={`list-row ${r.clubId === snap.userClubId ? 'is-me' : ''}`}>

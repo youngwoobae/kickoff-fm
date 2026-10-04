@@ -32,11 +32,11 @@ export function FinanceScreen() {
       <Card title="시즌 종료 예상 이월">
         <ul className="list compact">
           <li className="list-row">
-            <span>잔액 R</span>
+            <span>예상 잔액</span>
             <span>{formatKc(f.projectedCarry.total)}</span>
           </li>
           <li className="list-row">
-            <span>이월 상한 C (배정금 20%)</span>
+            <span>이월 상한 (배정금 20%)</span>
             <span>{formatKc(f.projectedCarry.cap)}</span>
           </li>
           <li className="list-row">
@@ -48,7 +48,7 @@ export function FinanceScreen() {
             <span>{formatKc(f.projectedCarry.excess)}</span>
           </li>
         </ul>
-        {f.transferOnlyBudget > 0 && <p className="small">현재 한정 예산 {formatKc(f.transferOnlyBudget)}</p>}
+        {f.transferOnlyBudget > 0 && <p className="small">현재 이적 한정 예산 {formatKc(f.transferOnlyBudget)}</p>}
       </Card>
       <Card title="최근 내역">
         {f.recent.length === 0 ? (
@@ -59,7 +59,7 @@ export function FinanceScreen() {
               <li key={i} className="list-row">
                 <span>
                   <span className="small muted">
-                    S{l.season} D{l.day}
+                    시즌 {l.season} · Day {l.day}
                   </span>{' '}
                   {LEDGER_LABEL[l.kind]}
                 </span>

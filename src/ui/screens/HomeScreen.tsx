@@ -66,7 +66,7 @@ export function HomeScreen() {
           }
         >
           {next && (
-            <button type="button" className="btn btn-secondary" disabled={!isOwner} title={isOwner ? undefined : '구단주 권한 필요'} onClick={recommendAndSubmit}>
+            <button type="button" className="btn btn-secondary" disabled={!isOwner} title={isOwner ? undefined : '구단주만 할 수 있어요'} onClick={recommendAndSubmit}>
               추천대로 제출
             </button>
           )}
@@ -101,7 +101,7 @@ function NextMatchCard({ fixture }: { fixture: Fixture }) {
         </span>
         {oppRow && <span className="muted">{oppRow.position}위 · 승점 {oppRow.points}</span>}
       </div>
-      <p className="muted small">킥오프 21:00 · 플랜 마감 20:50 (Phase 0: "넘기기"를 누르는 순간이 마감)</p>
+      <p className="muted small">‘다음 날로 넘기기’를 누르면 플랜이 마감되고 경기가 진행돼요</p>
       {scout && (
         <div className="scout">
           <div>
@@ -171,7 +171,7 @@ function AppliedPlanCard() {
       <p>
         <strong>{PLAN_SOURCE_LABEL[preview.source]}</strong> · 슬롯 {preview.plan.startSlot} ({slot?.formation}) · 조건부 지시 {preview.plan.conditionals.filter((c) => c.enabled).length}개
       </p>
-      {!planState?.confirmed && <p className="warn-line">⚠ 확정 제출하지 않으면 상대 맞춤 지시 없이 이 플랜으로 경기합니다</p>}
+      {!planState?.confirmed && <p className="warn-line">⚠ 확정 제출하지 않으면 상대 맞춤 지시 없이 이 플랜으로 경기해요</p>}
       {preview.adjustments.length > 0 && (
         <ul className="list compact">
           {preview.adjustments.map((a, i) => (
@@ -204,7 +204,7 @@ function TodoCard() {
   const unread = useUnreadCount();
   if (unread) items.push({ done: false, text: `받은 편지함 안 읽은 편지 ${unread}통`, onClick: () => go({ homeView: 'inbox' }) });
   const last = lastUserFixture(snap);
-  if (last) items.push({ done: false, text: '어제 경기 리포트 확인', onClick: () => go({ tab: 'match', matchId: last.id, matchView: 'report' }) });
+  if (last) items.push({ done: false, text: '어제 경기 리포트 보기', onClick: () => go({ tab: 'match', matchId: last.id, matchView: 'report' }) });
   if (!items.length) return null;
   return (
     <Card title="오늘 할 일">
@@ -270,7 +270,7 @@ function LastResultCard() {
 function OffseasonCard({ day }: { day: number }) {
   return (
     <Card title="오프시즌">
-      <p>{day === 27 ? '리뷰 데이: 순위 상금과 우승 수당이 입금되었어요.' : day === 28 ? '정산 데이: 이월 판정이 진행되었어요. 넘기면 시즌이 끝납니다.' : '경기 일정이 끝났어요.'}</p>
+      <p>{day === 27 ? '리뷰 데이: 순위 상금과 우승 수당이 들어왔어요.' : day === 28 ? '정산 데이: 이월 판정을 마쳤어요. 넘기면 시즌이 끝나요.' : '경기 일정이 끝났어요.'}</p>
     </Card>
   );
 }
@@ -289,7 +289,7 @@ function SeasonOverCard() {
         <button type="button" className="btn btn-secondary" onClick={() => go({ tab: 'club', club: 'league' })}>
           시즌 결산 보기
         </button>
-        <button type="button" className="btn btn-primary" onClick={() => run((s) => s.startNewSeason(), '새 시즌이 시작되었습니다')}>
+        <button type="button" className="btn btn-primary" onClick={() => run((s) => s.startNewSeason(), '새 시즌을 시작했어요')}>
           새 시즌 시작
         </button>
       </div>

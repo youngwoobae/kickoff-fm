@@ -7,12 +7,21 @@ export function ServiceUnavailable({ error, mode }: { error: unknown; mode: Serv
   const isTodo = /TODO/i.test(msg);
   return (
     <div className="fallback">
-      <h1>{isTodo ? '실제 게임 서비스가 아직 준비되지 않았어요' : '서비스를 불러오지 못했어요'}</h1>
-      <p>
-        현재 모드: <strong>{mode === 'fake' ? '가짜(fake) 서비스' : '실제 서비스'}</strong>
-        <br />
-        오류: <code>{msg}</code>
-      </p>
+      {DEV_TOOLS ? (
+        <>
+          <h1>{isTodo ? '실제 게임 서비스가 아직 준비되지 않았어요' : '서비스를 불러오지 못했어요'}</h1>
+          <p>
+            현재 모드: <strong>{mode === 'fake' ? '가짜(fake) 서비스' : '실제 서비스'}</strong>
+            <br />
+            오류: <code>{msg}</code>
+          </p>
+        </>
+      ) : (
+        <>
+          <h1>이 화면을 그리다 문제가 생겼어요</h1>
+          <p>‘새로고침’을 누르면 대부분 해결돼요.</p>
+        </>
+      )}
       {!DEV_TOOLS ? null : mode === 'real' ? (
         <>
           <h2>fake 모드로 실행하려면…</h2>
@@ -24,7 +33,7 @@ export function ServiceUnavailable({ error, mode }: { error: unknown; mode: Serv
               bash: <code>VITE_FAKE_SERVICE=1 npm run dev</code>
             </li>
             <li>
-              또는 주소 뒤에 <code>?fake=1</code> 을 붙여 여세요 (아래 버튼)
+              또는 주소 뒤에 <code>?fake=1</code>을 붙여 열어 주세요 (아래 버튼)
             </li>
           </ol>
           <button type="button" className="btn btn-primary btn-block" onClick={reloadInFakeMode}>

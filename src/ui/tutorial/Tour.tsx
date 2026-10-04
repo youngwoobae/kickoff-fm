@@ -69,14 +69,14 @@ export const TOUR_STEPS: StepDef[] = [
     nav: { tab: 'tactics', tactics: 'plan' },
     bubbles: [
       { target: 'plan.default', title: '기본 플랜', text: '기본 플랜으로 저장해 두면, 제출을 잊은 날에도 이 플랜으로 경기해요.', fallback: OFF_DAY },
-      { target: 'plan.submit', title: '확정 제출', text: '오늘 경기는 확정 제출을 눌러 마무리해요. 제출하지 않아도 기본 플랜으로 경기해요.', fallback: OFF_DAY },
+      { target: 'plan.submit', title: '확정 제출', text: '오늘 경기는 ‘확정 제출’을 눌러 마무리해요. 제출하지 않아도 기본 플랜으로 경기해요.', fallback: OFF_DAY },
     ],
   },
   {
     nav: { tab: 'home' },
     bubbles: [
-      { target: 'home.advance', title: '다음 날로 넘기기', text: '준비가 끝났어요. 다음 날로 넘기기를 누르면 경기가 진행돼요.' },
-      { target: 'dayResult.replay', title: '중계 보기', text: '결과가 나왔어요. 중계 보기로 경기를 다시 볼 수 있어요.' },
+      { target: 'home.advance', title: '다음 날로 넘기기', text: '준비가 끝났어요. ‘다음 날로 넘기기’를 누르면 경기가 진행돼요.' },
+      { target: 'dayResult.replay', title: '중계 보기', text: '결과가 나왔어요. ‘중계 보기’로 경기를 다시 볼 수 있어요.' },
     ],
   },
   {
