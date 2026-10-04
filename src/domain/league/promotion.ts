@@ -1,11 +1,11 @@
 /**
- * 시즌 판정 (6.2, 6.5 ①②③). Phase 0: 사람 팀 1개 → 봇 비율 > 40% 규칙에 따라
- * 전체 1·2위일 때만 PROMOTED, 전체 11~14위면 RELEGATED (T5 는 강등 없음). 실제 티어 이동 없음. 소유: A.
+ * 시즌 판정 (6.2, 6.5 ①②③). M3.3: 사람 구단 라벨은 리그별 승강 인원(movesOf, 메인 결정 U-1)을 따른다 —
+ * 위 promote 위 안 = PROMOTED, 아래 relegate 위 안 = RELEGATED (T1 승격·T5 강등 없음). D6 로 봇 비율 규칙은 폐기.
+ * 실제 이동(movements)은 호출자가 전 리그 순위표로 채운다(pyramid.ts seasonMovements). 소유: A.
  */
 import type { Club, Kc, PromotionLabel, SeasonNo, SeasonOutcome, StandingRow, Tier } from '../../types';
 import { TIER_ECONOMY, prizeFor } from '../economy/economy';
-
-const LEAGUE_SIZE = 14;
+import { movesOf } from './pyramid';
 
 export function judgeSeason(
   season: SeasonNo,
@@ -13,14 +13,11 @@ export function judgeSeason(
   finalTable: readonly StandingRow[],
   clubs: Readonly<Record<string, Club>>,
 ): SeasonOutcome {
-  const humans = finalTable.filter((r) => clubs[r.clubId]?.isHuman);
-  const botRatio = 1 - humans.length / LEAGUE_SIZE;
-  const promoteLimitRank = botRatio > 0.4 ? 2 : 4;
-  const promoted = tier === 'T1' ? [] : humans.filter((r) => r.position <= promoteLimitRank).slice(0, 2);
-  const relegated = tier === 'T5' ? [] : humans.filter((r) => r.position >= 11);
+  const m = movesOf(tier);
+  const n = finalTable.length;
   const labels: Record<string, PromotionLabel> = {};
-  for (const h of humans) {
-    labels[h.clubId] = promoted.includes(h) ? 'PROMOTED' : relegated.includes(h) ? 'RELEGATED' : 'STAYED';
+  for (const h of finalTable.filter((r) => clubs[r.clubId]?.isHuman)) {
+    labels[h.clubId] = h.position <= m.promote ? 'PROMOTED' : h.position > n - m.relegate ? 'RELEGATED' : 'STAYED';
   }
   const econ = TIER_ECONOMY[tier];
   const prizes: Record<string, Kc> = {};

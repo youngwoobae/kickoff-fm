@@ -45,12 +45,12 @@ describe('피라미드 하루 진행 (M3.2)', () => {
     a.startNewSeason();
     const snap = a.getSnapshot()!;
     expect(Object.keys(snap.clubs)).toHaveLength(70);
-    expect(Object.keys(snap.players)).toHaveLength(70 * 22);
-    expect(snap.clubs[other]!.playerIds).toEqual(before.clubs[other]!.playerIds); // 재생성 없음 (D6)
+    expect(snap.clubs[other]).toBeDefined(); // 재생성 없음 (D6) — 선수단은 수명주기(M3.3)로 일부 바뀐다
     expect(snap.fixtures).toHaveLength(5 * 182);
-    expect(a.getPyramid().leagues.map((l) => l.clubIds)).toEqual(
-      ['T1', 'T2', 'T3', 'T4', 'T5'].map((t) => before.leagues!.find((l) => l.tier === t)!.clubIds),
-    ); // 승강은 M3.3
+    // 승강 (M3.3): 판정의 movements 대로 리그 구성이 바뀐다
+    const mv = a.getSeasonOutcome(1)!.movements!;
+    expect(mv).toHaveLength(20);
+    for (const m of mv) expect(a.getPyramid().leagues.find((l) => l.tier === m.to)!.clubIds).toContain(m.clubId);
   });
 
   it('재정 요약은 구단 티어 기준 (다른 리그 구단 포함)', () => {
@@ -61,7 +61,7 @@ describe('피라미드 하루 진행 (M3.2)', () => {
     expect(s.getFinance()).toMatchObject({ tier: 'T5', salaryCap: 26_000_000 });
   });
 
-  it('단일 리그 세이브(leagues 없음, M3.3 변환 전)도 그대로 진행된다', () => {
+  it('스키마 2 단일 리그 세이브(leagues 없음)는 T3 에 배치되고 나머지 티어가 생긴다 (M3.3 변환)', () => {
     const s = svc();
     s.newGame({ seed: 34, startTier: 'T3' });
     const x = JSON.parse(s.exportSave()) as GameState;
@@ -74,15 +74,17 @@ describe('피라미드 하루 진행 (M3.2)', () => {
     }
     x.fixtures = x.fixtures.filter((f) => f.leagueId === user.id).map(({ leagueId: _l, score: _s, ...f }) => f);
     delete x.leagues;
+    x.schemaVersion = 2;
     const t = svc();
     t.importSave(JSON.stringify(x));
-    expect(t.getPyramid().leagues).toHaveLength(1);
+    expect(t.getSnapshot()!.schemaVersion).toBe(3);
+    expect(t.getPyramid().leagues.map((l) => l.clubIds.length)).toEqual([14, 14, 14, 14, 14]);
     expect(t.getPyramid().userLeagueId).toBe('L-T3');
     expect(t.getFixtures({ leagueId: 'L-T3' })).toHaveLength(182);
     t.advanceToSeasonEnd();
     expect(t.getStandings('L-T3')).toHaveLength(14);
     t.startNewSeason();
-    expect(Object.keys(t.getSnapshot()!.players)).toHaveLength(14 * 22);
+    expect(Object.keys(t.getSnapshot()!.clubs)).toHaveLength(70);
   });
 
   it('가져오기: 리그 구단이 겹치거나 없는 구단이면 거부', () => {

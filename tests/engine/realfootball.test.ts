@@ -179,7 +179,7 @@ describe('세이브 스키마 1 → 2 마이그레이션', () => {
     first.botStyle = 'WIDE';
     first.tactics.B = { ...first.tactics.B, formation: '3-5-2', roles: FORMATIONS['3-5-2'].slots.map((sl, i) => (sl.position === 'FB' ? 'FB_OVERLAPPING' : FORMATIONS['3-5-2'].slots[i]!.defaultRole)) };
     const migrated = migrateSave(legacy) as Record<string, any>;
-    expect(migrated.schemaVersion).toBe(2);
+    expect(migrated.schemaVersion).toBe(3); // 1 → 2 → 3 (M3.3)
     expect(migrated.clubs[botIds[0]!].style).toBe('WING_PLAY');
     expect(migrated.clubs[botIds[0]!].botStyle).toBeUndefined();
     expect(migrated.clubs[botIds[0]!].tactics.B.roles).toContain('WB_WINGBACK');
@@ -187,7 +187,7 @@ describe('세이브 스키마 1 → 2 마이그레이션', () => {
     // 서비스로 가져오기 (importSave, loadGame 둘 다)
     const s2 = createGameService({ storage: createMemoryStorage(), clock: { nowIso: () => '2026-09-27T00:00:00.000Z' } });
     const snap = s2.importSave(JSON.stringify(legacy));
-    expect(snap.schemaVersion).toBe(2);
+    expect(snap.schemaVersion).toBe(3);
     expect(snap.clubs[botIds[0]!]!.style).toBe('WING_PLAY');
     const st = createMemoryStorage();
     st.save(JSON.stringify(legacy));

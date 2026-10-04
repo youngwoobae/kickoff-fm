@@ -16,6 +16,9 @@ export {
   clubTierMap,
   clubLeagueMap,
   buildPyramid,
+  leagueTable,
+  seasonMovements,
+  applyMovements,
 } from './league/pyramid';
 export { QUICK_SIM, teamStrength, quickSimScore } from './league/quickSim';
 export { judgeSeason } from './league/promotion';
@@ -37,7 +40,7 @@ export { ovrAt, OVR_WEIGHTS } from './squad/ovr';
 export { applyDailyRecovery, applyMatchLine, applyMoraleResult, staminaRecoveryBonus } from './squad/condition';
 export { resolvePlan, validatePlan, remapLineup, pickCandidate, stripOpponentOrders, type ResolvePlanContext } from './plan/resolvePlan';
 export { toEngineTeamInput, toEnginePlayer } from './plan/engineInput';
-export { TIER_ECONOMY, SEASON_DAYS, S_REF, TIER_GAP, baseSalary, startingBalance, dailySalary, matchBonus, prizeFor, prizeRate, carryOver, spendable, postLedger } from './economy/economy';
+export { TIER_ECONOMY, SEASON_DAYS, S_REF, TIER_GAP, PROMOTION_BONUS_RATE, PARACHUTE_RATE, promotionBonus, parachuteOf, baseSalary, startingBalance, dailySalary, matchBonus, prizeFor, prizeRate, carryOver, spendable, postLedger } from './economy/economy';
 export { checkAction, isNewCoach, type PermissionContext } from './coach/permissions';
 export {
   createProposal,
@@ -80,9 +83,9 @@ export {
   type PackageId,
   type TacticPackage,
 } from './calibration/runCalibration';
+export { startNewSeasonState, toPyramid, LEGACY_LEAGUE_TIER } from './career/seasonTransition';
 export {
   advanceDayState,
-  startNewSeasonState,
   createInitialState,
   matchSeed,
   fixtureFor,

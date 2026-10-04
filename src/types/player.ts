@@ -70,6 +70,14 @@ export interface PlayerSeasonLine {
   goals: number;
 }
 
+/** 2.1.1 (M3.3, 수명주기 설계 14.1): 성장 저금통 (UI 비노출) */
+export interface PlayerDev {
+  /** OVR 단위 실수. 양수 = 성장 대기, 음수 = 노화 대기 */
+  bank: number;
+  /** 직전 성장 틱 시점의 season.minutes */
+  minutesMark: number;
+}
+
 export interface Player {
   id: PlayerId;
   clubId: ClubId | null;
@@ -94,4 +102,12 @@ export interface Player {
   season: PlayerSeasonStats;
   /** 2.1.0: 지난 시즌 기록, 오래된 순. 없으면 [] (스키마 2 세이브·첫 시즌) */
   history?: PlayerSeasonLine[];
+  /** 2.1.1: 성장 저금통. 없으면 { bank: 0, minutesMark: season.minutes } (UI 비노출) */
+  dev?: PlayerDev;
+  /** 2.1.1: Day 20 은퇴 예고. 시즌 경계에서 세계에서 사라진다 */
+  retiring?: boolean;
+  /** 2.1.1: 무소속(FA 풀)이 된 시즌 번호. clubId === null 일 때만 의미 */
+  faSince?: SeasonNo;
+  /** 2.1.1: 유스 출신 구단 (표시용) */
+  academyClubId?: ClubId;
 }

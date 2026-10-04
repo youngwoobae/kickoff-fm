@@ -27,6 +27,19 @@ export function startingBalance(econ: TierEconomy): Kc {
   return Math.round(econ.seasonBudget * econ.carryRate);
 }
 
+/** 경제 설계 4.2 (K4) [PH]: 승격 보너스 = 새 티어 배정금 × 30% (Day 1) */
+export const PROMOTION_BONUS_RATE = 0.3;
+/** K4 [PH]: 강등 연봉 전용 계정 = (이전 배정금 − 새 배정금) × 50%, 새 캡 초과 연봉만, Day 28 소멸 */
+export const PARACHUTE_RATE = 0.5;
+
+export function promotionBonus(to: Tier): Kc {
+  return Math.round(TIER_ECONOMY[to].seasonBudget * PROMOTION_BONUS_RATE);
+}
+
+export function parachuteOf(from: Tier, to: Tier): Kc {
+  return Math.max(0, Math.round((TIER_ECONOMY[from].seasonBudget - TIER_ECONOMY[to].seasonBudget) * PARACHUTE_RATE));
+}
+
 /** 일할 연봉 = round(salaryTotal / 28). 28일 합계 오차는 Day 28 에 보정 */
 export function dailySalary(salaryTotal: Kc, day: number): Kc {
   const per = Math.round(salaryTotal / SEASON_DAYS);

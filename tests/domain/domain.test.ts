@@ -110,7 +110,7 @@ describe('standings / promotion', () => {
     expect(t3a.map((r) => r.clubId)).toEqual(t3b.map((r) => r.clubId));
   });
 
-  it('사람 팀 1위·2위 → PROMOTED, 11~14위 → RELEGATED, T5 는 강등 없음, T1 은 승격 없음', () => {
+  it('라벨은 리그별 승강 인원(U-1): T3 = 위 2 / 아래 3, T4 = 위 3, T5 강등 없음, T1 승격 없음', () => {
     const clubs: Record<string, Club> = {};
     for (const id of IDS) clubs[id] = { id, name: id, shortName: id, isHuman: id === 'c01', playerIds: [], tactics: {} as Club['tactics'] };
     const table = (pos: number): StandingRow[] => {
@@ -120,11 +120,14 @@ describe('standings / promotion', () => {
     };
     expect(judgeSeason(1, 'T3', table(1), clubs).labels.c01).toBe('PROMOTED');
     expect(judgeSeason(1, 'T3', table(2), clubs).labels.c01).toBe('PROMOTED');
-    expect(judgeSeason(1, 'T3', table(3), clubs).labels.c01).toBe('STAYED'); // 봇 비율 > 40% → 1·2위만
-    expect(judgeSeason(1, 'T3', table(11), clubs).labels.c01).toBe('RELEGATED');
+    expect(judgeSeason(1, 'T3', table(3), clubs).labels.c01).toBe('STAYED');
+    expect(judgeSeason(1, 'T3', table(11), clubs).labels.c01).toBe('STAYED');
+    expect(judgeSeason(1, 'T3', table(12), clubs).labels.c01).toBe('RELEGATED');
     expect(judgeSeason(1, 'T3', table(14), clubs).labels.c01).toBe('RELEGATED');
+    expect(judgeSeason(1, 'T4', table(3), clubs).labels.c01).toBe('PROMOTED');
     expect(judgeSeason(1, 'T5', table(14), clubs).labels.c01).toBe('STAYED');
     expect(judgeSeason(1, 'T1', table(1), clubs).labels.c01).toBe('STAYED');
+    expect(judgeSeason(1, 'T1', table(13), clubs).labels.c01).toBe('RELEGATED');
     const o = judgeSeason(1, 'T3', table(1), clubs);
     expect(o.championId).toBe('c01');
     expect(o.prizes.c01).toBe(12_200_000 + 6_100_000);
@@ -408,7 +411,13 @@ describe('advanceDay 상태 머신', () => {
     expect(Object.keys(next.summaries)).toHaveLength(0);
     const p0 = s.players[s.clubs[s.userClubId]!.playerIds[0]!]!;
     expect(next.players[p0.id]!.age).toBe(p0.age + 1);
-    expect(Object.keys(next.players)).toHaveLength(70 * 22); // 피라미드: AI 구단 영구 존재(D6), 재생성 없음
+    // 피라미드: AI 구단 영구 존재(D6). 수명주기(은퇴·유스·보충) 뒤 AI 선수단 22~25, FA 풀은 clubId null 로 players 에 남는다
+    for (const c of Object.values(next.clubs)) if (!c.isHuman) expect(c.playerIds.length).toBeGreaterThanOrEqual(22);
+    const clubbed = new Set(Object.values(next.clubs).flatMap((c) => c.playerIds));
+    for (const p of Object.values(next.players)) expect(p.clubId === null ? !clubbed.has(p.id) : next.clubs[p.clubId]!.playerIds.includes(p.id)).toBe(true);
+    expect(next.players[p0.id]!.history).toEqual([{ season: 1, age: p0.age, ovr: p0.ovr, clubId: s.userClubId, tier: 'T3', apps: p0.season.apps, goals: p0.season.goals }]);
+    expect(next.seasonHistory[0]!.movements).toHaveLength(20); // 경계 4개 × (2 | 3) × 2
+    expect(next.boundarySeason).toBe(1);
   });
 
   it('SEASON_OVER 가 아니면 startNewSeason 은 INVALID_PHASE', () => {

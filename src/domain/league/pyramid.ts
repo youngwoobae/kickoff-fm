@@ -1,8 +1,10 @@
 /**
  * 2.1.0 피라미드 규칙 (D3: 5티어 × 1리그 × 14팀, 메인 결정 U-1: T3↔T4·T4↔T5 경계 3팀, T1~T3 사이 2팀).
- * M3.1: 규칙 상수·커리어. M3.2: GameState.leagues 조회 도우미. 실제 승강은 M3.3.
+ * M3.1: 규칙 상수·커리어. M3.2: GameState.leagues 조회 도우미. M3.3: 리그 순위표·승강 이동 계산·적용.
  */
-import type { CareerRecord, CareerSeason, ClubId, GameState, LeagueId, LeagueInfo, LeagueState, Pyramid, SeasonOutcome, Tier } from '../../types';
+import type { CareerRecord, CareerSeason, ClubId, ClubMovement, GameState, LeagueId, LeagueInfo, LeagueState, Pyramid, SeasonOutcome, StandingRow, Tier } from '../../types';
+import { hashString } from '../../engine';
+import { computeStandings, resultsOfFixtures } from './standings';
 
 /** 위(T1) → 아래(T5) */
 export const TIERS: readonly Tier[] = ['T1', 'T2', 'T3', 'T4', 'T5'];
@@ -72,6 +74,58 @@ export function clubLeagueMap(state: Pick<GameState, 'leagues' | 'clubs' | 'sett
   const m = new Map<ClubId, LeagueId>();
   for (const l of leaguesOf(state)) for (const id of l.clubIds) m.set(id, l.id);
   return m;
+}
+
+type TableState = Pick<GameState, 'leagues' | 'clubs' | 'settings' | 'userClubId' | 'time' | 'gameSeed' | 'summaries' | 'fixtures'>;
+
+/**
+ * 리그 순위표 (현재 시즌). 사용자 리그 = 엔진 요약(xG 포함), 다른 리그 = 경량 시뮬 스코어(D7).
+ * 타이브레이크 시드: 사용자 리그 `${seed}|tiebreak|${season}`, 다른 리그는 뒤에 `|${leagueId}`. 구역은 리그별 승강 인원.
+ */
+export function leagueTable(state: TableState, league: LeagueState): StandingRow[] {
+  const season = state.time.season;
+  const moves = movesOf(league.tier);
+  if (league.id === userLeagueOf(state).id) {
+    return computeStandings([...league.clubIds].sort(), Object.values(state.summaries), season, hashString(`${state.gameSeed}|tiebreak|${season}`), moves);
+  }
+  const res = resultsOfFixtures(state.fixtures.filter((f) => f.leagueId === league.id && f.season === season));
+  return computeStandings(league.clubIds, res, season, hashString(`${state.gameSeed}|tiebreak|${season}|${league.id}`), moves);
+}
+
+/** 시즌 최종 순위표 → 경계별 승강 이동 (BOUNDARY_MOVES). 위 리그 하위 n팀 ↓, 아래 리그 상위 n팀 ↑. 단일 리그 = [] */
+export function seasonMovements(state: TableState, tables: ReadonlyMap<LeagueId, readonly StandingRow[]>): ClubMovement[] {
+  const ls = [...leaguesOf(state)].sort((a, b) => TIERS.indexOf(a.tier) - TIERS.indexOf(b.tier));
+  const out: ClubMovement[] = [];
+  const mv = (r: StandingRow, from: Tier, to: Tier, kind: ClubMovement['kind']): ClubMovement => ({
+    clubId: r.clubId,
+    from,
+    to,
+    kind,
+    position: r.position,
+    isHuman: !!state.clubs[r.clubId]?.isHuman,
+  });
+  for (let i = 0; i + 1 < ls.length; i++) {
+    const up = ls[i]!;
+    const down = ls[i + 1]!;
+    const n = BOUNDARY_MOVES[up.tier as keyof typeof BOUNDARY_MOVES];
+    const upT = tables.get(up.id) ?? [];
+    const downT = tables.get(down.id) ?? [];
+    for (const r of upT.slice(upT.length - n)) out.push(mv(r, up.tier, down.tier, 'RELEGATED'));
+    for (const r of downT.slice(0, n)) out.push(mv(r, down.tier, up.tier, 'PROMOTED'));
+  }
+  return out;
+}
+
+/** 이동을 리그 구성에 반영 (새 배열, clubIds 정렬) */
+export function applyMovements(leagues: readonly LeagueState[], movements: readonly ClubMovement[]): LeagueState[] {
+  const to = new Map(movements.map((m) => [m.clubId, m.to]));
+  return leagues.map((l) => ({
+    ...l,
+    clubIds: [
+      ...l.clubIds.filter((id) => !to.has(id)),
+      ...movements.filter((m) => m.to === l.tier).map((m) => m.clubId),
+    ].sort(),
+  }));
 }
 
 export function buildPyramid(state: Pick<GameState, 'leagues' | 'clubs' | 'settings' | 'userClubId' | 'time'>): Pyramid {

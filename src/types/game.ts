@@ -104,10 +104,11 @@ export interface GameState {
   actorUserId: UserId;
   /** 사용자 리그 + 다른 4리그의 모든 구단 (2.1.0 피라미드 세이브는 70) */
   clubs: Record<ClubId, Club>;
+  /** 소속 선수 + FA 풀(clubId === null, 2.1.1 M3.3). 은퇴·해외 이적 선수는 지운다 */
   players: Record<PlayerId, Player>;
   /**
-   * 2.1.0 (M3.2): 5티어 피라미드(T1 → T5, 리그당 14구단). 없으면 단일 리그 세이브(스키마 2, clubs 전부가 사용자 리그).
-   * M3.3 의 스키마 2→3 변환이 채운다.
+   * 2.1.0 (M3.2): 5티어 피라미드(T1 → T5, 리그당 14구단). 스키마 3 은 항상 있다(2→3 변환이 단일 리그를 T3 에 배치하고 나머지 티어 생성).
+   * 타입상 선택인 이유: 스키마 2 세이브 호환 읽기(leaguesOf 대체 경로)
    */
   leagues?: LeagueState[];
   /** 이번 시즌 전 리그 일정 (피라미드 세이브는 leagueId 가 채워져 있다) */
@@ -123,6 +124,11 @@ export interface GameState {
   seasonHistory: SeasonOutcome[];
   /** Day 26 판정 후 설정, startNewSeason 에서 seasonHistory 로 이동 */
   pendingOutcome?: SeasonOutcome;
+  /**
+   * 2.1.1 (M3.3, 수명주기 U6): 시즌 경계(승강·수명주기·정산)를 마친 마지막 "끝난 시즌" 번호. 멱등 표식.
+   * 같은 경계를 다시 돌리면 건너뛴다(노화 두 번 방지). 없으면 아직 한 번도 넘지 않음
+   */
+  boundarySeason?: number;
   actionLog: ActionLogEntry[];
 }
 

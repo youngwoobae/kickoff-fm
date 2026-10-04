@@ -36,7 +36,7 @@ async function code(p: Promise<unknown>): Promise<string> {
 
 describe('세이브 슬롯 (2.0.0)', () => {
   it('계약 버전·슬롯 3개', () => {
-    expect(CONTRACT_VERSION).toBe('2.1.0');
+    expect(CONTRACT_VERSION).toBe('2.1.1');
     expect(SAVE_SLOT_IDS).toEqual([1, 2, 3]);
   });
 

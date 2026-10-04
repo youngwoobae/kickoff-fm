@@ -25,14 +25,13 @@ export type LedgerKind =
   | 'PRIZE'
   | 'CHAMPION_BONUS'
   | 'CARRY_EXCESS_SPLIT'
-  | 'TRANSFER_BUDGET_EXPIRED';
+  | 'TRANSFER_BUDGET_EXPIRED'
+  /** 2.1.1 (M3.3, 경제 설계 4.2 K4): 승격 보너스(새 배정금 30%, Day 1) */
+  | 'PROMOTION_BONUS'
+  /** 2.1.1: 강등 연봉 전용 계정(Finance.parachute)이 새 캡 초과 연봉을 대신 낸 금액 (+) */
+  | 'PARACHUTE';
 
-/**
- * 2.1.0 (경제 설계 4.2·14장): 승격 보너스, 강등 낙하산(연봉 전용 계정).
- * 아직 LedgerKind 에 합치지 않는다 — UI `LEDGER_LABEL: Record<LedgerKind, string>`(src/ui/format.ts)이 키 누락으로
- * 컴파일 실패하기 때문. 처음 기록하는 단위(M3.3)가 UI 라벨 두 줄(M3.5 소유)과 같은 변경에서
- * `LedgerKind = … | PromotionLedgerKind` 로 합친다(아키텍처 16장 2.1.0).
- */
+/** @deprecated 2.1.1 에서 LedgerKind 에 합쳤다. 기존 코드 컴파일용 별칭 */
 export type PromotionLedgerKind = 'PROMOTION_BONUS' | 'PARACHUTE';
 
 export interface LedgerEntry {
@@ -51,6 +50,11 @@ export interface Finance {
   /** 이월 상한 초과분 (이적창 한정 예산). Phase 0 은 표시만, Day 3 에 소멸(LP) */
   transferOnlyBudget: Kc;
   ledger: LedgerEntry[];
+  /**
+   * 2.1.1 (M3.3): 강등 시즌 연봉 전용 계정 잔액. Day 1 = (이전 배정금 − 새 배정금) × 50%,
+   * 새 캡을 넘는 연봉분만 일할로 대신 내고 Day 28 소멸. 이월 계산 제외. 없으면 0
+   */
+  parachute?: Kc;
 }
 
 export interface CarryOverResult {

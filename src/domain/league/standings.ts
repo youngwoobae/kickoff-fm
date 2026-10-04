@@ -24,9 +24,15 @@ function blank(clubId: ClubId): Acc {
   };
 }
 
-function zoneFor(position: number, total: number): TableZone {
-  if (position <= 2) return 'PROMOTION';
-  if (position > total - 4) return 'RELEGATION';
+/** 리그별 승강 인원 (pyramid.ts movesOf). 없으면 Phase 0 기본(위 2 / 아래 4) */
+export interface ZoneMoves {
+  promote: number;
+  relegate: number;
+}
+
+function zoneFor(position: number, total: number, m: ZoneMoves): TableZone {
+  if (position <= m.promote) return 'PROMOTION';
+  if (position > total - m.relegate) return 'RELEGATION';
   return 'NONE';
 }
 
@@ -52,6 +58,7 @@ export function computeStandings(
   summaries: readonly ResultLike[],
   season: SeasonNo,
   tieBreakSeed: number,
+  moves: ZoneMoves = { promote: 2, relegate: 4 },
 ): StandingRow[] {
   const acc = new Map<ClubId, Acc>(clubIds.map((id) => [id, blank(id)]));
   const games = summaries.filter((s) => s.season === season);
@@ -127,7 +134,7 @@ export function computeStandings(
       xPts: round2(rest.xPts),
       position: idx + 1,
       form,
-      zone: zoneFor(idx + 1, out.length),
+      zone: zoneFor(idx + 1, out.length, moves),
     };
   });
 }

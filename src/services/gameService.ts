@@ -94,7 +94,7 @@ import {
   buildPyramid,
   clubTierMap,
   findLeague,
-  resultsOfFixtures,
+  leagueTable,
   userLeagueOf,
   buildReplay,
   buildReport,
@@ -245,9 +245,9 @@ function saveProblem(x: unknown): string | null {
   for (const f of x.fixtures as unknown[]) {
     if (!isObj(f) || typeof f.id !== 'string' || !isNum(f.season) || !isNum(f.day) || !isObj(clubs[f.homeId as string]) || !isObj(clubs[f.awayId as string])) return '일정 형식 오류';
   }
-  if (x.leagues !== undefined) {
-    // 2.1.0 피라미드: 리그마다 고유 티어, 구단은 존재하고 한 리그에만, 사용자 구단 포함
-    if (!Array.isArray(x.leagues) || x.leagues.length === 0) return '리그 형식 오류';
+  {
+    // 스키마 3 (2.1.1): 5티어 피라미드 필수. 리그마다 고유 티어, 구단은 존재하고 한 리그에만, 사용자 구단 포함
+    if (!Array.isArray(x.leagues) || x.leagues.length !== 5) return '리그 형식 오류';
     const seen = new Set<unknown>();
     const tiers = new Set<unknown>();
     for (const l of x.leagues as unknown[]) {
@@ -711,16 +711,8 @@ class LocalGameService implements GameService {
     if (this.standingsCache?.state !== s) this.standingsCache = { state: s, rows: new Map() };
     const hit = this.standingsCache.rows.get(league.id);
     if (hit) return hit;
-    // 사용자 리그 = 엔진 요약(xG 포함), 다른 리그 = 경량 시뮬 스코어(D7). 타이브레이크 시드는 advanceDay 판정과 같다
-    const rows =
-      league.id === user.id
-        ? computeStandings([...league.clubIds].sort(), Object.values(s.summaries), s.time.season, hashString(`${s.gameSeed}|tiebreak|${s.time.season}`))
-        : computeStandings(
-            league.clubIds,
-            resultsOfFixtures(s.fixtures.filter((f) => f.leagueId === league.id && f.season === s.time.season)),
-            s.time.season,
-            hashString(`${s.gameSeed}|tiebreak|${s.time.season}|${league.id}`),
-          );
+    // 사용자 리그 = 엔진 요약(xG 포함), 다른 리그 = 경량 시뮬 스코어(D7). 판정과 같은 함수(타이브레이크 시드·리그별 승강 구역)
+    const rows = leagueTable(s, league);
     this.standingsCache.rows.set(league.id, rows);
     return rows;
   }

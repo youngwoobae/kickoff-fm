@@ -12,6 +12,7 @@ import type {
   Finance,
   Fixture,
   GameState,
+  LeagueId,
   LeagueState,
   GameTimestamp,
   LedgerEntry,
@@ -19,6 +20,7 @@ import type {
   MatchSummary,
   Membership,
   Player,
+  PlayerId,
   ResolvedPlan,
   SlotKey,
   StandingRow,
@@ -47,19 +49,21 @@ import { DomainError } from '../errors';
 import { judgeSeason } from '../league/promotion';
 import { generateDoubleRoundRobin } from '../league/schedule';
 import { lastTacticOf } from '../league/scout';
-import { TIERS, clubTierMap, leagueIdOf, leaguesOf, userLeagueOf } from '../league/pyramid';
+import { TIERS, clubTierMap, leagueIdOf, leagueTable, leaguesOf, seasonMovements, userLeagueOf } from '../league/pyramid';
 import { quickSimScore, teamStrength } from '../league/quickSim';
-import { computeStandings, resultsOfFixtures } from '../league/standings';
 import { expectedPoints } from '../league/xpts';
 import { toEngineTeamInput } from '../plan/engineInput';
 import { resolvePlan, stripOpponentOrders } from '../plan/resolvePlan';
 import { buildReport, computeLeagueAverages } from '../report/buildReport';
 import { applyDailyRecovery, applyMatchLine, applyMoraleResult } from '../squad/condition';
 import { TIER_REFERENCE_OVR, botName, createBotClub, gauss, generateSquad } from '../squad/generator';
-import { OVR_WEIGHTS, computeOvr } from '../squad/ovr';
+import { LIFECYCLE, lifeRng, rollRetirement, weeklyGrowth } from '../squad/lifecycle';
 
-/** 세이브 스키마. 2 (엔진 0.4.0): Club.botStyle → Club.style (WIDE → WING_PLAY), 3·5백 FB 공격형 풀백 → 윙백 */
-export const SCHEMA_VERSION = 2;
+/**
+ * 세이브 스키마. 2 (엔진 0.4.0): Club.botStyle → Club.style (WIDE → WING_PLAY), 3·5백 FB 공격형 풀백 → 윙백.
+ * 3 (계약 2.1.1, M3.3): 5티어 피라미드(leagues) 필수 — 단일 리그 세이브는 T3 에 배치하고 나머지 티어를 만든다(save/migrate.ts)
+ */
+export const SCHEMA_VERSION = 3;
 export const MATCH_DAYS = 26;
 export const REVIEW_DAY = 27;
 export const SETTLEMENT_DAY = 28;
@@ -85,8 +89,6 @@ export const BOT_STYLE_DISTRIBUTION: BotStyle[] = [
   'HIGH_LINE',
   'WINGBACK_3',
 ];
-/** 단일 리그 세이브(Phase 0) 봇 재생성 전력 = 사람 팀 주전 평균 OVR × U(0.90, 1.08) [PH]. 피라미드 생성은 D14(TIER_BAND) */
-export const BOT_STRENGTH_RANGE: [number, number] = [0.9, 1.08];
 /** D14 (수명주기 설계 12장) [PH]: 새 게임 구단 목표 OVR = ref(T) + N(0, sd), 허용 범위 ref ± range */
 export const TIER_BAND = { sd: 2, range: 6 } as const;
 
@@ -134,7 +136,7 @@ function shuffle<T>(rng: Rng, xs: T[]): T[] {
 }
 
 /** 원장은 사용자 리그 구단만 남긴다. 다른 리그(경량 시뮬, D7)는 잔액만 — 세이브 크기 */
-function post(state: GameState, clubId: ClubId, entry: Omit<LedgerEntry, 'season' | 'day'>, sink?: LedgerEntry[]): void {
+export function post(state: GameState, clubId: ClubId, entry: Omit<LedgerEntry, 'season' | 'day'>, sink?: LedgerEntry[]): void {
   const f = state.finances[clubId];
   if (!f) return;
   const e: LedgerEntry = { season: state.time.season, day: state.time.day, ...entry };
@@ -149,31 +151,6 @@ function r3(x: number): number {
 
 // ───────────────────────────────────────────── 생성
 
-function makeBots(
-  rng: Rng,
-  season: number,
-  tier: Tier,
-  humanOvr: number,
-  ids: ClubId[],
-): { clubs: Club[]; players: Player[] } {
-  const styles = shuffle(rng, BOT_STYLE_DISTRIBUTION);
-  const clubs: Club[] = [];
-  const players: Player[] = [];
-  ids.forEach((id, k) => {
-    const [lo, hi] = BOT_STRENGTH_RANGE;
-    const ovr = humanOvr * (lo + rng() * (hi - lo));
-    const squadId = season === 1 ? id : `s${season}${id}`;
-    const squad = generateSquad(rng, { clubId: squadId, targetOvr: Math.round(ovr * 10) / 10, size: 22, tier }).map((p) => ({ ...p, clubId: id }));
-    const style = styles[k % styles.length]!;
-    const club = createBotClub(rng, id, style, squad);
-    const idx = Number(id.slice(1)) - 2;
-    const nm = botName(idx);
-    clubs.push({ ...club, name: nm.name, shortName: nm.shortName });
-    players.push(...squad);
-  });
-  return { clubs, players };
-}
-
 /** D14: 티어 대역 안에서 봇 구단 하나 생성 (구단별 시드 파생, 생성 순서와 무관) */
 function makeTierBot(gameSeed: number, id: ClubId, tier: Tier, style: BotStyle): { club: Club; players: Player[] } {
   const rng = mulberry32(hashString(`${gameSeed}|club|${id}`));
@@ -186,7 +163,7 @@ function makeTierBot(gameSeed: number, id: ClubId, tier: Tier, style: BotStyle):
 }
 
 /** 한 시즌 일정: 리그마다 더블 라운드로빈, leagueId 채움. 사용자 리그 시드는 단일 리그 시절과 같다 */
-function seasonFixtures(state: Pick<GameState, 'gameSeed' | 'leagues' | 'clubs' | 'settings' | 'userClubId'>, season: number): Fixture[] {
+export function seasonFixtures(state: Pick<GameState, 'gameSeed' | 'leagues' | 'clubs' | 'settings' | 'userClubId'>, season: number): Fixture[] {
   const user = userLeagueOf(state);
   const out: Fixture[] = [];
   for (const l of leaguesOf(state)) {
@@ -196,17 +173,31 @@ function seasonFixtures(state: Pick<GameState, 'gameSeed' | 'leagues' | 'clubs' 
   return out;
 }
 
-function emptyFinance(clubId: ClubId): Finance {
+export function emptyFinance(clubId: ClubId): Finance {
   return { clubId, balance: 0, transferOnlyBudget: 0, ledger: [] };
 }
 
+/**
+ * 일할 연봉. 강등 시즌 연봉 전용 계정(Finance.parachute, K4)이 있으면 새 캡을 넘는 연봉분의 일할을 계정에서 대신 낸다(PARACHUTE +).
+ */
+function paySalary(state: GameState, cid: ClubId, day: number, tier: Tier, sink?: LedgerEntry[]): void {
+  const total = salaryTotal(state, cid);
+  post(state, cid, { kind: 'SALARY', amount: -dailySalary(total, day), memo: `연봉 (${day}일차)` }, sink);
+  const f = state.finances[cid];
+  if (!f?.parachute) return;
+  const cover = Math.min(f.parachute, dailySalary(Math.max(0, total - TIER_ECONOMY[tier].salaryCap), day));
+  if (cover <= 0) return;
+  state.finances[cid] = { ...f, parachute: f.parachute - cover };
+  post(state, cid, { kind: 'PARACHUTE', amount: cover, memo: '강등 연봉 전용 계정 (캡 초과분)' }, sink);
+}
+
 /** Day 1 00:00: 기본 배정금 입금 + 1일차 연봉 (구단마다 자기 티어 수치) */
-function dayOneProcessing(state: GameState): void {
+export function dayOneProcessing(state: GameState): void {
   const tiers = clubTierMap(state);
   for (const id of Object.keys(state.clubs).sort()) {
-    const econ = TIER_ECONOMY[tiers.get(id) ?? state.settings.tier];
-    post(state, id, { kind: 'SEASON_BUDGET', amount: econ.seasonBudget, memo: '시즌 기본 배정금' });
-    post(state, id, { kind: 'SALARY', amount: -dailySalary(salaryTotal(state, id), 1), memo: '연봉 (1일차)' });
+    const tier = tiers.get(id) ?? state.settings.tier;
+    post(state, id, { kind: 'SEASON_BUDGET', amount: TIER_ECONOMY[tier].seasonBudget, memo: '시즌 기본 배정금' });
+    paySalary(state, id, 1, tier);
   }
 }
 
@@ -367,9 +358,9 @@ function dailyProcessing(state: GameState, usedSlots: Map<ClubId, SlotKey[]>, si
     state.clubs[cid] = { ...club, tactics };
   }
   // 연봉 일할 차감 (28일 합계 = 연봉 총액)
-  for (const cid of Object.keys(state.clubs).sort()) {
-    post(state, cid, { kind: 'SALARY', amount: -dailySalary(salaryTotal(state, cid), day), memo: `연봉 (${day}일차)` }, sink);
-  }
+  for (const cid of Object.keys(state.clubs).sort()) paySalary(state, cid, day, tiers.get(cid) ?? state.settings.tier, sink);
+  // 수명주기 (설계 2.2): Day 8·15·22·28 성장 틱, Day 20 은퇴 판정
+  lifecycleDaily(state, tiers, notices);
   // Day 3: 이적창 한정 예산 소멸(LP 전환 표시)
   if (day === TRANSFER_BUDGET_EXPIRY_DAY) {
     for (const cid of Object.keys(state.finances).sort()) {
@@ -385,11 +376,7 @@ function dailyProcessing(state: GameState, usedSlots: Map<ClubId, SlotKey[]>, si
   if (day === REVIEW_DAY && state.pendingOutcome) {
     const tables: [Tier, StandingRow[]][] = [[state.settings.tier, state.pendingOutcome.finalTable]];
     const user = userLeagueOf(state);
-    for (const l of leaguesOf(state)) {
-      if (l.id === user.id) continue;
-      const res = resultsOfFixtures(state.fixtures.filter((f) => f.leagueId === l.id && f.season === state.time.season));
-      tables.push([l.tier, computeStandings(l.clubIds, res, state.time.season, hashString(`${state.gameSeed}|tiebreak|${state.time.season}|${l.id}`))]);
-    }
+    for (const l of leaguesOf(state)) if (l.id !== user.id) tables.push([l.tier, leagueTable(state, l)]);
     for (const [tier, table] of tables) {
       for (const row of table) {
         const pr = prizeFor(TIER_ECONOMY[tier], row.position);
@@ -398,10 +385,11 @@ function dailyProcessing(state: GameState, usedSlots: Map<ClubId, SlotKey[]>, si
       }
     }
   }
-  // Day 28: 이월 판정
+  // Day 28: 이월 판정 (연봉 전용 계정은 소멸, 이월 계산 제외)
   if (day === SETTLEMENT_DAY) {
     for (const cid of Object.keys(state.finances).sort()) {
-      const f = state.finances[cid]!;
+      const { parachute, ...f } = state.finances[cid]!;
+      if (parachute !== undefined) state.finances[cid] = f;
       const co = carryOver(f, econOf(cid));
       if (co.excess > 0) {
         post(state, cid, { kind: 'CARRY_EXCESS_SPLIT', amount: -co.excess, memo: `이월 상한 ${co.cap} 초과분 → 이적창 한정 예산` }, sink);
@@ -578,11 +566,12 @@ export function advanceDayState(input: GameState, nowIso: string): AdvanceOutcom
       post(state, f.homeId, { ...matchBonus(econ, score.home, score.away), memo: `${f.id} 경기 수당` });
       post(state, f.awayId, { ...matchBonus(econ, score.away, score.home), memo: `${f.id} 경기 수당` });
     }
-    // 5 SEASON_JUDGEMENT (사용자 리그. 다른 리그 최종 순위는 Fixture.score 로 언제든 다시 계산한다)
+    // 5 SEASON_JUDGEMENT: 사용자 리그 판정 + 전 리그 최종 순위로 승강 이동 확정(M3.3). 실제 이동은 시즌 경계(startNewSeasonState)
     if (d === MATCH_DAYS) {
-      const clubIds = [...userIds].sort();
-      const table = computeStandings(clubIds, Object.values(state.summaries), state.time.season, hashString(`${state.gameSeed}|tiebreak|${state.time.season}`));
-      state.pendingOutcome = judgeSeason(state.time.season, state.settings.tier, table, state.clubs);
+      const tables = new Map<LeagueId, StandingRow[]>(leaguesOf(state).map((l) => [l.id, leagueTable(state, l)]));
+      const user = userLeagueOf(state);
+      const table = tables.get(user.id)!;
+      state.pendingOutcome = { ...judgeSeason(state.time.season, state.settings.tier, table, state.clubs), leagueId: user.id, movements: seasonMovements(state, tables) };
       seasonOutcome = state.pendingOutcome;
       const row = table.find((r) => r.clubId === state.userClubId);
       if (row) notices.push(`최종 순위 ${row.position}위 — ${state.pendingOutcome.labels[state.userClubId] ?? 'STAYED'}`);
@@ -619,82 +608,44 @@ function namesOf(...teams: { starters: { id: string; name: string }[]; bench: { 
   return out;
 }
 
-// ───────────────────────────────────────────── 새 시즌
+// ───────────────────────────────────────────── 수명주기 (일일)
 
-function growPlayer(rng: Rng, p: Player): Player {
-  const age = p.age + 1;
-  const delta = age <= 21 ? 2 : age <= 23 ? 1 : age <= 29 ? 0 : age <= 32 ? -1 : -2;
-  if (delta === 0) return { ...p, age };
-  const attrs = { ...p.attrs };
-  for (const k of Object.keys(OVR_WEIGHTS[p.primary]) as (keyof typeof attrs)[]) {
-    if (rng() < 0.5) continue;
-    attrs[k] = clamp(attrs[k] + delta, 1, 20);
-  }
-  let next = { ...p, age, attrs };
-  let ovr = computeOvr(next);
-  if (delta > 0 && ovr > p.potential) {
-    next = { ...p, age };
-    ovr = p.ovr;
-  }
-  return { ...next, ovr };
-}
+/** 성장 틱 날(설계 2.2: Day 8·15·22·28 00:00 = 직전 주 W1~W4) */
+const GROWTH_DAYS = [8, 15, 22, 28];
+/** 경량 시뮬 리그 출전 비중 대용: 스쿼드 OVR 순위 상위 11명 0.85, 12~16위 0.35, 나머지 0.05 (설계 13.2 모델) */
+const QUICK_SHARE = [
+  [11, 0.85],
+  [16, 0.35],
+  [Infinity, 0.05],
+] as const;
 
-/** SEASON_OVER → 새 시즌 Day 1 (6.5 ⑦⑧⑨⑪ 의 Phase 0 축소판) */
-export function startNewSeasonState(input: GameState, nowIso: string): GameState {
-  if (input.phase !== 'SEASON_OVER') throw new DomainError('INVALID_PHASE', '시즌 종료 후에만 새 시즌을 시작할 수 있습니다');
-  void nowIso;
-  const state: GameState = structuredClone(input);
-  const season = state.time.season + 1;
-  const rng = mulberry32(hashString(`${state.gameSeed}|season|${season}`));
-  if (state.pendingOutcome) state.seasonHistory.push(state.pendingOutcome);
-  delete state.pendingOutcome;
-  state.summaries = {};
-  state.records = {};
-  state.plans = {};
-  state.proposals = Object.fromEntries(Object.entries(state.proposals).filter(([, p]) => p.status === 'OPEN'));
-  state.seq += 1;
-
-  // 선수: 나이·성장·노화, 계약 −1 (만료 시 자동 1시즌 재계약 [해석]).
-  // 단일 리그 세이브는 사람 구단만(봇은 아래에서 재생성). 피라미드는 AI 구단이 영구 존재(D6)하므로 전 구단에 같은 규칙.
-  // ponytail: Phase 0 성장 규칙 임시 적용. M3.3 이 수명주기 훅(M3.4)·승강·정산으로 대체한다
-  const userId = state.userClubId;
-  const pyramid = !!state.leagues;
-  const resetIds = pyramid ? [userId, ...Object.keys(state.clubs).filter((id) => id !== userId).sort()] : [userId];
-  for (const cid of resetIds) {
-    for (const id of state.clubs[cid]!.playerIds) {
-      const p = state.players[id];
-      if (!p) continue;
-      const g = growPlayer(rng, p);
-      const left = g.contract.seasonsLeft - 1;
-      state.players[id] = {
-        ...g,
-        condition: 100,
-        morale: 0,
-        contract: { ...g.contract, seasonsLeft: left <= 0 ? 1 : left },
-        availability: { ...g.availability, injuryDays: 0 },
-        season: { apps: 0, starts: 0, minutes: 0, goals: 0, shots: 0, keyPasses: 0, tackles: 0, redCards: 0 },
-      };
+function lifecycleDaily(state: GameState, tiers: Map<ClubId, Tier>, notices: string[]): void {
+  const { day, season } = state.time;
+  const w = GROWTH_DAYS.indexOf(day);
+  if (w >= 0) {
+    const userIds = new Set(userLeagueOf(state).clubIds);
+    const share = new Map<PlayerId, number>();
+    for (const cid of Object.keys(state.clubs)) {
+      if (userIds.has(cid)) continue;
+      clubPlayers(state, cid)
+        .sort((a, b) => b.ovr - a.ovr || a.id.localeCompare(b.id))
+        .forEach((p, r) => share.set(p.id, QUICK_SHARE.find(([n]) => r < n)![1]));
+    }
+    const clubMatches = LIFECYCLE.weekMatches[w]!;
+    for (const id of Object.keys(state.players).sort()) {
+      const p = state.players[id]!;
+      const g = weeklyGrowth(p, lifeRng(state.gameSeed, season, `grow-w${w + 1}`, id), { clubMatches, share: share.get(id) }).player;
+      if (g !== p) state.players[id] = g;
     }
   }
-  if (!pyramid) {
-    // 봇 폐기·재생성 (id·이름 유지, 선수·성향 새로 생성)
-    const botIds = Object.keys(state.clubs).filter((id) => !state.clubs[id]!.isHuman).sort();
-    for (const id of botIds) {
-      for (const pid of state.clubs[id]!.playerIds) delete state.players[pid];
+  if (day === LIFECYCLE.retireAnnounceDay) {
+    for (const cid of Object.keys(state.clubs).sort()) {
+      const ref = TIER_REFERENCE_OVR[tiers.get(cid) ?? state.settings.tier];
+      for (const p of clubPlayers(state, cid)) {
+        if (p.retiring || !rollRetirement(p, lifeRng(state.gameSeed, season, 'retire', p.id), ref)) continue;
+        state.players[p.id] = { ...p, retiring: true };
+        if (cid === state.userClubId) notices.push(`${p.name}(${p.age}세)이 이번 시즌을 끝으로 은퇴합니다`);
+      }
     }
-    const bots = makeBots(rng, season, state.settings.tier, starterOvr(clubPlayers(state, userId)), botIds);
-    for (const c of bots.clubs) state.clubs[c.id] = c;
-    for (const p of bots.players) state.players[p.id] = p;
   }
-  // 새 일정 (전 리그)
-  state.fixtures = seasonFixtures(state, season);
-  // 재정: 원장은 새 시즌부터. 단일 리그 봇은 재생성되므로 잔액 초기화, 피라미드는 잔액 유지(Day 28 이월 판정 후 값)
-  for (const cid of Object.keys(state.clubs).sort()) {
-    const f = state.finances[cid] ?? emptyFinance(cid);
-    state.finances[cid] = pyramid || state.clubs[cid]!.isHuman ? { ...f, ledger: [] } : emptyFinance(cid);
-  }
-  state.time = { season, day: 1 };
-  state.phase = 'MATCHDAY';
-  dayOneProcessing(state);
-  return state;
 }

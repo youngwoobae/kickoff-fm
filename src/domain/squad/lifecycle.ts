@@ -1,9 +1,9 @@
 /**
  * 선수 수명주기 순수 함수 (M3.4, 설계서 docs/설계/선수_수명주기.md 15장).
- * 성장·노화·은퇴·FA 정리·유스·AI 선수단 관리. 게임 상태에는 아직 연결하지 않는다(M3.3).
+ * 성장·노화·은퇴·FA 정리·유스·AI 선수단 관리. 게임 상태 연결은 day/advanceDay.ts(주간·Day 20)와 career/seasonTransition.ts(시즌 경계, M3.3).
  * 모든 함수는 입력을 바꾸지 않고 새 객체를 돌려준다. 무작위는 주입된 Rng 만.
  */
-import type { AttrKey, ClubId, Player, PlayerId, Position, ScoutGrade, SeasonNo, Tier } from '../../types';
+import type { AttrKey, ClubId, Player, PlayerDev, PlayerId, Position, ScoutGrade, SeasonNo, Tier } from '../../types';
 import { clamp, hashString, mulberry32, type Rng } from '../../engine';
 import { OVR_WEIGHTS, TIER_REFERENCE_OVR, generatePlayer, scoutGrade } from './generator';
 
@@ -11,21 +11,9 @@ import { OVR_WEIGHTS, TIER_REFERENCE_OVR, generatePlayer, scoutGrade } from './g
 
 export type TrainingFocus = 'BALANCED' | 'ATTACK' | 'DEFENSE' | 'PHYSICAL' | 'TACTICAL' | 'RECOVERY';
 
-/** 성장 저금통 (UI 비노출). bank: OVR 단위 실수, 양수 = 성장 대기, 음수 = 노화 대기 */
-export interface PlayerDev {
-  bank: number;
-  /** 직전 성장 틱 시점의 season.minutes */
-  minutesMark: number;
-}
-
-/** 수명주기 필드를 가진 선수. 필드가 없으면 기본값으로 읽는다 */
-export type LifePlayer = Player & {
-  dev?: PlayerDev;
-  retiring?: boolean;
-  /** 무소속이 된 시즌 번호 (clubId === null 일 때만 의미) */
-  faSince?: SeasonNo;
-  academyClubId?: ClubId;
-};
+export type { PlayerDev } from '../../types';
+/** 수명주기 필드(dev·retiring·faSince·academyClubId)는 2.1.1 에서 Player 에 들어갔다 */
+export type LifePlayer = Player;
 
 export type LifecycleEvent =
   | { kind: 'GREW'; playerId: PlayerId; attrs: Partial<Record<AttrKey, number>> }
@@ -195,11 +183,12 @@ export function spendBank(p: LifePlayer, rng: Rng, attrMult: Partial<Record<Attr
 /**
  * 주간 성장 틱 (Day 8·15·22·28, 3.2). 이번 주 출전 = season.minutes − dev.minutesMark.
  * FA(clubId null)는 M = 0.6, F = 1. noiseSd 는 테스트용(잡음 0 주입).
+ * share: 출전 비중을 직접 준다(경량 시뮬 리그는 출전 시간이 쌓이지 않아 스쿼드 순위로 대신한다, 13.2 모델).
  */
 export function weeklyGrowth(
   p: LifePlayer,
   rng: Rng,
-  ctx: { clubMatches: number; focus?: TrainingFocus; noiseSd?: number },
+  ctx: { clubMatches: number; focus?: TrainingFocus; noiseSd?: number; share?: number },
 ): { player: LifePlayer; event?: LifecycleEvent } {
   if (p.isTemporary) return { player: p };
   const dev = devOf(p);
@@ -210,7 +199,7 @@ export function weeklyGrowth(
   if (p.ovr >= p.potential) return { player: { ...marked, dev: { bank: 0, minutesMark: p.season.minutes } } };
   const isFa = p.clubId === null;
   const focus = isFa ? 'BALANCED' : (ctx.focus ?? 'BALANCED');
-  const share = isFa || ctx.clubMatches <= 0 ? 0 : (p.season.minutes - dev.minutesMark) / (90 * ctx.clubMatches);
+  const share = isFa ? 0 : (ctx.share ?? (ctx.clubMatches <= 0 ? 0 : (p.season.minutes - dev.minutesMark) / (90 * ctx.clubMatches)));
   const F = LIFECYCLE.focus[focus];
   const delta = Math.max(0, (k / 4) * minuteMult(share) * F.growth + gauss(rng) * (ctx.noiseSd ?? LIFECYCLE.growthNoiseSd));
   const mult: Partial<Record<AttrKey, number>> = {};

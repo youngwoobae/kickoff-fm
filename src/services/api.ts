@@ -80,7 +80,12 @@ import type {
  * SeasonOutcome.leagueId?·movements?, NewGameOptions.startTier, GameSettings.startTier?, Player.history?,
  * PromotionLedgerKind(아직 LedgerKind 미포함). 실제 70구단·승강은 M3.2·M3.3. 아키텍처 16장.
  */
-export const CONTRACT_VERSION = '2.1.0';
+/**
+ * 2.1.1 (M3.3, 패치 — 2.1.0 이 예고한 항목 완성, 시그니처 불변): LedgerKind 에 PROMOTION_BONUS·PARACHUTE 합침(PromotionLedgerKind 는 deprecated 별칭),
+ * Finance.parachute?, Player.dev?·retiring?·faSince?·academyClubId?, GameState.boundarySeason?, FA 풀 = players 의 clubId null.
+ * 실제 승강·수명주기·K4 정산, 세이브 스키마 3(leagues 필수, 2 → 3 자동 변환). 아키텍처 16장.
+ */
+export const CONTRACT_VERSION = '2.1.1';
 
 /** 슬롯 번호 목록 (D28: 3개) */
 export const SAVE_SLOT_IDS: readonly SaveSlotId[] = [1, 2, 3];
