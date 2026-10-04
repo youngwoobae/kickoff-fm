@@ -114,11 +114,13 @@ export function marketClubs(state: GameState): Map<ClubId, MarketClub & { outloo
 function aiView(state: GameState, clubId: ClubId): Player[] {
   const squad = clubPlayers(state, clubId);
   if (!preBoundary(state) || !state.pendingRenewals?.length) return squad;
-  const ren = new Map(state.pendingRenewals.map((r) => [r.playerId, r]));
-  return squad.map((p) => {
-    const r = ren.get(p.id);
-    return r ? { ...p, contract: { seasonsLeft: r.seasons + 1, salary: r.salary, bonusPerSeason: r.bonusPerSeason } } : p;
-  });
+  return squad.map((p) => withPendingRenewal(state, p));
+}
+
+/** 성립 재계약이 있으면 새 계약(잔여 = 시즌 수 + 1, 경계에서 −1)으로 본 선수. 정규 창 판매 등록·AI 판단용 (M4.8) */
+export function withPendingRenewal(state: GameState, p: Player): Player {
+  const r = state.pendingRenewals?.find((x) => x.playerId === p.id);
+  return r ? { ...p, contract: { seasonsLeft: r.seasons + 1, salary: r.salary, bonusPerSeason: r.bonusPerSeason } } : p;
 }
 
 export function listingRecord(m: TransferMarketState): Record<string, TransferListing> {
@@ -169,8 +171,32 @@ export function registerExpiringFa(state: GameState): void {
   if (add.length) state.transferMarket = { ...m, listings: [...m.listings, ...add] };
 }
 
+/**
+ * 정규 창 Day 28: Day 25 열림 때는 승강 판정(Day 26) 전이라 AI 판매 명단이 지난 티어 기준이었다.
+ * 승강한 AI 구단은 새 티어 기준 명단(대역 상한·캡 등)을 다시 계산해 아직 없는 선수만 더한다(M4.8, 강등팀 대역 정리).
+ */
+export function relistMovedAiClubs(state: GameState): void {
+  if (state.transferMarket?.window.kind !== 'REGULAR') return;
+  const tiers = clubTierMap(state);
+  const moved = [...marketClubs(state)].filter(([id, c]) => !isHuman(state, id) && c.tier !== (tiers.get(id) ?? state.settings.tier)).map(([id]) => id);
+  addSellListings(state, moved, true);
+}
+
+/** 구단들의 7.4 판매 명단(시장 판단 티어·캡 기준)을 계산해 아직 매물이 아닌 선수만 더한다 */
+function addSellListings(state: GameState, clubIds: readonly ClubId[], band: boolean): void {
+  const m = state.transferMarket;
+  if (!m) return;
+  const mcs = marketClubs(state);
+  const listed = new Set(m.listings.map((l) => l.playerId));
+  const add = clubIds.flatMap((id) => {
+    const c = mcs.get(id)!;
+    return aiSellListings({ window: m.window, tier: c.tier, players: aiView(state, id), capLimit: c.capLimit, band }).filter((l) => !listed.has(l.playerId));
+  });
+  if (add.length) state.transferMarket = { ...m, listings: [...m.listings, ...add] };
+}
+
 /** 7.3 AI 입찰. clubIds 생략 = 모든 AI 구단. aggr 생략 = 구단 성향(7.1). 그 구단의 이전 입찰은 새 판단으로 바꾼다(중간 창 2차 입찰) */
-export function placeAiBids(state: GameState, clubIds?: readonly ClubId[], aggr?: number): void {
+export function placeAiBids(state: GameState, clubIds?: readonly ClubId[], aggr?: number, band = true): void {
   const m = state.transferMarket;
   if (!m) return;
   const mcs = marketClubs(state);
@@ -191,7 +217,7 @@ export function placeAiBids(state: GameState, clubIds?: readonly ClubId[], aggr?
       cap: TIER_ECONOMY[o.tier].salaryCap,
       ...(o.relegated ? { relegatedBudget: TIER_ECONOMY[o.tier].seasonBudget } : {}),
     });
-    const mine = aiBids({ gameSeed: state.gameSeed, window: m.window, club, aggr: a, F, players: aiView(state, id), listings: m.listings, listingPlayers, placedDay: state.time.day });
+    const mine = aiBids({ gameSeed: state.gameSeed, window: m.window, club, aggr: a, F, players: aiView(state, id), listings: m.listings, listingPlayers, placedDay: state.time.day, band });
     bids = bids.filter((b) => b.clubId !== id);
     for (const b of mine) bids = upsertBid(bids, b);
   }
@@ -255,6 +281,7 @@ export function settleMarket(state: GameState, sink: LedgerEntry[], notices: str
   const user = state.userClubId;
   const nameOf = (id: PlayerId) => marketPlayer(state, id)?.name ?? m.npcPlayers[id]?.name ?? id;
   const byListing = new Map(r.deals.map((d) => [d.listingId, d]));
+  const failed = new Map(r.failures.filter((x) => x.clubId === user).map((x) => [x.listingId, x.reason]));
   const drafts: InboxDraft[] = [];
   let won = 0;
   let sold = 0;
@@ -267,7 +294,7 @@ export function settleMarket(state: GameState, sink: LedgerEntry[], notices: str
       won++;
       drafts.push({ kind: 'BID_WON', title: `${name} 영입`, body: l.kind === 'FA' ? `${name} 선수와 FA 계약을 맺었어요. 계약금 ${fmtM(d.amount)}, 연봉 ${fmtM(d.contract.salary)}, ${d.contract.seasonsLeft}시즌이에요.` : `${name} 선수를 ${fmtM(d.amount)}에 영입했어요.`, playerId: l.playerId, clubId: user, listingId: l.id });
     } else {
-      drafts.push({ kind: 'BID_LOST', title: `${name} 영입 실패`, body: d ? `${name} 선수는 다른 구단으로 갔어요.` : `${name} 선수 영입이 성사되지 않았어요. 예산·연봉 캡·선수단 인원·시즌 영입 한도를 확인해 주세요.`, playerId: l.playerId, clubId: user, listingId: l.id });
+      drafts.push({ kind: 'BID_LOST', title: `${name} 영입 실패`, body: failed.has(l.id) ? `${name} 선수 영입이 정산에서 무산됐어요: ${failed.get(l.id)}.${d ? ' 선수는 다음 순위 구단으로 갔어요.' : ''}` : d ? `${name} 선수는 다른 구단으로 갔어요.` : `${name} 선수 영입이 성사되지 않았어요. 예산·연봉 캡·선수단 인원·시즌 영입 한도를 확인해 주세요.`, playerId: l.playerId, clubId: user, listingId: l.id });
     }
   }
   for (const l of m.listings.filter((x) => x.sellerClubId === user)) {
@@ -416,7 +443,8 @@ export function aiReleasePenalties(before: Readonly<Record<PlayerId, Player>>, r
 }
 
 /**
- * 사람 구단 등록 18명 미만 → FA 풀에서 긴급 FA 자동 계약(5.4: ask, 1시즌, 계약금 0).
+ * 사람 구단 등록 18명 미만(지금 소속 기준) → FA 풀에서 긴급 FA 자동 계약(5.4: ask, 1시즌, 계약금 0).
+ * 후보 제외(M4.8): 이번 시즌 그 구단이 방출한 선수(방출 편지 기준), 그 구단이 지금 입찰 중인 선수.
  * ponytail: 시즌당 2명 상한·캡 검사 없이 안전망으로만 채운다(사람 구단 이적·유스 UI 가 정상 경로). 포지션은 GK 2명만 보장, 나머지는 OVR 순
  */
 export function fillHumanSquads(state: GameState): void {
@@ -426,11 +454,13 @@ export function fillHumanSquads(state: GameState): void {
     if (squad().length >= CONTRACT.emergency.minRegistered) continue;
     const tier = tiers.get(id) ?? state.settings.tier;
     const ref = TIER_REFERENCE_OVR[tier];
+    const released = new Set((state.inbox ?? []).filter((m) => m.kind === 'PLAYER_RELEASED' && m.clubId === id && m.season === state.time.season && m.playerId).map((m) => m.playerId!));
+    const bidOn = new Set((state.transferMarket?.bids ?? []).filter((b) => b.clubId === id).map((b) => state.transferMarket!.listings.find((l) => l.id === b.listingId)?.playerId));
     const signed: string[] = [];
     while (squad().length < CONTRACT.emergency.minRegistered) {
       const needGk = squad().filter((p) => p.primary === 'GK').length < 2;
       const pool = Object.values(state.players)
-        .filter((p) => p.clubId === null && p.ovr <= ref + 6 && (!needGk || p.primary === 'GK'))
+        .filter((p) => p.clubId === null && p.ovr <= ref + 6 && (!needGk || p.primary === 'GK') && !released.has(p.id) && !bidOn.has(p.id))
         .sort((a, b) => b.ovr - a.ovr || (a.id < b.id ? -1 : 1));
       const x = pool[0];
       if (!x) break;
@@ -464,6 +494,7 @@ export function transferDaily(state: GameState, sink: LedgerEntry[], notices: st
   if (d === W.REGULAR.openDay) openWindow(state, 'REGULAR');
   if (d === SEASON_DAYS) {
     registerExpiringFa(state);
+    relistMovedAiClubs(state);
     placeAiBids(state);
   }
   if (state.transferMarket && isSettleDay(state.time, state.transferMarket.window)) settleMarket(state, sink, notices);
@@ -471,13 +502,13 @@ export function transferDaily(state: GameState, sink: LedgerEntry[], notices: st
 }
 
 /**
- * 자동 운영 구단(CAREER_SIM 의 사람 구단, 7.7): 그날 AI 와 같은 규칙으로 재계약(Day 20)·입찰(Day 11·14·28), aggr 고정.
+ * 자동 운영 구단(CAREER_SIM 의 사람 구단, 7.7): 그날 AI 와 같은 규칙으로 재계약(Day 20)·입찰(Day 11·14·28)·판매 명단(Day 11·27), aggr 고정.
  * 새 상태를 돌려준다(입력 불변).
  */
 export function autoManageDay(input: GameState, clubId: ClubId, aggr = 0.75): GameState {
   const d = input.time.day;
   const W = TRANSFER.window;
-  if (d !== CONTRACT.renewalOpenDay && d !== W.MID.openDay && d !== W.MID.settleDay - 1 && d !== SEASON_DAYS) return input;
+  if (d !== CONTRACT.renewalOpenDay && d !== W.MID.openDay && d !== W.MID.settleDay - 1 && d !== SEASON_DAYS - 1 && d !== SEASON_DAYS) return input;
   const state: GameState = { ...input };
   if (d === CONTRACT.renewalOpenDay) {
     const picks = aiRenewalsFor(state, [clubId]);
@@ -485,6 +516,11 @@ export function autoManageDay(input: GameState, clubId: ClubId, aggr = 0.75): Ga
     payAiRenewalBonuses(state, picks);
     state.pendingRenewals = [...(state.pendingRenewals ?? []), ...picks];
   }
-  else if (state.transferMarket) placeAiBids(state, [clubId], aggr);
+  else if (state.transferMarket) {
+    // 7.4 판매 명단(약체·인원 초과·캡 초과·노장, 대역 상한 판매는 없음): 중간 창 Day 11(AI 는 Day 14 에 판단), 정규 창 Day 27(승강 판정 뒤 다음 시즌 기준, AI 는 Day 28).
+    // 경제 4.2 "자동 운영 구단은 AI 매각 규칙으로 해소" (M4.8)
+    if (d === W.MID.openDay || d === SEASON_DAYS - 1) addSellListings(state, [clubId], false);
+    if (d !== SEASON_DAYS - 1) placeAiBids(state, [clubId], aggr, false); // 대역 상한 없음(7.3 그대로, 7.7)
+  }
   return state;
 }

@@ -182,4 +182,6 @@ export {
   fillHumanSquads,
   transferDaily,
   autoManageDay,
+  payAiRenewalBonuses,
+  withPendingRenewal,
 } from './transfer/flow';

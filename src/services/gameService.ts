@@ -146,6 +146,7 @@ import {
   mailContract,
   marketClubs,
   marketPlayer,
+  withPendingRenewal,
   offerRenewal as offerRenewalDomain,
   playerValue,
   post,
@@ -840,7 +841,18 @@ class LocalGameService implements GameService {
     if (!listing) throw new GameError('NOT_FOUND', `매물이 없어요: ${input.listingId}`);
     const club = marketClubs(s).get(s.userClubId)!;
     const bid = this.run(() =>
-      validateBid({ window: m.window, listing, input, club, clubBids: m.bids.filter((b) => b.clubId === s.userClubId), listings, placedDay: s.time.day }),
+      validateBid({
+        window: m.window,
+        listing,
+        input,
+        club,
+        clubBids: m.bids.filter((b) => b.clubId === s.userClubId),
+        listings,
+        placedDay: s.time.day,
+        playerClubId: marketPlayer(s, listing.playerId)?.clubId ?? null,
+        squad: clubPlayers(s, s.userClubId),
+        player: marketPlayer(s, listing.playerId),
+      }),
     );
     this.commitMarket(s, { ...m, bids: upsertBid(m.bids, bid) });
     return bid;
@@ -865,7 +877,7 @@ class LocalGameService implements GameService {
     this.ownerOnly(s);
     const p = this.ownPlayer(s, playerId);
     const m = this.market(s);
-    const listing = this.run(() => clubListing(m.window, p, minPrice));
+    const listing = this.run(() => clubListing(m.window, withPendingRenewal(s, p), minPrice)); // 성립 재계약은 새 계약으로 (M4.8)
     // 같은 선수 재등록 = 최저가 수정. 새 최저가보다 낮아진 입찰은 무효라 뺀다
     const bids = m.bids.filter((b) => b.listingId !== listing.id || (b.fee ?? 0) >= listing.minPrice);
     this.commitMarket(s, { ...m, listings: [...m.listings.filter((l) => l.id !== listing.id), listing], bids });

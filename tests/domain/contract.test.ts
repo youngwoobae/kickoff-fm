@@ -142,12 +142,26 @@ describe('시즌 경계·AI 재계약', () => {
       mk({ ovr: 70 - i, age: i === 0 ? 33 : i === 1 ? 32 : 25, contract: { seasonsLeft: i % 2 === 0 || i >= 17 ? 1 : 2, salary: 2 * M } }, `p${String(i).padStart(2, '0')}`),
     );
     const picks = aiRenewals(squad, { tier: 'T3', clubMatches: 0, capLimit: 1000 * M });
-    // 0(33세, 1위)·순위≤18 짝수·17(18위) 포함, 19(20위) 제외, 1은 2시즌 남음
-    expect(picks.map((p) => p.playerId)).toEqual(['p00', 'p02', 'p04', 'p06', 'p08', 'p10', 'p12', 'p14', 'p16', 'p17']);
+    // 0(33세, 1위)·순위≤20 짝수·17·19(18·20위) 포함 (M4.8: 순위 18 → 20), 1은 2시즌 남음
+    expect(picks.map((p) => p.playerId)).toEqual(['p00', 'p02', 'p04', 'p06', 'p08', 'p10', 'p12', 'p14', 'p16', 'p17', 'p18', 'p19']);
     expect(picks[0]!.seasons).toBe(1);
     expect(picks[1]!.seasons).toBe(3);
     const tight = aiRenewals(squad, { tier: 'T3', clubMatches: 0, capLimit: 60 * M });
     expect(tight.length).toBeLessThan(picks.length);
-    expect(tight.map((p) => p.playerId)).toEqual(picks.slice(0, tight.length).map((p) => p.playerId));
+    // M4.8: 우선순위(OVR) 높은 대상부터 넣고, 안 맞는 대상은 건너뛴다(뒤의 더 싼 대상은 들어갈 수 있음)
+    expect(tight[0]!.playerId).toBe('p00');
+    expect(tight.every((t) => picks.some((p) => p.playerId === t.playerId))).toBe(true);
+    // 갱신 보너스는 사람과 같다 (0.1 × 연봉 × 시즌, 시즌 분할)
+    expect(picks[1]!.bonusPerSeason).toBe(Math.round(Math.round((0.1 * picks[1]!.salary * 3) / 1000) * 1000 / 3));
+  });
+  it('7.5 M4.8: 23세 이하 티어 기준 이상은 순위 밖이어도, 어린 유망주는 캡이 빠듯할 때 먼저 재계약', () => {
+    // 22명 중 21위인 20세 OVR 60(T3 기준) 선수
+    const squad = Array.from({ length: 22 }, (_, i) => mk({ ovr: 80 - i, age: i === 20 ? 20 : 27, contract: { seasonsLeft: i === 20 ? 1 : 2, salary: 2 * M } }, `q${String(i).padStart(2, '0')}`));
+    squad[20] = { ...squad[20]!, ovr: 60 };
+    expect(aiRenewals(squad, { tier: 'T3', clubMatches: 0, capLimit: 1000 * M }).map((p) => p.playerId)).toEqual(['q20']);
+    // 같은 OVR 이면 어린 선수가 먼저: 캡이 한 명분이면 19세가 남는다
+    const two = [mk({ ovr: 60, age: 28, contract: { seasonsLeft: 1, salary: 3 * M } }, 'old'), mk({ ovr: 60, age: 19, contract: { seasonsLeft: 1, salary: 3 * M } }, 'kid')];
+    const one = aiRenewals(two, { tier: 'T3', clubMatches: 0, capLimit: 3.6 * M });
+    expect(one.map((p) => p.playerId)).toEqual(['kid']);
   });
 });

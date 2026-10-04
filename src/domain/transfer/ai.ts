@@ -61,7 +61,7 @@ export function aiTransferBudget(kind: TransferWindow['kind'], aggr: number, x: 
  * 인원 > 23 비주전 OVR 낮은 순 0.8V → 캡 초과 비주전 연봉 높은 순 0.7V → 31세 이상 비주전 잔여 ≥ 2 0.8V.
  * GK 는 2명 아래로 내놓지 않는다. 정규 창은 잔여 1시즌 선수 제외(clubListing 규칙).
  */
-export function aiSellListings(args: { window: TransferWindow; tier: Tier; players: readonly Player[]; capLimit: Kc }): TransferListing[] {
+export function aiSellListings(args: { window: TransferWindow; tier: Tier; players: readonly Player[]; capLimit: Kc; /** false = 대역 상한 판매 안 함(자동 운영 사람 구단, M4.8) */ band?: boolean }): TransferListing[] {
   const A = LIFECYCLE.ai;
   const S = AI_TRANSFER.sell;
   const ref = TIER_REFERENCE_OVR[args.tier];
@@ -78,7 +78,7 @@ export function aiSellListings(args: { window: TransferWindow; tier: Tier; playe
   for (const p of own) if (p.age >= A.weakMinAge && p.ovr < ref - A.weakBelow) take(p, S.weakPrice);
 
   let rest = own.filter((p) => !picked.has(p.id));
-  for (let n = 0; n < A.sellMaxPerSeason && squadStrength(rest) > ref + A.bandHi; n++) {
+  for (let n = 0; args.band !== false && n < A.sellMaxPerSeason && squadStrength(rest) > ref + A.bandHi; n++) {
     const x = rest.filter((p) => p.age <= A.sellMaxAge && p.ovr >= ref + A.sellOver && !picked.has(p.id)).sort(byOvrDesc).find((p) => take(p, S.bandPrice));
     if (!x) break;
     rest = rest.filter((p) => p !== x);
@@ -115,6 +115,8 @@ export function aiBids(args: {
   listings: readonly TransferListing[];
   listingPlayers: Readonly<Record<string, Player>>;
   placedDay: number;
+  /** 대역 상한(영입 뒤 XI ≤ ref + bandHi) 적용. 기본 true = AI 구단(티어 평균 보정, M4.3). 자동 운영 사람 구단은 false — 경제 7.3 입찰식에는 대역 조건이 없다(M4.8) */
+  band?: boolean;
 }): Bid[] {
   const { window: w, club, aggr } = args;
   if (club.balance < 0) return [];
@@ -135,13 +137,13 @@ export function aiBids(args: {
   const cands: Cand[] = [];
   for (const l of args.listings) {
     const p = args.listingPlayers[l.playerId];
-    if (!p || l.sellerClubId === club.id || p.age > AI_TRANSFER.maxAge) continue;
+    if (!p || l.sellerClubId === club.id || p.clubId === club.id || p.age > AI_TRANSFER.maxAge) continue; // 자기 만료 예정자 FA 매물 제외
     const g = GROUP[p.primary];
     const need = deficit(g) > 0 || own.length < A.minSquad; // M4.8: 22명 미만이면 모든 그룹이 필요 (사람 자동 운영 구단은 경계 보충이 없다)
     const gain = p.ovr - weakest(g);
     if (!need && gain < AI_TRANSFER.upgradeMin) continue;
     // 대역: 영입 뒤 주전 전력 > ref + bandHi 이면 안 산다. 필요 포지션 보충만 ref 이하 선수로 예외 (M4.8, 11.4 보충과 같은 상한)
-    if (squadStrength([...own, p]) > ref + A.bandHi && !(need && p.ovr <= ref)) continue;
+    if (args.band !== false && squadStrength([...own, p]) > ref + A.bandHi && !(need && p.ovr <= ref)) continue;
     const u = h(args.gameSeed >>> 0, w.season, w.kind, club.id, l.id);
     const s = baseSalary(p.ovr);
     let bid: Bid;

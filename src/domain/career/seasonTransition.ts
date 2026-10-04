@@ -36,7 +36,7 @@ interface BoundaryOut {
 }
 
 /** ④ 수명주기 경계 (설계 15.1) + 계약 경계(M4.4). state 를 제자리에서 바꾼다(호출자가 복사본을 넘긴다) */
-function lifecycleBoundary(state: GameState, ending: number): BoundaryOut {
+function lifecycleBoundary(state: GameState, ending: number, relegated: ReadonlySet<string>): BoundaryOut {
   const season = ending + 1;
   const players = state.players;
   const removeFromClubs = (gone: Set<string>) => {
@@ -57,7 +57,7 @@ function lifecycleBoundary(state: GameState, ending: number): BoundaryOut {
   const tiers = clubTierMap(state);
   const ai = Object.values(state.clubs).filter((c) => !c.isHuman);
   const r = aiSquadMaintenance({
-    clubs: ai.map((c) => ({ id: c.id, tier: tiers.get(c.id) ?? state.settings.tier, players: clubPlayers(state, c.id) })),
+    clubs: ai.map((c) => ({ id: c.id, tier: tiers.get(c.id) ?? state.settings.tier, players: clubPlayers(state, c.id), relegated: relegated.has(c.id) })),
     pool: fa.keep,
     season,
     gameSeed: state.gameSeed,
@@ -80,7 +80,6 @@ function lifecycleBoundary(state: GameState, ending: number): BoundaryOut {
     state.clubs[c.id] = { ...c, playerIds: [...c.playerIds, ...picked] };
     lifeEvents.push(...picked.map((id) => ({ kind: 'YOUTH_PROMOTED' as const, playerId: id, clubId: c.id, auto: true })));
   }
-  fillHumanSquads(state);
   pruneMarket(state);
   return { contractEvents, lifeEvents, penalties };
 }
@@ -115,7 +114,7 @@ export function startNewSeasonState(input: GameState, nowIso: string): GameState
       state.settings = { ...state.settings, tier: userLeagueOf(state).tier };
     }
     // ④ 수명주기
-    boundary = lifecycleBoundary(state, ending);
+    boundary = lifecycleBoundary(state, ending, new Set(movements.filter((m) => m.kind === 'RELEGATED').map((m) => m.clubId)));
     state.boundarySeason = ending;
     // 강등 시즌 무위약 방출권 (경제 5.3, 사람 구단)
     if (movements.some((m) => m.clubId === state.userClubId && m.kind === 'RELEGATED')) state.freeReleasesLeft = CONTRACT.freeReleasesOnRelegation;
@@ -138,6 +137,8 @@ export function startNewSeasonState(input: GameState, nowIso: string): GameState
   for (const cid of Object.keys(state.clubs).sort()) state.finances[cid] = { ...(state.finances[cid] ?? emptyFinance(cid)), ledger: [] };
   state.time = { season, day: 1 };
   state.phase = 'MATCHDAY';
+  // 긴급 FA 는 만료·은퇴가 끝난 뒤 새 시즌 Day 1 인원으로 판정한다(편지도 새 시즌 날짜, M4.8)
+  if (fresh) fillHumanSquads(state);
   // K4: 강등 연봉 전용 계정은 Day 1 연봉부터 쓰이므로 배정금 처리 전에 연다
   for (const m of movements.filter((x) => x.kind === 'RELEGATED')) {
     const amount = parachuteOf(m.from, m.to);

@@ -168,9 +168,16 @@ export function validateBid(args: {
   clubBids: readonly Bid[];
   listings: Readonly<Record<string, TransferListing>>;
   placedDay: Day;
+  /** 매물 선수의 지금 소속. 만료 예정 FA 매물(Day 28)이 우리 선수면 입찰 금지 (M4.8) */
+  playerClubId?: ClubId | null;
+  /** 이 구단 선수단(임시 포함). 주면 중간 창은 정산과 같은 캡·25명 기준을 입찰 때 미리 본다 (M4.8) */
+  squad?: readonly Player[];
+  /** 매물 선수 (캡 산입 계산용, squad 와 함께) */
+  player?: Player;
 }): Bid {
   const { window: w, listing: l, input, club } = args;
   if (l.sellerClubId === club.id) throw new DomainError('BID_OUT_OF_RANGE', '우리 구단 매물에는 입찰할 수 없어요', ['OWN_LISTING']);
+  if (args.playerClubId === club.id) throw new DomainError('BID_OUT_OF_RANGE', '우리 구단 선수예요. 계약이 끝나기 전에 재계약(Day 20~27)으로 붙잡아 주세요', ['OWN_PLAYER']);
   if (club.balance < 0) throw new DomainError('NEGATIVE_BALANCE_LOCK', '잔액이 0 아래인 동안에는 입찰할 수 없어요');
   let bid: Bid;
   if (l.kind === 'FA') {
@@ -194,6 +201,13 @@ export function validateBid(args: {
     .reduce((s, b) => s + (args.listings[b.listingId] ? reservationOf(w, args.listings[b.listingId]!, b) : 0), 0);
   const room = club.budget - reservedOther;
   if (reservationOf(w, l, bid) > room) throw new DomainError('INSUFFICIENT_FUNDS', `지출 가능액이 모자라요. 이 입찰에 쓸 수 있는 돈은 ${fmtM(Math.max(0, room))}까지예요`);
+  if (club.signings >= club.signingLimit) throw new DomainError('BID_OUT_OF_RANGE', `이번 시즌 영입 한도 ${club.signingLimit}명을 다 썼어요`, ['SIGNING_LIMIT']);
+  // 정규 창은 경계(만료·은퇴)를 지나 정산하므로 선수단 기준은 정산 때만 본다
+  if (w.kind === 'MID' && args.squad && args.player) {
+    if (args.squad.filter((x) => !x.isTemporary).length + 1 > TRANSFER.maxSquad) throw new DomainError('BID_OUT_OF_RANGE', `선수단이 ${TRANSFER.maxSquad}명이라 더 영입할 수 없어요`, ['SQUAD_FULL']);
+    const after = capUsage(args.squad) + capCharge({ ovr: args.player.ovr, contract: newContract(l, args.player, bid) });
+    if (after > club.capLimit) throw new DomainError('CAP_EXCEEDED', `영입하면 연봉 캡을 넘어요 (${fmtM(after)} / ${fmtM(club.capLimit)})`);
+  }
   return bid;
 }
 
@@ -229,6 +243,8 @@ export interface SettleResult {
   clubs: MarketClub[];
   /** 낙찰 없는 매물. NPC 는 지우고, FA 는 풀에 남고, CLUB 은 구단에 남는다 */
   unsold: string[];
+  /** 최고 순위였지만 정산 조건을 못 맞춘 입찰과 그 사유 (편지용, M4.8) */
+  failures: { listingId: string; clubId: ClubId; reason: string }[];
 }
 
 function newContract(l: TransferListing, p: Player, b: Bid): Contract {
@@ -255,6 +271,7 @@ export function settleWindow(input: SettleInput): SettleResult {
   const deals: TransferDeal[] = [];
   const money: TransferMoney[] = [];
   const unsold: string[] = [];
+  const failures: SettleResult['failures'] = [];
 
   const listings = [...input.listings].sort((a, b) => b.maxPrice - a.maxPrice || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   for (const l of listings) {
@@ -271,15 +288,19 @@ export function settleWindow(input: SettleInput): SettleResult {
       const c = clubs.get(win.clubId)!;
       const contract = newContract(l, p0, win);
       const res = reservationOf(w, l, win);
-      const ok =
-        p0.clubId === l.sellerClubId &&
-        c.id !== l.sellerClubId &&
-        c.balance >= 0 &&
-        c.budget - (committed.get(c.id) ?? 0) >= res &&
-        capUsage(squad(c.id)) + capCharge({ ovr: p0.ovr, contract }) <= c.capLimit &&
-        squad(c.id).filter((x) => !x.isTemporary).length + 1 <= TRANSFER.maxSquad &&
-        c.signings < c.signingLimit;
-      if (!ok) {
+      const room = c.budget - (committed.get(c.id) ?? 0);
+      const capAfter = capUsage(squad(c.id)) + capCharge({ ovr: p0.ovr, contract });
+      const reason =
+        p0.clubId !== l.sellerClubId ? '선수가 이미 다른 거래로 이동했어요'
+        : c.id === l.sellerClubId ? '우리 구단 매물이에요'
+        : c.balance < 0 ? '잔액이 0 아래예요'
+        : room < res ? `정산 때 지출 가능액 ${fmtM(Math.max(0, room))}가 필요한 ${fmtM(res)}보다 모자랐어요`
+        : capAfter > c.capLimit ? `영입하면 연봉 캡을 넘어요 (${fmtM(capAfter)} / ${fmtM(c.capLimit)})`
+        : squad(c.id).filter((x) => !x.isTemporary).length + 1 > TRANSFER.maxSquad ? `선수단이 ${TRANSFER.maxSquad}명이에요`
+        : c.signings >= c.signingLimit ? `시즌 영입 한도 ${c.signingLimit}명을 다 썼어요`
+        : null;
+      if (reason) {
+        failures.push({ listingId: l.id, clubId: c.id, reason });
         bids = bids.filter((b) => b !== win);
         continue;
       }
@@ -309,7 +330,7 @@ export function settleWindow(input: SettleInput): SettleResult {
     }
     if (!sold) unsold.push(l.id);
   }
-  return { deals, money, players, clubs: input.clubs.map((c) => clubs.get(c.id)!), unsold };
+  return { deals, money, players, clubs: input.clubs.map((c) => clubs.get(c.id)!), unsold, failures };
 }
 
 // ── 잔액 부족 (D18, 6.5) ──

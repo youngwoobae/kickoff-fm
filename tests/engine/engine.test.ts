@@ -1,6 +1,6 @@
 /** 엔진 테스트 (소유: A). 기준은 docs/아키텍처.md 12장 */
 import { createHash } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { EngineConstants, ROLE_SHAPE, VALUE_TABLE, computeUnits, conditionEfficiency, decomposeBinary, explainMatch } from '../../src/engine';
 import { runCalibration, styleMatrixMatch } from '../../src/domain';
 import type { BinaryDecisionLog, ConditionalOrder, DecisionLog, EngineTeamInput, RoleId, RuleId, StyleId, TacticCap } from '../../src/types';
@@ -266,6 +266,8 @@ describe('explainMatch (8.8)', () => {
 });
 
 describe('calibration (고정 시드 게이트, 엔진 0.5.0, 기본 상한 0.7)', () => {
+  // 무거운 배치(긴 동기 루프) 사이에 이벤트 루프를 한 번 돌려 vitest 워커 RPC(onTaskUpdate)가 타임아웃 나지 않게 한다
+  afterEach(() => new Promise<void>((r) => setTimeout(r)));
   it('기본 전술 상한 = 0.7 (새 게임·엔진 설정·sim-batch 공통)', () => {
     expect(DEFAULT_TAC_CAP).toBe(0.7);
   });

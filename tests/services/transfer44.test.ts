@@ -177,11 +177,18 @@ describe('이적 연결 (M4.4)', () => {
     expect(userLedger(s).at(-1)).toMatchObject({ kind: 'RELEASE_PENALTY', amount: -q.penalty });
     expect(s.getInbox()[0]).toMatchObject({ kind: 'PLAYER_RELEASED', playerId: p.id });
     expect(codeOf(() => s.releasePlayer(p.id))).toBe('NOT_FOUND');
-    // 18명 아래로 내리면 긴급 FA 가 채운다
-    while (s.getSquad().filter((x) => !x.isTemporary).length > 18) s.releasePlayer(s.getSquad().at(-1)!.id);
+    // 18명 아래로 내려도 이번 시즌 우리가 방출한 선수는 긴급 FA 로 다시 데려오지 않는다(M4.8).
+    // 시즌 1 은 FA 풀이 방금 방출한 선수뿐이라 채울 후보가 없다
+    const released = new Set([p.id]);
+    while (s.getSquad().filter((x) => !x.isTemporary).length > 18) {
+      const id = s.getSquad().at(-1)!.id;
+      released.add(id);
+      s.releasePlayer(id);
+    }
+    released.add(s.getSquad().at(-1)!.id);
     s.releasePlayer(s.getSquad().at(-1)!.id);
-    expect(s.getSquad().length).toBe(18);
-    expect(s.getInbox()[0]!.kind).toBe('GENERAL');
+    expect(s.getSquad().some((x) => released.has(x.id))).toBe(false);
+    expect(s.getSquad().length).toBe(17);
     s.switchRole('COACH');
     expect(codeOf(() => s.releasePlayer(s.getSquad()[0]!.id))).toBe('PERMISSION_DENIED');
   });

@@ -45,6 +45,8 @@ interface SeasonStart {
   onClubs: number;
   aiSizes: number[];
   humanSize: number;
+  /** 사람 구단 XI − 그 티어 평균 XI (진단용) */
+  humanEdge: number;
   /** 정규 창 정산(Day 2) 뒤 사람 구단 인원·소속 선수 수. 정규 창 영입은 Day 2 에 들어오므로 인원 판정(L-C1·H1)은 이 값 (M4.8) */
   afterSettle?: { humanSize: number; onClubs: number };
   allSizesOk: boolean;
@@ -109,6 +111,7 @@ function measureStart(s: GameState): SeasonStart {
     onClubs: members.length,
     aiSizes: sizes.filter((x) => !x.human).map((x) => x.n),
     humanSize: sizes.find((x) => x.human)?.n ?? 0,
+    humanEdge: squadStrength(clubPlayers(s, HUMAN)) - tiers[s.settings.tier],
     allSizesOk: sizes.every((x) => x.n >= 18 && x.n <= 25),
     structureOk: Object.keys(s.clubs).length === 70 && leagues.length === 5 && leagues.every((l) => l.clubIds.length === 14),
     fa: ps.filter((p) => p.clubId === null).length,
@@ -260,8 +263,12 @@ export function judgeCareer(runs: readonly SeedRun[], seasons: number): CareerGa
     median([...e.money.values()].filter((m) => m.tier === t).map((m) => f(m) / TIER_ECONOMY[t].seasonBudget));
   const e2 = ok.map((r) => Math.max(...TIERS.map((t) => Math.abs(tierMed(r.ends[last]!, t, (m) => m.balance) - tierMed(r.ends[1]!, t, (m) => m.balance)))));
   g('E2', 'ECON', 'HARD', `잔액 안정 |S${seasons} − S2| (잔액/배정금 티어 중앙값)`, `p95=${f2(quantile(e2, 0.95))}`, '<= 0.15', seasons >= 2 ? within(quantile(e2, 0.95), 0, 0.15) : null);
-  const e3 = ends.flatMap((e) => TIERS.map((t) => tierMed(e, t, (m) => m.balance + m.tob)));
-  g('E3', 'ECON', 'HARD', '잔액 수준 (잔액+한정 예산)/배정금 티어 중앙값, 모든 시즌', `max=${f2(Math.max(...e3))}`, '<= 0.85', e3.length ? Math.max(...e3) <= 0.85 : null);
+  // 티어 중앙값 = 그 시즌 그 티어의 모든 시드 구단(시드 × 14) 중앙값 (M4.8: 시드별 14구단 중앙값의 최대는 표본 꼬리라 실행마다 ±0.1 흔들림 — 참고로 출력)
+  const e3 = Array.from({ length: seasons }, (_, s) =>
+    TIERS.map((t) => median(ok.flatMap((r) => [...r.ends[s]!.money.values()].filter((m) => m.tier === t).map((m) => (m.balance + m.tob) / TIER_ECONOMY[t].seasonBudget)))),
+  ).flat();
+  const e3seed = ends.flatMap((e) => TIERS.map((t) => tierMed(e, t, (m) => m.balance + m.tob)));
+  g('E3', 'ECON', 'HARD', '잔액 수준 (잔액+한정 예산)/배정금 티어 중앙값(시드 합산), 모든 시즌', `max=${f2(Math.max(...e3))} (시드별 중앙값 최대 ${f2(Math.max(...e3seed))})`, '<= 0.80', e3.length ? Math.max(...e3) <= 0.8 : null);
 
   // B1/B2: 시즌 s 말 승격(강등) → 시즌 s+1 말 강등(승격)
   let b1n = 0, b1k = 0, b2n = 0, b2k = 0;

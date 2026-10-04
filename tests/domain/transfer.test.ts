@@ -227,6 +227,22 @@ describe('정산 (6.4, D17)', () => {
     const none = settleWindow({ gameSeed: SEED, window: MID, listings: [L], bids: [bid('B', 15 * M)], clubs: [club('S', 'T3'), club('B', 'T3', { signings: 8 })], players: asMap([sellerP]) });
     expect(none.deals).toHaveLength(0);
     expect(none.unsold).toEqual([L.id]);
+    // M4.8: 정산 실패 사유를 남긴다 (편지용)
+    expect(none.failures).toEqual([{ listingId: L.id, clubId: 'B', reason: '시즌 영입 한도 8명을 다 썼어요' }]);
+    const capFail = settleWindow({ gameSeed: SEED, window: MID, listings: [L], bids: [bid('B', 15 * M)], clubs: [club('S', 'T3'), club('B', 'T3', { capLimit: 1 * M })], players: asMap([sellerP]) });
+    expect(capFail.failures[0]!.reason).toMatch(/연봉 캡을 넘어요/);
+  });
+
+  it('M4.8 입찰 검증: 우리 선수 FA 매물 금지, 중간 창은 정산과 같은 캡·25명·영입 한도를 입찰 때 본다', () => {
+    const mine = mk('mine', 'B', 60, 25, { contract: { seasonsLeft: 1, salary: 3 * M } });
+    const fa = faListing(REG, mine);
+    expect(() => validateBid({ window: REG, listing: fa, input: { listingId: fa.id, bonus: 0, salary: fa.salaryFloor!, seasons: 1 }, club: club('B', 'T3'), clubBids: [], listings: {}, placedDay: 28, playerClubId: 'B' })).toThrow(/재계약/);
+    const base = { window: MID, listing: L, input: { listingId: L.id, fee: 13 * M }, clubBids: [], listings: {}, placedDay: 12, player: sellerP };
+    expect(() => validateBid({ ...base, club: club('B', 'T3', { signings: 8 }) })).toThrow(/영입 한도/);
+    expect(() => validateBid({ ...base, club: club('B', 'T3', { capLimit: 2 * M }), squad: [] })).toThrow(/연봉 캡/);
+    const full = Array.from({ length: 25 }, (_, i) => mk(`f${i}`, 'B', 50));
+    expect(() => validateBid({ ...base, club: club('B', 'T3'), squad: full })).toThrow(/25명/);
+    expect(validateBid({ ...base, club: club('B', 'T3'), squad: full.slice(0, 20) }).fee).toBe(13 * M);
   });
 
   it('FA 낙찰: 비교값 = 계약금 + 연봉 × 시즌 × 0.5, 계약 생성, 정규 창은 한정 예산 먼저', () => {

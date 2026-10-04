@@ -22,7 +22,7 @@ export const CONTRACT = {
   freeReleasesOnRelegation: 2,
   emergency: { minRegistered: 18, minAvailable: 16, perSeason: 2 },
   /** 7.5 AI 재계약 */
-  ai: { keepRank: 20, keepMaxAge: 31, vetRank: 18, vetMinAge: 32, capUseMax: 0.97, maxSeasons: 3 },
+  ai: { keepRank: 20, keepMaxAge: 31, vetRank: 20, vetMinAge: 32, capUseMax: 0.97, maxSeasons: 3, youngMaxAge: 23, youngPriority: [[21, 4], [23, 2]] as const },
 } as const;
 
 /** @deprecated 2.2.1 (M4.4): TransferLedgerKind 가 LedgerKind 에 합쳐져 LedgerEntry 와 같다 */
@@ -169,7 +169,8 @@ export function offerRenewal(p: Player, offer: RenewalOffer, ctx: RenewalContext
 /**
  * 7.5 AI 재계약 (Day 20): 만료 예정자 중 OVR 순위 ≤ 18 & 나이 ≤ 31 → ask, min(허용 최대, 3)시즌 /
  * 순위 ≤ 18 & 나이 ≥ 32 → ask, 1시즌 (M4.8: 순위 18 → 20, 베테랑 11 → 18).
- * 캡: OVR 높은 대상부터 "계약 후 캡 사용 ≤ max(캡 × 0.97, 지금 캡 사용)" 이면 넣고 아니면 건너뛴다(M4.8).
+ * 23세 이하이면서 OVR ≥ 티어 기준이면 순위와 관계없이 재계약(M4.8: 어리고 강한 선수를 FA 로 놓치지 않음).
+ * 캡: 우선순위(OVR + 21세 이하 4·23세 이하 2) 높은 대상부터 "계약 후 캡 사용 ≤ max(캡 × 0.97, 지금 캡 사용)" 이면 넣고 아니면 건너뛴다(M4.8).
  * 성장 재계산으로 이미 캡을 넘은 구단도 만료자가 비우는 몫 안에서는 주전을 붙잡는다(5.1 "재계산 초과는 늘리는 계약만 막는다" — 총 사용은 늘지 않음).
  * 갱신 보너스는 사람과 같다(M4.8, 경제 1장 "AI 전용 보정 없음"): bonusPerSeason 을 캡에 산입하고, 지급은 호출자(flow.payAiRenewalBonuses).
  */
@@ -182,11 +183,16 @@ export function aiRenewals(squad: readonly Player[], ctx: AskContext & { capLimi
     const rank = i + 1;
     const salary = renewalAsk(p, ctx);
     const pick = (seasons: number) => picks.push({ playerId: p.id, salary, seasons, bonusPerSeason: Math.round(renewalBonus(salary, seasons) / seasons) });
-    if (rank <= A.keepRank && p.age <= A.keepMaxAge) pick(Math.min(seasonsRange(p.age)[1], A.maxSeasons));
+    if ((rank <= A.keepRank && p.age <= A.keepMaxAge) || (p.age <= A.youngMaxAge && p.ovr >= TIER_REFERENCE_OVR[ctx.tier])) pick(Math.min(seasonsRange(p.age)[1], A.maxSeasons));
     else if (rank <= A.vetRank && p.age >= A.vetMinAge) pick(1);
   });
-  // 계약 후 캡 사용 = 비만료자 + 재계약자 새 산입액. picks 는 OVR 내림차순
+  // 계약 후 캡 사용 = 비만료자 + 재계약자 새 산입액. 우선순위 = OVR + 어린 나이 가산 (V 나이계수와 같은 방향)
   const byId = new Map(squad.map((p) => [p.id, p]));
+  const prio = (id: PlayerId) => {
+    const p = byId.get(id)!;
+    return p.ovr + (A.youngPriority.find(([age]) => p.age <= age)?.[1] ?? 0);
+  };
+  picks.sort((a, b) => prio(b.playerId) - prio(a.playerId) || a.playerId.localeCompare(b.playerId));
   const limit = Math.max(ctx.capLimit * A.capUseMax, capUsage(squad));
   let used = capUsage(squad.filter((p) => p.contract.seasonsLeft > 1 || p.isTemporary));
   return picks.filter((r) => {

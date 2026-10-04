@@ -68,7 +68,7 @@ export const LIFECYCLE = {
   squadTemplate: { GK: 2, CB: 4, FB: 4, DM: 2, CM: 3, AM: 2, W: 2, ST: 3 } as Record<Position, number>,
   ai: {
     minSquad: 22, maxSquad: 25, minGk: 2, weakBelow: 14, weakMinAge: 21, bandHi: 1, sellOver: 4, sellMaxAge: 30,
-    sellMaxPerSeason: 2, bandLo: 2, bandLoPoolMax: 6, poolMaxAge: 31, poolBand: 6, regenOffset: -3, regenSd: 4,
+    sellMaxPerSeason: 2, relegatedSellExtra: 2, bandLo: 2, bandLoPoolMax: 6, poolMaxAge: 31, poolBand: 6, poolFillHi: 2, regenOffset: -3, regenSd: 4,
     regenAge: [21, 29], regenClamp: [-10, 4], regenPotAge: 24, regenPotAdd: 4, contractSeasons: [1, 3], agedPenalty: 2,
   },
 } as const;
@@ -301,7 +301,7 @@ export function squadStrength(players: readonly Player[]): number {
 
 export interface AiSquadInput {
   /** AI 구단만. tier 는 승강이 반영된 다음 시즌 티어 */
-  clubs: { id: ClubId; tier: Tier; players: LifePlayer[] }[];
+  clubs: { id: ClubId; tier: Tier; players: LifePlayer[]; /** 이번 경계에 강등 (M4.8: 대역 상한 판매 한도 + relegatedSellExtra) */ relegated?: boolean }[];
   pool: LifePlayer[];
   /** 다음(새) 시즌 번호. 방출 선수의 faSince = season − 1 (끝난 시즌) */
   season: SeasonNo;
@@ -354,7 +354,8 @@ export function aiSquadMaintenance(input: AiSquadInput): AiSquadResult {
       return false;
     });
     // 2. 대역 상한
-    for (let n = 0; n < A.sellMaxPerSeason && squadStrength(c.players) > ref + A.bandHi; n++) {
+    const sellMax = A.sellMaxPerSeason + (c.relegated ? A.relegatedSellExtra : 0);
+    for (let n = 0; n < sellMax && squadStrength(c.players) > ref + A.bandHi; n++) {
       const x = c.players.filter((p) => !p.isTemporary && p.age <= A.sellMaxAge && p.ovr >= ref + A.sellOver).sort(byOvrDesc)[0];
       if (!x) break;
       c.players = c.players.filter((p) => p !== x);
@@ -393,8 +394,8 @@ export function aiSquadMaintenance(input: AiSquadInput): AiSquadResult {
     for (let n = 1; size() < A.minSquad || count('GK') < A.minGk; n++) {
       const need =
         count('GK') < A.minGk ? 'GK' : POSITIONS.reduce((b, pos) => (LIFECYCLE.squadTemplate[pos] - count(pos) > LIFECYCLE.squadTemplate[b] - count(b) ? pos : b));
-      // M4.8: ref − 6 ≤ ovr ≤ ref (위쪽 절반을 빼야 만료 FA 로 커진 풀이 하위 티어 전력을 올리지 않는다)
-      const x = takeFromPool((p) => p.primary === need && p.age <= A.poolMaxAge && p.ovr <= ref && p.ovr >= ref - A.poolBand);
+      // M4.8: ref − 6 ≤ ovr ≤ ref + poolFillHi (위쪽을 막아야 만료 FA 로 커진 풀이 하위 티어 전력을 올리지 않는다)
+      const x = takeFromPool((p) => p.primary === need && p.age <= A.poolMaxAge && p.ovr <= ref + A.poolFillHi && p.ovr >= ref - A.poolBand);
       if (x) { add(sign(x, c.id, c.rng), 'SIGNED_FROM_POOL'); continue; }
       add(regenPlayer(c.rng, c.id, need, ref, input.season, n), 'REGENERATED');
     }
