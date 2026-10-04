@@ -1,12 +1,11 @@
 /** 선수 수명주기 순수 함수 (M3.4). 기준: docs/설계/선수_수명주기.md 3.5·4.4·6.4·7.6·8.4·11.7·16장 */
 import { describe, expect, it } from 'vitest';
 import { mulberry32 } from '../../src/engine';
-import type { AttrKey, Player, Position, Tier } from '../../src/types';
+import type { AttrKey, LifecycleEvent, Player, Position, Tier } from '../../src/types';
 import { OVR_WEIGHTS, TIER_REFERENCE_OVR, generatePlayer, generateSquad } from '../../src/domain/squad/generator';
 import {
   LIFECYCLE,
   type LifePlayer,
-  type LifecycleEvent,
   ageOneSeason,
   aiSquadMaintenance,
   cleanFreeAgents,

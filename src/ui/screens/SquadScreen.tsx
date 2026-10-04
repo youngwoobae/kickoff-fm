@@ -1,10 +1,12 @@
 /** Q01 선수 목록 · Q02 선수 상세(시트) (소유: B) */
 import { useMemo, useState } from 'react';
 import type { AttrDef, Player, PlayerId } from '../../types';
-import { Badge, Card, ConditionBar, Empty, ErrorNote, FitMark, MoneyField, Segmented, Sheet } from '../components/kit';
+import { Badge, Card, ConditionBar, DisciplineBadges, Empty, ErrorNote, FitMark, MoneyField, Segmented, Sheet } from '../components/kit';
 import { FIT_LABEL, MORALE_LABEL, MORALE_SHORT, POS_LABEL, POS_NAME, POS_ORDER, fitOf, formatKc, isAvailable } from '../format';
 import { useGame, useInlineAction, useIsOwner, useQuery } from '../service/ServiceContext';
 import { josa } from '../josa';
+import { TrainingCard } from './TrainingCard';
+import { YELLOW_LIMIT, yellowAccumOf, yellowCardsOf } from '../types23';
 
 type SortKey = 'pos' | 'ovr' | 'cond' | 'form';
 
@@ -32,6 +34,7 @@ export function SquadScreen() {
 
   return (
     <div className="screen">
+      <TrainingCard />
       <Card className="card-compact">
         <div className="row-between small">
           <span>{squad.length}명 · 평균 컨디션 {avgCond}</span>
@@ -68,7 +71,7 @@ export function SquadScreen() {
                   <span className="pr-sub">
                     {p.age}세 · 폼 {MORALE_SHORT[p.morale]} · {p.season.apps}경기 {p.season.goals}골
                     {p.availability.injuryDays > 0 && <Badge tone="bad">🩹 부상 {p.availability.injuryDays}일</Badge>}
-                    {p.availability.suspendedMatches > 0 && <Badge tone="bad">🟥 정지 {p.availability.suspendedMatches}경기</Badge>}
+                    <DisciplineBadges p={p} />
                   </span>
                 </span>
                 <span className="pr-cond">
@@ -127,6 +130,7 @@ function PlayerDetail({ p, attrs, onClose }: { p: Player; attrs: AttrDef[]; onCl
           {p.availability.suspendedMatches > 0 && `출장 정지 ${p.availability.suspendedMatches}경기`}
         </p>
       )}
+      <Discipline p={p} />
       <h3 className="h3">포지션 적합도</h3>
       <div className="fit-grid">
         {POS_ORDER.map((pos) => {
@@ -165,6 +169,22 @@ function PlayerDetail({ p, attrs, onClose }: { p: Player; attrs: AttrDef[]; onCl
       </p>
       <GrowthHistory p={p} />
     </div>
+  );
+}
+
+/** 경고 누적·시즌 경고 (2.3.0). 값이 없으면(구 서비스) 줄을 그리지 않는다 */
+function Discipline({ p }: { p: Player }) {
+  const accum = yellowAccumOf(p);
+  const total = yellowCardsOf(p);
+  if (total === undefined && accum === 0) return null;
+  return (
+    <p className="small">
+      <Badge tone={accum >= YELLOW_LIMIT - 1 ? 'warn' : 'neutral'}>
+        🟨 경고 누적 {accum}/{YELLOW_LIMIT}
+      </Badge>{' '}
+      {accum >= YELLOW_LIMIT - 1 ? '한 장 더 받으면 1경기 출장 정지예요.' : `${YELLOW_LIMIT}장이 쌓이면 1경기 출장 정지예요.`}
+      {total !== undefined && ` 이번 시즌 경고 ${total}장 · 퇴장 ${p.season.redCards}회.`}
+    </p>
   );
 }
 

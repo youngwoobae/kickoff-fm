@@ -22,6 +22,11 @@ export function baseSalary(ovr: number): Kc {
   return Math.round((S_REF * Math.pow(1.55, (ovr - 60) / TIER_GAP)) / 1000) * 1000;
 }
 
+/** 경제 설계 8장 (K14, M5.1) [PH]: 유스 연봉 = max(0.2M, 0.9 × S(OVR)), 1,000 KC 반올림 */
+export function youthSalary(ovr: number): Kc {
+  return Math.max(0.2 * M, Math.round((0.9 * baseSalary(ovr)) / 1000) * 1000);
+}
+
 /** 경제 설계 3.3 (K3): 새 게임 시작 잔액 = 배정금 × 이월 비율(20%), 모든 구단 */
 export function startingBalance(econ: TierEconomy): Kc {
   return Math.round(econ.seasonBudget * econ.carryRate);

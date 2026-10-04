@@ -67,7 +67,9 @@ import type {
   TransferListingFilter,
   TransferMarketState,
   TransferWindow,
+  TrainingFocus,
   UiLogKind,
+  YouthIntake,
 } from '../types';
 import {
   ENGINE_VERSION,
@@ -160,6 +162,9 @@ import {
   upsertRenewal,
   validateBid,
   type CapChargeInput,
+  LIFECYCLE,
+  decideYouthState,
+  trainingFocusOf,
 } from '../domain';
 import {
   CONTRACT_VERSION,
@@ -984,6 +989,38 @@ class LocalGameService implements GameService {
     mailContract(next, [r.event]);
     fillHumanSquads(next);
     this.commit(next);
+  }
+
+  // ── 훈련·유스 (2.3.0, M5.1) ────────────────────────────────────
+
+  setTrainingFocus(focus: TrainingFocus): GameSnapshot {
+    const s = this.require();
+    this.ownerOnly(s);
+    if (!(focus in LIFECYCLE.focus)) throw new GameError('INVALID_TACTIC', `알 수 없는 훈련 포커스: ${String(focus)}`);
+    const club = s.clubs[s.userClubId]!;
+    const current = trainingFocusOf(club);
+    const training = focus === current ? { focus: current } : { focus: current, next: focus };
+    const next = this.withLog({ ...s, clubs: { ...s.clubs, [club.id]: { ...club, training } } }, 'TRAINING_FOCUS_SET', { focus });
+    this.commit(next);
+    return next;
+  }
+
+  getYouthIntake(): YouthIntake | null {
+    const intake = this.require().youthIntake;
+    if (!intake) return null;
+    // potential 비노출 원칙: 숨김 값은 ovr 로 가린다
+    return { ...intake, candidates: intake.candidates.map((c) => ({ ...c, potential: c.ovr })) };
+  }
+
+  decideYouth(promoteIds: readonly PlayerId[]): GameSnapshot {
+    const s = this.require();
+    this.ownerOnly(s);
+    const next: GameState = { ...s, players: { ...s.players }, clubs: { ...s.clubs } };
+    const events = this.run(() => decideYouthState(next, promoteIds, false));
+    const promoted = events.flatMap((e) => (e.kind === 'YOUTH_PROMOTED' ? [e.playerId] : []));
+    const logged = this.withLog(next, 'YOUTH_DECIDED', { promoted });
+    this.commit(logged);
+    return logged;
   }
 
   // ── 받은 편지함 (2.2.0) ─────────────────────────────────────────

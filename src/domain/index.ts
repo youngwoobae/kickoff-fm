@@ -135,7 +135,7 @@ export {
   type ReleaseResult,
   type ReleaseExemption,
 } from './contract/contract';
-export { INBOX, lifecycleDraft, contractDraft, inboxId, pruneInbox, appendInbox, type InboxDraft, type InboxLifecycleEvent, type InboxContext } from './inbox/inbox';
+export { INBOX, lifecycleDraft, contractDraft, inboxId, pruneInbox, appendInbox, type InboxDraft, type InboxContext } from './inbox/inbox';
 export { TRANSFER, h as transferHash, round1k, fmtM, windowOf, windowAt, isSettleDay, daysAfterSettle, potentialEstimate, ageCoef, potentialCoef, contractCoef, valueOf, playerValue, budgetB, type ValueInput } from './transfer/value';
 export {
   listingId,
@@ -185,3 +185,8 @@ export {
   payAiRenewalBonuses,
   withPendingRenewal,
 } from './transfer/flow';
+// 2.3.0 (M5.1): 훈련 포커스·유스·징계
+export { LIFECYCLE, applyDiscipline, tierScoutRange, trainingFocusOf } from './squad/lifecycle';
+export { rollTrainingFocus } from './day/advanceDay';
+export { offerYouthIntake, decideYouthState, pickYouthFor, youthDeadline } from './career/youth';
+export { youthSalary } from './economy/economy';

@@ -1,13 +1,14 @@
 /** T01 라인업 편집: 탭-탭 교환, 피치/리스트 보기, 벤치 7 (소유: B) */
 import { useMemo, useState } from 'react';
 import type { FormationDef, MatchPlan, Player, PlayerId } from '../../types';
-import { Badge, Card, ConditionBar, Empty, FitMark, Segmented, Stars, Toggle } from '../components/kit';
+import { Badge, Card, ConditionBar, DisciplineBadges, Empty, FitMark, Segmented, Stars, Toggle } from '../components/kit';
 import { POS_LABEL, fitOf, isAvailable, pitchRows, roleFit } from '../format';
 import { PlanActions } from '../plan/PlanActions';
 import { getPrefs } from '../prefs';
 import { usePlanEditor } from '../plan/PlanEditor';
 import { useGame, useQuery } from '../service/ServiceContext';
 import { PlayerSheet } from './SquadScreen';
+import { YELLOW_LIMIT, yellowAccumOf } from '../types23';
 
 type Area = 'S' | 'B' | 'R';
 interface Pick {
@@ -102,6 +103,8 @@ export function LineupScreen() {
         <span className="legend small">◎주 ○숙련 △가능 ✕부적합 · ★역할 적합</span>
       </div>
 
+      <OutStartersWarning ids={plan.lineup.starters} byId={byId} />
+
       <div className="pick-bar" aria-live="polite">
         {pick ? (
           <>
@@ -148,7 +151,8 @@ export function LineupScreen() {
                     <span className="token-name">{p?.name ?? '—'}</span>
                     {stars(i, p) !== undefined && <Stars n={stars(i, p)!} />}
                     {p && <ConditionBar value={p.condition} compact />}
-                    {p && !isAvailable(p) && <span className="token-warn">🩹</span>}
+                    {p && !isAvailable(p) && <span className="token-warn">{p.availability.suspendedMatches > 0 ? '🟥 정지' : '🩹 부상'}</span>}
+                    {p && isAvailable(p) && yellowAccumOf(p) >= YELLOW_LIMIT - 1 && <span className="token-warn">🟨 {yellowAccumOf(p)}</span>}
                   </button>
                 );
               })}
@@ -168,6 +172,7 @@ export function LineupScreen() {
                   <span className="slot-role small muted">{roleLabel(i)}</span>
                   <span className="slot-name">
                     {p?.name ?? '—'} {p && fs && <FitMark fit={fitOf(p, fs.position)} />} {stars(i, p) !== undefined && <Stars n={stars(i, p)!} />}
+                    {p && p.availability.injuryDays > 0 && <Badge tone="bad">🩹 부상</Badge>} {p && <DisciplineBadges p={p} />}
                   </span>
                   {p && <ConditionBar value={p.condition} />}
                   <span className="slot-ovr">{p?.ovr}</span>
@@ -216,7 +221,20 @@ function TrayCard({ p, picked, onTap }: { p: Player | undefined; picked: boolean
         {POS_LABEL[p.primary]} {p.ovr}
       </span>
       <ConditionBar value={p.condition} compact />
-      {!isAvailable(p) && <Badge tone="bad">불가</Badge>}
+      {!isAvailable(p) && <Badge tone="bad">{p.availability.suspendedMatches > 0 ? `🟥 정지 ${p.availability.suspendedMatches}` : '🩹 부상'}</Badge>}
+      {isAvailable(p) && yellowAccumOf(p) >= YELLOW_LIMIT - 1 && <Badge tone="warn">🟨 {yellowAccumOf(p)}</Badge>}
     </button>
+  );
+}
+
+/** 선발에 출장 정지·부상 선수가 있으면 경고 (경기 전 자동 대체되지만 미리 바꾸는 편이 낫다) */
+function OutStartersWarning({ ids, byId }: { ids: PlayerId[]; byId: Map<PlayerId, Player> }) {
+  const out = ids.map((id) => byId.get(id)).filter((p): p is Player => !!p && !isAvailable(p));
+  if (!out.length) return null;
+  return (
+    <p className="warn-line" role="alert">
+      ⚠ 선발에 뛸 수 없는 선수가 있어요:{' '}
+      {out.map((p) => `${p.name}(${p.availability.suspendedMatches > 0 ? `🟥 출장 정지 ${p.availability.suspendedMatches}경기` : `🩹 부상 ${p.availability.injuryDays}일`})`).join(', ')}. 바꾸지 않으면 경기 전에 자동으로 다른 선수로 바뀌어요.
+    </p>
   );
 }

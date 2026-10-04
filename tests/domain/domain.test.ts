@@ -162,7 +162,7 @@ describe('condition (4.2 표 재현)', () => {
   });
   it('퇴장 → 다음 1경기 정지, 결장 경기에서 소화, 부상 일수는 매일 −1', () => {
     let p = applyMatchLine(playerWith(10), line(70, { redCard: true, injuredDays: 2 }), true);
-    expect(p.availability).toEqual({ injuryDays: 2, suspendedMatches: 1 });
+    expect(p.availability).toEqual({ injuryDays: 2, suspendedMatches: 1, yellowAccum: 0 });
     p = applyDailyRecovery(p);
     expect(p.availability.injuryDays).toBe(1);
     p = applyMatchLine(p, undefined, true);

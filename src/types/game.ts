@@ -9,7 +9,7 @@ import type { Finance, LedgerEntry } from './economy';
 import type { InboxMessage } from './inbox';
 import type { Club, Fixture, LeagueState, MatchSummary, SeasonOutcome, Tier } from './league';
 import type { PlanRecord, ResolvedPlan } from './plan';
-import type { Player } from './player';
+import type { Player, YouthIntake } from './player';
 import type { MatchReport } from './report';
 import type { TacticCap } from './tactics';
 import type { PendingRenewal, TransferMarketState } from './transfer';
@@ -73,7 +73,10 @@ export type ActionLogKind =
   | 'PROPOSAL_REJECTED'
   | 'PROPOSAL_EXPIRED'
   | 'DAY_ADVANCED'
-  | 'SEASON_STARTED';
+  | 'SEASON_STARTED'
+  /** 2.3.0 */
+  | 'TRAINING_FOCUS_SET'
+  | 'YOUTH_DECIDED';
 
 /** UI 가 logEvent() 로 직접 남길 수 있는 종류 (나머지는 services 가 자동 기록) */
 export type UiLogKind = 'SESSION_START' | 'SESSION_END' | 'REPORT_VIEWED' | 'REPLAY_VIEWED' | 'SCOUT_VIEWED';
@@ -144,6 +147,8 @@ export interface GameState {
   pendingRenewals?: PendingRenewal[];
   /** 2.2.1: 사용자 구단 강등 시즌 무위약 방출권 남은 장수. 없으면 0 */
   freeReleasesLeft?: number;
+  /** 2.3.0 (M5.1): 사람 구단 유스 후보 (새 시즌 Day 1 ~ Day 8 00:00). 없으면 결정할 후보 없음 */
+  youthIntake?: YouthIntake;
   actionLog: ActionLogEntry[];
 }
 

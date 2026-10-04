@@ -2,7 +2,7 @@
 import { createContext, useContext } from 'react';
 
 export type TabId = 'home' | 'squad' | 'tactics' | 'match' | 'club';
-export type SquadSub = 'list' | 'lineup';
+export type SquadSub = 'list' | 'lineup' | 'youth';
 export type TacticsSub = 'team' | 'plan';
 export type ClubSub = 'league' | 'career' | 'finance' | 'transfer' | 'coach' | 'dev';
 export type HomeView = 'today' | 'inbox';

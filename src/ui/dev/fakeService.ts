@@ -119,6 +119,16 @@ import {
   mulberry32,
 } from './fakeData';
 import { TIER_NAME, conditionalText, formatKc, nearestStyle } from '../format';
+import { YELLOW_LIMIT, trainingOf, type TrainingFocus, type YouthCandidate, type YouthIntake } from '../types23';
+
+// ── 2.3.0 (M5.1) 근사: 훈련 포커스·유스·경고 누적 ──
+const TIER_REF_OVR: Record<Tier, number> = { T1: 72, T2: 66, T3: 60, T4: 54, T5: 48 }; // domain TIER_REFERENCE_OVR 사본
+const WEEK_STARTS = [1, 8, 15, 22];
+const LIFE_YOUTH_DEADLINE = 7;
+const YOUTH_POS: Position[] = ['GK', 'GK', 'CB', 'CB', 'CB', 'CB', 'FB', 'FB', 'FB', 'FB', 'DM', 'DM', 'CM', 'CM', 'CM', 'AM', 'AM', 'W', 'W', 'ST', 'ST', 'ST'];
+const gradeOf = (v: number): Player['scoutRange'][0] => (v >= 80 ? 'S' : v >= 72 ? 'A' : v >= 65 ? 'B' : v >= 58 ? 'C' : v >= 50 ? 'D' : 'E');
+const gauss = (rng: () => number) => Math.sqrt(-2 * Math.log(1 - rng())) * Math.cos(2 * Math.PI * rng());
+
 
 const FAKE_SAVE_KEY = 'kickoff-fm/fake/v2';
 const SCHEMA = 2;
@@ -325,7 +335,7 @@ function genPlayer(rng: () => number, id: PlayerId, clubId: ClubId, pos: Positio
     contract: { seasonsLeft: 1 + Math.floor(rng() * 4), salary: 0 },
     availability: { injuryDays: 0, suspendedMatches: 0 },
     isTemporary: false,
-    season: { apps: 0, starts: 0, minutes: 0, goals: 0, shots: 0, keyPasses: 0, tackles: 0, redCards: 0 },
+    season: { apps: 0, starts: 0, minutes: 0, goals: 0, shots: 0, keyPasses: 0, tackles: 0, redCards: 0, yellowCards: 0 },
   };
 }
 
@@ -684,6 +694,19 @@ export class FakeGameService implements GameService {
       this.ledger(s, id, 'SEASON_BUDGET', ECON.budget);
       this.paySalary(s, id);
     }
+    // 데모: 경고 누적 4장·출장 정지 선수 한 명씩 (배지 확인용)
+    const demo = clubs[USER_CLUB]?.playerIds ?? [];
+    const warned = players[demo[5] ?? ''];
+    const banned = players[demo[7] ?? ''];
+    if (warned) {
+      warned.availability.yellowAccum = 4;
+      warned.season.yellowCards = 4;
+    }
+    if (banned) {
+      banned.availability.suspendedMatches = 1;
+      banned.season.yellowCards = 5;
+    }
+    this.genYouth(s);
     this.reports = {};
     this.replays = {};
     if (opts.slotId !== undefined) this.setSlot(opts.slotId);
@@ -1191,8 +1214,9 @@ export class FakeGameService implements GameService {
     for (const p of Object.values(s.players)) {
       p.age += 1;
       if (p.clubId) p.contract.seasonsLeft = Math.max(1, p.contract.seasonsLeft - 1);
-      p.season = { apps: 0, starts: 0, minutes: 0, goals: 0, shots: 0, keyPasses: 0, tackles: 0, redCards: 0 };
+      p.season = { apps: 0, starts: 0, minutes: 0, goals: 0, shots: 0, keyPasses: 0, tackles: 0, redCards: 0, yellowCards: 0 };
       p.condition = 100;
+      p.availability.yellowAccum = 0; // 경고 누적만 초기화, 남은 정지는 유지 (D24)
     }
     s.fixtures = genFixtures(s.time.season, userIds(s), mulberry32(s.gameSeed + s.time.season));
     s.plans = {};
@@ -1202,6 +1226,8 @@ export class FakeGameService implements GameService {
     }
     this.mkt(s).signings = 0;
     this.emergencyFill(s);
+    this.weekStart(s);
+    this.genYouth(s);
     this.log(s, 'SEASON_STARTED', { season: s.time.season });
     this.commit(s);
     return s;
@@ -1348,15 +1374,21 @@ export class FakeGameService implements GameService {
   }
 
   private daily(s: GameState, userLedger: LedgerEntry[]): void {
+    if (s.phase === 'MATCHDAY' && WEEK_STARTS.includes(s.time.day)) this.weekStart(s);
+    if (s.time.day === LIFE_YOUTH_DEADLINE + 1) this.youthDeadline(s);
+    const focus = trainingOf(s.clubs[s.userClubId]).focus;
     for (const p of Object.values(s.players)) {
-      p.condition = clamp(p.condition + 14 + p.attrs.stamina * 0.3, 0, 100);
+      const bonus = focus === 'RECOVERY' && p.clubId === s.userClubId ? 4 : 0;
+      p.condition = clamp(p.condition + 14 + p.attrs.stamina * 0.3 + bonus, 0, 100);
       if (p.availability.injuryDays > 0) p.availability.injuryDays -= 1;
     }
     for (const club of Object.values(s.clubs)) {
       if (isVirtual(club.id)) continue;
+      const tactical = club.id === s.userClubId && focus === 'TACTICAL';
       for (const k of ['A', 'B'] as const) {
         const used = club.lastUsedPlan?.startSlot === k;
-        if (!used) club.tactics[k].familiarity = clamp(club.tactics[k].familiarity - 2, 0, 100);
+        if (tactical) club.tactics[k].familiarity = clamp(club.tactics[k].familiarity + 3, 0, 100);
+        else if (!used) club.tactics[k].familiarity = clamp(club.tactics[k].familiarity - 2, 0, 100);
       }
       const e = this.paySalary(s, club.id);
       if (club.id === s.userClubId) userLedger.push(e);
@@ -1533,11 +1565,14 @@ export class FakeGameService implements GameService {
         p.season.apps++;
         p.season.minutes += mins;
       }
-      for (const id of rp.plan.lineup.bench) {
+      // 출장 정지 소화: 구단이 경기를 치르고 선수가 안 뛰면 −1
+      const played = new Set([...starters, ...subs.filter((x) => x.clubId === rp.plan.clubId).map((x) => x.in)]);
+      for (const id of s.clubs[rp.plan.clubId]?.playerIds ?? []) {
         const p = s.players[id];
-        if (p && p.availability.suspendedMatches > 0) p.availability.suspendedMatches--;
+        if (p && !played.has(id) && p.availability.suspendedMatches > 0) p.availability.suspendedMatches--;
       }
     }
+    for (const y of yellowCards) this.applyYellow(s, y.playerId);
     for (const g of goals) {
       const p = s.players[g.playerId];
       if (p) {
@@ -2233,6 +2268,110 @@ export class FakeGameService implements GameService {
     const value = fakeValue(p);
     return { value, minPrice: round1k(value * 0.7), maxPrice: round1k(value * 1.3) };
   }
+  // ── 2.3.0 훈련 포커스·유스·경고 누적 (fake 근사) ──
+  setTrainingFocus(focus: TrainingFocus): GameSnapshot {
+    const s = clone(this.req());
+    this.requireOwner(s);
+    const club = s.clubs[s.userClubId];
+    if (!club) throw new GameError('NOT_FOUND', '구단을 찾지 못했어요');
+    const cur = trainingOf(club).focus;
+    club.training = focus === cur ? { focus: cur } : { focus: cur, next: focus };
+    this.commit(s);
+    return s;
+  }
+  /** 주 시작(Day 1·8·15·22 00:00): 예약한 포커스 적용 */
+  private weekStart(s: GameState): void {
+    const club = s.clubs[s.userClubId];
+    if (club?.training?.next) club.training = { focus: club.training.next };
+  }
+  private applyYellow(s: GameState, id: PlayerId): void {
+    const p = s.players[id];
+    if (!p) return;
+    const av = p.availability;
+    const se = p.season;
+    se.yellowCards = (se.yellowCards ?? 0) + 1;
+    let accum = (av.yellowAccum ?? 0) + 1;
+    const mine = p.clubId === s.userClubId;
+    if (accum >= YELLOW_LIMIT) {
+      accum -= YELLOW_LIMIT;
+      p.availability.suspendedMatches += 1;
+      if (mine) this.inbox(s, 'SUSPENDED', `${p.name} 출장 정지`, `경고가 ${YELLOW_LIMIT}장 쌓여 다음 경기에 뛸 수 없어요. 선발을 확인해 주세요.`, { playerId: p.id });
+    } else if (accum === YELLOW_LIMIT - 1 && mine) {
+      this.inbox(s, 'DISCIPLINE_WARNING', `${p.name} 경고 누적 ${accum}장`, '한 장 더 받으면 1경기 출장 정지예요.', { playerId: p.id });
+    }
+    av.yellowAccum = accum;
+  }
+  /** Day 1: 사람 구단 유스 후보 3~5명 (수명주기 7.2 근사) */
+  private genYouth(s: GameState): void {
+    const rng = mulberry32(s.gameSeed + s.time.season * 104729);
+    const ref = TIER_REF_OVR[s.settings.tier];
+    const n = 3 + Math.floor(rng() * 3);
+    const candidates: YouthCandidate[] = Array.from({ length: n }, (_, i) => {
+      const pos = YOUTH_POS[Math.floor(rng() * YOUTH_POS.length)] ?? 'CM';
+      const age = 16 + Math.floor(rng() * 2);
+      let pot = ref - 10 + gauss(rng) * 8;
+      if (rng() < 0.05) pot += 18;
+      pot = clamp(Math.round(pot), 30, 92);
+      const gap = age === 16 ? 14 + rng() * 10 : 12 + rng() * 10;
+      const p = genPlayer(rng, `y${s.time.season}-${s.userClubId}-${i}`, s.userClubId, pos, clamp(pot - gap, 15, 90));
+      return {
+        ...p,
+        age,
+        potential: Math.max(pot, p.ovr),
+        scoutRange: [gradeOf(pot - 8), gradeOf(pot + 8)],
+        // U3 상대 척도: 티어 기준 OVR 을 T3 기준(60, C)으로 옮긴 등급
+        tierRange: [gradeOf(pot - 8 + 60 - ref), gradeOf(pot + 8 + 60 - ref)],
+        clubId: null,
+        contract: { seasonsLeft: 3, salary: 300_000 },
+        academyClubId: s.userClubId,
+      };
+    });
+    s.youthIntake = { season: s.time.season, clubId: s.userClubId, tier: s.settings.tier, candidates, deadlineDay: LIFE_YOUTH_DEADLINE };
+    this.inbox(s, 'YOUTH_INTAKE', `유스 후보 ${n}명이 도착했어요`, `Day ${LIFE_YOUTH_DEADLINE}까지 최대 2명을 1군으로 올릴 수 있어요. 정하지 않으면 유망주만 최대 1명 자동으로 올려요.`);
+  }
+  private promoteYouth(s: GameState, c: YouthCandidate): void {
+    const { tierRange: _t, ...p } = clone(c);
+    p.clubId = s.userClubId;
+    s.players[p.id] = p;
+    s.clubs[s.userClubId]?.playerIds.push(p.id);
+  }
+  /** Day 8 00:00: 미결정이면 유망주(pot >= ref + 4)만 최대 1명 자동 승격, 후보 삭제 */
+  private youthDeadline(s: GameState): void {
+    const it = s.youthIntake;
+    if (!it) return;
+    if (!it.decided) {
+      const ref = TIER_REF_OVR[s.settings.tier];
+      const best = [...it.candidates].sort((a, b) => b.potential - a.potential)[0];
+      const ok = !!best && best.potential >= ref + 4 && this.squadOf(s, s.userClubId).length < 25;
+      if (ok && best) this.promoteYouth(s, best);
+      this.inbox(s, 'YOUTH_AUTO_DECIDED', '유스 결정 마감', ok && best ? `마감까지 정하지 않아 유망주 ${best.name} 선수를 자동으로 올렸어요.` : '마감까지 정하지 않았고 올릴 만한 유망주가 없어 후보가 모두 떠났어요.', ok && best ? { playerId: best.id } : {});
+    }
+    delete s.youthIntake;
+  }
+  getYouthIntake(): YouthIntake | null {
+    const it = this.req().youthIntake;
+    if (!it) return null;
+    // 실제 서비스처럼 potential 은 ovr 로 가려서 내보낸다
+    return { ...it, candidates: it.candidates.map((c) => ({ ...c, potential: c.ovr })) };
+  }
+  decideYouth(promoteIds: readonly PlayerId[]): GameSnapshot {
+    const s = clone(this.req());
+    this.requireOwner(s);
+    const it = s.youthIntake;
+    if (!it || it.decided) throw new GameError('INVALID_PHASE', '지금은 유스를 결정할 수 없어요');
+    const ids = [...new Set(promoteIds)];
+    if (ids.length > 2) throw new GameError('SQUAD_FULL', '유스는 최대 2명까지 올릴 수 있어요');
+    const picks = ids.map((id) => it.candidates.find((c) => c.id === id));
+    if (picks.some((c) => !c)) throw new GameError('NOT_FOUND', '후보를 찾지 못했어요');
+    if (this.squadOf(s, s.userClubId).length + ids.length > 25) throw new GameError('SQUAD_FULL', '선수단이 25명을 넘어요. 먼저 선수를 정리해 주세요.');
+    for (const c of picks) if (c) this.promoteYouth(s, c);
+    // 한 번만. 결과 표시용으로 Day 8 까지 남긴다
+    it.decided = true;
+    it.promotedIds = ids;
+    this.commit(s);
+    return s;
+  }
+
   private inboxCache: { state: GameState; unread: boolean; list: InboxMessage[] } | null = null;
   getInbox(filter: { unreadOnly?: boolean } = {}): InboxMessage[] {
     const s = this.req();

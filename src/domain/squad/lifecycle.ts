@@ -3,28 +3,13 @@
  * 성장·노화·은퇴·FA 정리·유스·AI 선수단 관리. 게임 상태 연결은 day/advanceDay.ts(주간·Day 20)와 career/seasonTransition.ts(시즌 경계, M3.3).
  * 모든 함수는 입력을 바꾸지 않고 새 객체를 돌려준다. 무작위는 주입된 Rng 만.
  */
-import type { AttrKey, ClubId, Player, PlayerDev, PlayerId, Position, ScoutGrade, SeasonNo, Tier } from '../../types';
+import type { AttrKey, ClubId, LifecycleEvent, Player, PlayerDev, PlayerId, PlayerMatchLine, Position, ScoutGrade, SeasonNo, Tier, TrainingFocus, YouthCandidate } from '../../types';
 import { clamp, hashString, mulberry32, type Rng } from '../../engine';
 import { OVR_WEIGHTS, TIER_REFERENCE_OVR, generatePlayer, scoutGrade } from './generator';
-
-// ── 로컬 타입 (14장 초안. M5.1 계약 2.3.0에서 src/types 로 옮긴다) ──
-
-export type TrainingFocus = 'BALANCED' | 'ATTACK' | 'DEFENSE' | 'PHYSICAL' | 'TACTICAL' | 'RECOVERY';
 
 export type { PlayerDev } from '../../types';
 /** 수명주기 필드(dev·retiring·faSince·academyClubId)는 2.1.1 에서 Player 에 들어갔다 */
 export type LifePlayer = Player;
-
-export type LifecycleEvent =
-  | { kind: 'GREW'; playerId: PlayerId; attrs: Partial<Record<AttrKey, number>> }
-  | { kind: 'DECLINED'; playerId: PlayerId; attrs: Partial<Record<AttrKey, number>> }
-  | { kind: 'FA_RETIRED'; playerId: PlayerId }
-  | { kind: 'YOUTH_PROMOTED'; playerId: PlayerId; clubId: ClubId; auto: boolean }
-  | { kind: 'RELEASED'; playerId: PlayerId; clubId: ClubId }
-  | { kind: 'SOLD_UP'; playerId: PlayerId; clubId: ClubId }
-  | { kind: 'SOLD_ABROAD'; playerId: PlayerId; clubId: ClubId }
-  | { kind: 'SIGNED_FROM_POOL'; playerId: PlayerId; clubId: ClubId }
-  | { kind: 'REGENERATED'; playerId: PlayerId; clubId: ClubId };
 
 // ── 상수 [PH] (17장) ──
 
@@ -135,6 +120,11 @@ export function scoutRangeOf(p: Pick<Player, 'potential' | 'age'>): [ScoutGrade,
   return [scoutGrade(p.potential - h), scoutGrade(p.potential + h)];
 }
 
+/** U3: 티어 기준 상대 등급. 절대 척도(T3 기준 60)를 티어 기준 OVR 만큼 옮긴다 — 그 티어 주전급 ≈ C, 유망주(ref+4) ≈ C~B */
+export function tierScoutRange(p: Pick<Player, 'potential' | 'age'>, tier: Tier): [ScoutGrade, ScoutGrade] {
+  return scoutRangeOf({ age: p.age, potential: p.potential + TIER_REFERENCE_OVR.T3 - TIER_REFERENCE_OVR[tier] });
+}
+
 function devOf(p: LifePlayer): PlayerDev {
   return p.dev ?? { bank: 0, minutesMark: p.season.minutes };
 }
@@ -176,6 +166,11 @@ export function spendBank(p: LifePlayer, rng: Rng, attrMult: Partial<Record<Attr
   const next = { ...p, attrs, dev: { ...devOf(p), bank } };
   const ovr = clamp(Math.round(rawOvr(next)), 1, 100);
   return { ...next, ovr, scoutRange: scoutRangeOf(next) };
+}
+
+/** 구단 훈련 포커스 (없으면 BALANCED) */
+export function trainingFocusOf(club: { training?: { focus: TrainingFocus } }): TrainingFocus {
+  return club.training?.focus ?? 'BALANCED';
 }
 
 // ── 시점별 진입점 ──
@@ -232,9 +227,9 @@ export function rollRetirement(p: LifePlayer, rng: Rng, tierRef: number): boolea
 /**
  * 시즌 경계 ③ FA 풀 정리 (6.3). 나이 +1 뒤에 호출. faSince 없는 선수는 이번 시즌에 풀린 것으로 보고 채운다.
  */
-export function cleanFreeAgents(pool: readonly LifePlayer[], endingSeason: SeasonNo): { keep: LifePlayer[]; events: LifecycleEvent[] } {
+export function cleanFreeAgents(pool: readonly LifePlayer[], endingSeason: SeasonNo): { keep: LifePlayer[]; events: Extract<LifecycleEvent, { kind: 'FA_RETIRED' }>[] } {
   const keep: LifePlayer[] = [];
-  const events: LifecycleEvent[] = [];
+  const events: Extract<LifecycleEvent, { kind: 'FA_RETIRED' }>[] = [];
   for (const p of pool) {
     const since = p.faSince ?? endingSeason;
     const out =
@@ -248,7 +243,7 @@ export function cleanFreeAgents(pool: readonly LifePlayer[], endingSeason: Seaso
 const POSITIONS = Object.keys(LIFECYCLE.squadTemplate) as Position[];
 
 /** 유스 후보 3~5명 (7.2). clubId 는 null(아직 미승격), academyClubId 로 출신 표시. ID y{season}-{clubId}-{n} */
-export function generateYouthCandidates(rng: Rng, clubId: ClubId, tier: Tier, season: SeasonNo): LifePlayer[] {
+export function generateYouthCandidates(rng: Rng, clubId: ClubId, tier: Tier, season: SeasonNo): YouthCandidate[] {
   const Y = LIFECYCLE.youth;
   const ref = TIER_REFERENCE_OVR[tier];
   const n = Y.minCands + Math.floor(rng() * (Y.maxCands - Y.minCands + 1));
@@ -271,6 +266,7 @@ export function generateYouthCandidates(rng: Rng, clubId: ClubId, tier: Tier, se
       contract: { ...base.contract, seasonsLeft: Y.contractSeasons },
       dev: { bank: 0, minutesMark: 0 },
       academyClubId: clubId,
+      tierRange: tierScoutRange({ potential, age }, tier),
     };
   });
 }
@@ -386,7 +382,7 @@ export function aiSquadMaintenance(input: AiSquadInput): AiSquadResult {
     // 4. 유스 (생성과 결정을 한 번에, 방출 후보는 세계에 남지 않음)
     const cands = generateYouthCandidates(lifeRng(input.gameSeed, input.season, 'youth', c.id), c.id, c.tier, input.season);
     for (const id of pickYouthAi(cands, size(), ref, true)) {
-      const y = cands.find((p) => p.id === id)!;
+      const { tierRange: _t, ...y } = cands.find((p) => p.id === id)!;
       c.players.push({ ...y, clubId: c.id });
       events.push({ kind: 'YOUTH_PROMOTED', playerId: id, clubId: c.id, auto: true });
     }
@@ -429,4 +425,28 @@ function regenPlayer(rng: Rng, clubId: ClubId, pos: Position, ref: number, seaso
     contract: { ...base.contract, seasonsLeft: randInt(rng, A.contractSeasons[0], A.contractSeasons[1]) },
     dev: { bank: 0, minutesMark: 0 },
   };
+}
+
+/**
+ * 경고 누적 징계 (10.1, D1~D4). 정지는 가산식: 퇴장 +1, 누적 5장 +1(누적 −5). 퇴장 경기의 경고는 누적에 넣지 않는다(표시 통계는 센다).
+ * applyMatchLine 이 호출한다. 사건: 누적 4장 도달 YELLOW_WARNING, 누적 정지 SUSPENDED_ACCUM.
+ */
+export function applyDiscipline(p: Player, line: Pick<PlayerMatchLine, 'redCard' | 'yellowCards'>): { player: Player; events: LifecycleEvent[] } {
+  const yc = line.yellowCards ?? 0;
+  const before = p.availability.yellowAccum ?? 0;
+  let accum = before + (line.redCard ? 0 : yc);
+  let ban = 0;
+  while (accum >= LIFECYCLE.yellowLimit) {
+    ban++;
+    accum -= LIFECYCLE.yellowLimit;
+  }
+  const events: LifecycleEvent[] = [];
+  if (ban) events.push({ kind: 'SUSPENDED_ACCUM', playerId: p.id });
+  else if (accum === LIFECYCLE.yellowLimit - 1 && before !== accum) events.push({ kind: 'YELLOW_WARNING', playerId: p.id });
+  const player: Player = {
+    ...p,
+    availability: { ...p.availability, suspendedMatches: p.availability.suspendedMatches + (line.redCard ? 1 : 0) + ban, yellowAccum: accum },
+    season: { ...p.season, yellowCards: (p.season.yellowCards ?? 0) + yc },
+  };
+  return { player, events };
 }

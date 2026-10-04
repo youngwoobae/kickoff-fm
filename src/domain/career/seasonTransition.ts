@@ -2,36 +2,35 @@
  * 시즌 경계 (M3.3, 기획서 6.5 순서) 와 세이브 스키마 2 → 3 피라미드 변환. 소유: A.
  * startNewSeasonState: SEASON_OVER → 새 시즌 Day 1.
  *  ① 판정 보관(movements 채움) ② 선수 시즌 기록(history) ③ 승강 적용(leagues·settings.tier)
- *  ④ 수명주기 경계(설계 15.1: 은퇴 실행 → 나이 +1·노화 → FA 정리 → AI 선수단 관리, 다음 시즌 티어 기준) + 사람 구단 유스(AI 규칙 자동, UI 는 M5)
+ *  ④ 수명주기 경계(설계 15.1: 은퇴 실행 → 나이 +1·노화 → FA 정리 → AI 선수단 관리, 다음 시즌 티어 기준). 사람 구단 유스는 새 시즌 Day 1 후보(youthIntake, M5.1)
  *  ②' 계약 −1·만료(M4.4 contractBoundary) ⑤ 컨디션·시즌 스탯 초기화 ⑥ 리포트 보관 정리(D28: 현재 + 직전 시즌) ⑦ 일정·재정(Day 1 배정금·연봉, K4 승격 보너스·연봉 전용 계정)
  * 멱등(U6): boundarySeason ≥ 끝난 시즌이면 ①~④·K4 를 건너뛴다.
  */
 import type { ClubMovement, Fixture, GameState, LeagueId, Player, StandingRow, Tier } from '../../types';
 import { hashString, mulberry32 } from '../../engine';
-import { baseSalary, parachuteOf, promotionBonus } from '../economy/economy';
+import { baseSalary, parachuteOf, promotionBonus, youthSalary } from '../economy/economy';
 import { DomainError } from '../errors';
 import { parseMatchId } from '../league/schedule';
 import { applyMovements, clubTierMap, leagueIdOf, leagueTable, leaguesOf, seasonMovements, userLeagueOf } from '../league/pyramid';
 import { quickSimScore, teamStrength } from '../league/quickSim';
-import { TIER_REFERENCE_OVR } from '../squad/generator';
-import { ageOneSeason, aiSquadMaintenance, cleanFreeAgents, generateYouthCandidates, lifeRng, pickYouthAi, type LifecycleEvent } from '../squad/lifecycle';
+import { ageOneSeason, aiSquadMaintenance, cleanFreeAgents, lifeRng } from '../squad/lifecycle';
 import { CONTRACT, type ContractEvent } from '../contract/contract';
-import { aiReleasePenalties, boundaryContracts, fillHumanSquads, mailContract, mailLifecycle, pruneMarket } from '../transfer/flow';
-import { clubPlayers, createInitialState, dayOneProcessing, emptyFinance, post, seasonFixtures } from '../day/advanceDay';
+import { aiReleasePenalties, boundaryContracts, fillHumanSquads, mailContract, pruneMarket } from '../transfer/flow';
+import { clubPlayers, createInitialState, dayOneProcessing, emptyFinance, post, rollTrainingFocus, seasonFixtures } from '../day/advanceDay';
+import { offerYouthIntake } from './youth';
 
 /** 스키마 2 단일 리그 세이브가 들어갈 티어 (로드맵 M3.3) */
 export const LEGACY_LEAGUE_TIER: Tier = 'T3';
 
 const SEASON_RESET: Player['season'] = { apps: 0, starts: 0, minutes: 0, goals: 0, shots: 0, keyPasses: 0, tackles: 0, redCards: 0 };
 
-/** 생성 선수(연봉 0)는 기준 연봉 S(OVR) (K1) */
+/** 생성 선수(연봉 0)는 기준 연봉 S(OVR) (K1), 유스는 유스 연봉 (K14) */
 function withSalary(p: Player): Player {
-  return p.contract.salary > 0 ? p : { ...p, contract: { ...p.contract, salary: baseSalary(p.ovr) } };
+  return p.contract.salary > 0 ? p : { ...p, contract: { ...p.contract, salary: p.academyClubId ? youthSalary(p.ovr) : baseSalary(p.ovr) } };
 }
 
 interface BoundaryOut {
   contractEvents: ContractEvent[];
-  lifeEvents: LifecycleEvent[];
   penalties: { clubId: string; amount: number; memo: string }[];
 }
 
@@ -69,19 +68,8 @@ function lifecycleBoundary(state: GameState, ending: number, relegated: Readonly
     for (const p of c.players) players[p.id] = withSalary(p);
     state.clubs[c.id] = { ...state.clubs[c.id]!, playerIds: c.players.map((p) => p.id) };
   }
-  const lifeEvents: LifecycleEvent[] = [];
-  // 사람 구단 유스: 유스 선택 UI 는 M5 — 지금은 AI 규칙(22명까지 채움, 최대 2명)으로 자동
-  for (const c of Object.values(state.clubs).filter((x) => x.isHuman).sort((a, b) => a.id.localeCompare(b.id))) {
-    const tier = tiers.get(c.id) ?? state.settings.tier;
-    const cands = generateYouthCandidates(lifeRng(state.gameSeed, season, 'youth', c.id), c.id, tier, season);
-    const size = clubPlayers(state, c.id).filter((p) => !p.isTemporary).length;
-    const picked = pickYouthAi(cands, size, TIER_REFERENCE_OVR[tier], true);
-    for (const y of cands.filter((p) => picked.includes(p.id))) players[y.id] = withSalary({ ...y, clubId: c.id });
-    state.clubs[c.id] = { ...c, playerIds: [...c.playerIds, ...picked] };
-    lifeEvents.push(...picked.map((id) => ({ kind: 'YOUTH_PROMOTED' as const, playerId: id, clubId: c.id, auto: true })));
-  }
   pruneMarket(state);
-  return { contractEvents, lifeEvents, penalties };
+  return { contractEvents, penalties };
 }
 
 /** SEASON_OVER → 새 시즌 Day 1 */
@@ -121,9 +109,9 @@ export function startNewSeasonState(input: GameState, nowIso: string): GameState
     else delete state.freeReleasesLeft;
   } else if (outcome) state.seasonHistory.push(outcome);
 
-  // ⑤ 컨디션·사기·부상·시즌 스탯 초기화 (계약 −1·만료는 ②' contractBoundary, M4.4)
+  // ⑤ 컨디션·사기·부상·시즌 스탯·경고 누적 초기화 (퇴장·누적 정지 경기는 이어진다, 수명주기 10.1 D4. 계약 −1·만료는 ②' contractBoundary, M4.4)
   for (const p of Object.values(state.players)) {
-    state.players[p.id] = { ...p, condition: 100, morale: 0, availability: { ...p.availability, injuryDays: 0 }, season: { ...SEASON_RESET } };
+    state.players[p.id] = { ...p, condition: 100, morale: 0, availability: { ...p.availability, injuryDays: 0, yellowAccum: 0 }, season: { ...SEASON_RESET } };
   }
   // ⑥ 리포트 보관 (D28): 상세 기록은 끝난 시즌 것만 남기고(= 새 시즌에서 직전 시즌), 그 전은 버린다. 요약은 판정표(seasonHistory)로 충분
   state.records = Object.fromEntries(Object.entries(state.records).filter(([id]) => parseMatchId(id)?.season === ending));
@@ -137,6 +125,8 @@ export function startNewSeasonState(input: GameState, nowIso: string): GameState
   for (const cid of Object.keys(state.clubs).sort()) state.finances[cid] = { ...(state.finances[cid] ?? emptyFinance(cid)), ledger: [] };
   state.time = { season, day: 1 };
   state.phase = 'MATCHDAY';
+  rollTrainingFocus(state); // 8.3: 주 시작 Day 1
+  delete state.youthIntake;
   // 긴급 FA 는 만료·은퇴가 끝난 뒤 새 시즌 Day 1 인원으로 판정한다(편지도 새 시즌 날짜, M4.8)
   if (fresh) fillHumanSquads(state);
   // K4: 강등 연봉 전용 계정은 Day 1 연봉부터 쓰이므로 배정금 처리 전에 연다
@@ -155,7 +145,8 @@ export function startNewSeasonState(input: GameState, nowIso: string): GameState
   if (boundary) {
     for (const x of boundary.penalties) post(state, x.clubId, { kind: 'RELEASE_PENALTY', amount: x.amount, memo: x.memo });
     mailContract(state, boundary.contractEvents);
-    mailLifecycle(state, boundary.lifeEvents);
+    // 사람 구단 유스 후보 (7.1, M5.1): Day 1 생성 → Day 7 까지 decideYouth, Day 8 자동 처리. 긴급 FA 뒤라 결정 시 인원은 그 뒤 기준
+    offerYouthIntake(state);
   }
   return state;
 }

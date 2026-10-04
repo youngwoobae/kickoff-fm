@@ -4,13 +4,14 @@
  * 컨테이너(players·clubs·finances)는 호출자가 이미 복사한 것이고, 그 안의 값과 transferMarket·inbox·pendingRenewals·signingsThisSeason
  * 은 항상 새 값으로 교체한다(제자리 수정 금지, 6.3).
  */
-import type { ClubId, GameState, Kc, LedgerEntry, PendingRenewal, Player, PlayerId, Tier, TransferListing, TransferMarketState, WindowKind } from '../../types';
+import type { ClubId, GameState, Kc, LedgerEntry, LifecycleEvent, PendingRenewal, Player, PlayerId, Tier, TransferListing, TransferMarketState, WindowKind } from '../../types';
 import { TIER_ECONOMY, SEASON_DAYS, promotionBonus } from '../economy/economy';
 import { clubTierMap } from '../league/pyramid';
 import { TIER_REFERENCE_OVR } from '../squad/generator';
 import { CONTRACT, aiRenewals, capLimit, contractBoundary, emergencyFaSign, releaseQuote, renewalBonus, type ContractEvent } from '../contract/contract';
-import { appendInbox, contractDraft, lifecycleDraft, type InboxContext, type InboxDraft, type InboxLifecycleEvent } from '../inbox/inbox';
+import { appendInbox, contractDraft, lifecycleDraft, type InboxContext, type InboxDraft } from '../inbox/inbox';
 import { clubPlayers, post } from '../day/advanceDay';
+import { decideYouthState, pickYouthFor } from '../career/youth';
 import { aiAggr, aiBids, aiSellListings, aiTransferBudget } from './ai';
 import { faListing, forcedSales, generateNpcListings, negativeBalanceStatus, settleWindow, upsertBid, type MarketClub, type TransferMoney } from './market';
 import { TRANSFER, budgetB, fmtM, isSettleDay, windowOf } from './value';
@@ -27,7 +28,7 @@ export function mail(state: GameState, drafts: readonly (InboxDraft | null)[]): 
   state.inbox = appendInbox(state.inbox ?? [], drafts, state.time.season, state.time.day);
 }
 
-export function mailLifecycle(state: GameState, events: readonly InboxLifecycleEvent[]): void {
+export function mailLifecycle(state: GameState, events: readonly LifecycleEvent[]): void {
   const ctx = inboxContext(state);
   mail(state, events.map((e) => lifecycleDraft(e, ctx)));
 }
@@ -506,6 +507,12 @@ export function transferDaily(state: GameState, sink: LedgerEntry[], notices: st
  * 새 상태를 돌려준다(입력 불변).
  */
 export function autoManageDay(input: GameState, clubId: ClubId, aggr = 0.75): GameState {
+  if (input.youthIntake?.clubId === clubId && !input.youthIntake.decided) {
+    // 유스(M5.1): 자동 운영은 AI 와 같은 규칙(22명까지 채움, 최대 2명) — 경계 자동 처리 시절과 같은 결과
+    const s: GameState = { ...input, players: { ...input.players }, clubs: { ...input.clubs } };
+    decideYouthState(s, pickYouthFor(s, true), false);
+    return autoManageDay(s, clubId, aggr);
+  }
   const d = input.time.day;
   const W = TRANSFER.window;
   if (d !== CONTRACT.renewalOpenDay && d !== W.MID.openDay && d !== W.MID.settleDay - 1 && d !== SEASON_DAYS - 1 && d !== SEASON_DAYS) return input;

@@ -74,7 +74,12 @@ export interface Club {
   defaultPlan?: MatchPlan;
   /** 직전 경기에 실제 사용된 플랜 (기본 플랜 미지정 시 대체) */
   lastUsedPlan?: MatchPlan;
+  /** 2.3.0 (M5.1, 수명주기 8장): 훈련 포커스. 없으면 { focus: 'BALANCED' }. next 는 다음 주 시작(Day 1·8·15·22)에 focus 로 옮겨진다 */
+  training?: { focus: TrainingFocus; next?: TrainingFocus };
 }
+
+/** 2.3.0: 훈련 포커스. 균형·공격·수비·체력은 성장 총량 같고 자라는 능력치만 다름, 전술 숙련(성장 ×0.8, 숙련 +3/일)·회복(성장 ×0.7, 회복 +4/일) */
+export type TrainingFocus = 'BALANCED' | 'ATTACK' | 'DEFENSE' | 'PHYSICAL' | 'TACTICAL' | 'RECOVERY';
 
 export interface Fixture {
   id: MatchId;

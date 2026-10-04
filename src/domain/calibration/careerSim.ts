@@ -11,7 +11,7 @@ import { TIERS, leagueTable, leaguesOf } from '../league/pyramid';
 import { TIER_ECONOMY, baseSalary, startingBalance } from '../economy/economy';
 import { capUsage } from '../contract/contract';
 import { TIER_REFERENCE_OVR } from '../squad/generator';
-import { LIFECYCLE, generateYouthCandidates, lifeRng, squadStrength } from '../squad/lifecycle';
+import { LIFECYCLE, squadStrength } from '../squad/lifecycle';
 
 export interface CareerSimOptions {
   seeds: number;
@@ -137,10 +137,11 @@ export function runCareerSeed(seed: number, seasons: number, startTier: Tier, on
     for (let season = 1; season <= seasons; season++) {
       if (season > 1) {
         s = startNewSeasonState(s, 'now');
-        const tier = s.settings.tier;
-        const cands = generateYouthCandidates(lifeRng(s.gameSeed, season, 'youth', HUMAN), HUMAN, tier, season);
+        const tier = s.youthIntake?.tier ?? s.settings.tier;
         run.youthProspect[1]++;
-        if (cands.some((p) => p.potential >= TIER_REFERENCE_OVR[tier] + LIFECYCLE.youth.prospectOver)) run.youthProspect[0]++;
+        if (s.youthIntake?.candidates.some((p) => p.potential >= TIER_REFERENCE_OVR[tier] + LIFECYCLE.youth.prospectOver)) run.youthProspect[0]++;
+        s = autoManageDay(s, HUMAN); // Day 1 유스 결정(M5.1: 자동 운영 = AI 규칙). 시즌 시작 측정 전
+
       }
       run.starts.push(measureStart(s));
       onSeason?.(season);

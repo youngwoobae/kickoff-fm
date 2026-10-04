@@ -3,27 +3,14 @@
  * 사람 구단 것만 넣는다: clubId 가 있는 사건은 여기서 거르고, clubId 없는 사건(경고·정지)은 호출자가 사람 구단 선수만 넘긴다.
  * 이적 결과(BID_WON 등) 문구는 M4.3 이 같은 draft 형식으로 만들어 appendInbox 로 넣는다.
  */
-import type { ClubId, Day, InboxKind, InboxMessage, Kc, PlayerId, SeasonNo } from '../../types';
+import type { ClubId, Day, InboxKind, InboxMessage, Kc, LifecycleEvent, PlayerId, SeasonNo } from '../../types';
 import { SEASON_DAYS } from '../economy/economy';
-import type { LifecycleEvent } from '../squad/lifecycle';
 import type { ContractEvent } from '../contract/contract';
 
 /** D27: 3시즌(84일) 지나면 삭제. 개수 상한 [PH] */
 export const INBOX = { keepDays: 3 * SEASON_DAYS, maxMessages: 300 } as const;
 
 export type InboxDraft = Omit<InboxMessage, 'id' | 'season' | 'day' | 'read'>;
-
-/**
- * 수명주기 설계 14.2 의 사건 중 코드(squad/lifecycle.ts)에 아직 없는 것. M4.4 가 만들어 넘긴다
- * (RETIRE_ANNOUNCED = Day 20 retiring 표시된 사람 구단 선수, YOUTH_OFFERED = Day 1 유스 후보 생성 등).
- */
-export type InboxLifecycleEvent =
-  | LifecycleEvent
-  | { kind: 'RETIRE_ANNOUNCED'; playerId: PlayerId; clubId: ClubId }
-  | { kind: 'RETIRED'; playerId: PlayerId; clubId: ClubId | null }
-  | { kind: 'YOUTH_OFFERED'; clubId: ClubId; count: number }
-  | { kind: 'YELLOW_WARNING'; playerId: PlayerId }
-  | { kind: 'SUSPENDED_ACCUM'; playerId: PlayerId };
 
 export interface InboxContext {
   userClubId: ClubId;
@@ -34,7 +21,7 @@ export interface InboxContext {
 const fmtM = (kc: Kc) => `${(kc / 1_000_000).toFixed(2)}M`;
 
 /** 수명주기 사건 → 편지 초안. 편지 대상이 아니면 null (성장·노화·AI 구단 사건 등) */
-export function lifecycleDraft(e: InboxLifecycleEvent, ctx: InboxContext): InboxDraft | null {
+export function lifecycleDraft(e: LifecycleEvent, ctx: InboxContext): InboxDraft | null {
   if ('clubId' in e && e.clubId !== ctx.userClubId) return null;
   const name = 'playerId' in e ? (ctx.nameOf(e.playerId) ?? e.playerId) : '';
   const who = 'playerId' in e ? { playerId: e.playerId } : {};
@@ -45,6 +32,8 @@ export function lifecycleDraft(e: InboxLifecycleEvent, ctx: InboxContext): Inbox
       return { kind: 'YOUTH_INTAKE', title: '유스 후보 도착', body: `유스 후보 ${e.count}명이 올라왔어요. Day 7까지 승격할 선수를 골라 주세요.`, clubId: e.clubId };
     case 'YOUTH_PROMOTED':
       return e.auto ? { kind: 'YOUTH_AUTO_DECIDED', title: '유스 승격 자동 결정', body: `기한이 지나 ${name} 선수가 자동으로 1군에 올라왔어요.`, ...who, clubId: e.clubId } : null;
+    case 'YOUTH_AUTO_NONE':
+      return { kind: 'YOUTH_AUTO_DECIDED', title: '유스 후보 자동 정리', body: `기한이 지나 유스 후보 ${e.count}명을 모두 돌려보냈어요. 눈에 띄는 유망주가 없었어요.`, clubId: e.clubId };
     case 'YELLOW_WARNING':
       return { kind: 'DISCIPLINE_WARNING', title: `${name} 경고 누적`, body: `${name} 선수가 경고 4장째예요. 한 장 더 받으면 출장 정지예요.`, ...who };
     case 'SUSPENDED_ACCUM':

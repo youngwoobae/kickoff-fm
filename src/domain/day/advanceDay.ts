@@ -16,6 +16,7 @@ import type {
   LeagueState,
   GameTimestamp,
   LedgerEntry,
+  LifecycleEvent,
   MatchResult,
   MatchSummary,
   Membership,
@@ -57,7 +58,8 @@ import { resolvePlan, stripOpponentOrders } from '../plan/resolvePlan';
 import { buildReport, computeLeagueAverages } from '../report/buildReport';
 import { applyDailyRecovery, applyMatchLine, applyMoraleResult } from '../squad/condition';
 import { TIER_REFERENCE_OVR, botName, createBotClub, gauss, generateSquad } from '../squad/generator';
-import { LIFECYCLE, lifeRng, rollRetirement, weeklyGrowth } from '../squad/lifecycle';
+import { LIFECYCLE, lifeRng, rollRetirement, trainingFocusOf, weeklyGrowth } from '../squad/lifecycle';
+import { youthDeadline } from '../career/youth';
 import { mailLifecycle, transferDaily } from '../transfer/flow';
 
 /**
@@ -333,35 +335,46 @@ export function matchSeed(state: Pick<GameState, 'gameSeed'>, matchId: string, e
 function applyResultToClub(state: GameState, clubId: ClubId, result: MatchResult, gf: number, ga: number): void {
   const letter = gf > ga ? 'W' : gf === ga ? 'D' : 'L';
   const lines = new Map(result.players.filter((l) => l.clubId === clubId).map((l) => [l.playerId, l]));
+  const events: LifecycleEvent[] = [];
   for (const id of state.clubs[clubId]?.playerIds ?? []) {
     const p = state.players[id];
     if (!p) continue;
-    state.players[id] = applyMoraleResult(applyMatchLine(p, lines.get(id), true), letter);
+    state.players[id] = applyMoraleResult(applyMatchLine(p, lines.get(id), true, events), letter);
   }
+  // 경고 누적 편지 (수명주기 10.1): 사람 구단만. 경고·정지 사건에는 clubId 가 없어 여기서 거른다
+  if (clubId === state.userClubId) mailLifecycle(state, events);
 }
 
 function dailyProcessing(state: GameState, usedSlots: Map<ClubId, SlotKey[]>, sink: LedgerEntry[], notices: string[]): void {
   const day = state.time.day;
   const tiers = clubTierMap(state);
   const econOf = (cid: ClubId) => TIER_ECONOMY[tiers.get(cid) ?? state.settings.tier];
-  // 회복·부상 일수
-  for (const id of Object.keys(state.players)) state.players[id] = applyDailyRecovery(state.players[id]!);
-  // 미사용 슬롯 숙련도 −2 (사용자 리그만: 경량 시뮬 리그는 전술을 쓰지 않으므로 숙련도를 그대로 둔다)
+  // 수명주기 (설계 2.2): Day 8·15·22·28 성장 틱(끝난 주의 포커스), Day 20 은퇴 판정
+  lifecycleDaily(state, tiers, notices);
+  // 훈련 포커스 예약값 적용 (8.3: 주 시작 Day 8·15·22, Day 1 은 시즌 경계) — 성장 틱 뒤, 오늘 회복·숙련부터 새 포커스
+  if (WEEK_START_DAYS.includes(day)) rollTrainingFocus(state);
+  // 유스 마감 (7.1): Day 8 00:00 미결정분 자동 처리
+  youthDeadline(state);
+  // 회복(+회복 포커스 +4)·부상 일수
+  for (const [id, p] of Object.entries(state.players)) {
+    const club = p.clubId ? state.clubs[p.clubId] : undefined;
+    state.players[id] = applyDailyRecovery(p, club ? (LIFECYCLE.focus[trainingFocusOf(club)].recoveryBonus ?? 0) : 0);
+  }
+  // 숙련도: 미사용 슬롯 −2, 전술 숙련 포커스는 두 슬롯 +3·감쇠 없음 (사용자 리그만: 경량 시뮬 리그는 전술을 쓰지 않으므로 숙련도를 그대로 둔다)
   for (const cid of [...userLeagueOf(state).clubIds].sort()) {
     const club = state.clubs[cid];
     if (!club) continue;
     const used = usedSlots.get(cid) ?? [];
+    const daily = LIFECYCLE.focus[trainingFocusOf(club)].familiarityDaily;
     const tactics = { ...club.tactics };
     for (const k of ['A', 'B'] as SlotKey[]) {
-      if (used.includes(k)) continue;
-      tactics[k] = { ...tactics[k], familiarity: Math.max(0, tactics[k].familiarity - EngineConstants.FAMILIARITY.unusedDailyDecay) };
+      if (daily) tactics[k] = { ...tactics[k], familiarity: Math.min(100, tactics[k].familiarity + daily) };
+      else if (!used.includes(k)) tactics[k] = { ...tactics[k], familiarity: Math.max(0, tactics[k].familiarity - EngineConstants.FAMILIARITY.unusedDailyDecay) };
     }
     state.clubs[cid] = { ...club, tactics };
   }
   // 연봉 일할 차감 (28일 합계 = 연봉 총액)
   for (const cid of Object.keys(state.clubs).sort()) paySalary(state, cid, day, tiers.get(cid) ?? state.settings.tier, sink);
-  // 수명주기 (설계 2.2): Day 8·15·22·28 성장 틱, Day 20 은퇴 판정
-  lifecycleDaily(state, tiers, notices);
   // Day 3: 이적창 한정 예산 소멸(LP 전환 표시)
   if (day === TRANSFER_BUDGET_EXPIRY_DAY) {
     for (const cid of Object.keys(state.finances).sort()) {
@@ -615,6 +628,13 @@ function namesOf(...teams: { starters: { id: string; name: string }[]; bench: { 
 
 /** 성장 틱 날(설계 2.2: Day 8·15·22·28 00:00 = 직전 주 W1~W4) */
 const GROWTH_DAYS = [8, 15, 22, 28];
+/** 훈련 포커스 주 시작 (Day 1 은 시즌 경계 startNewSeasonState) */
+const WEEK_START_DAYS = [8, 15, 22];
+
+/** 예약된 포커스(training.next)를 적용 (8.3). Day 1·8·15·22 00:00 */
+export function rollTrainingFocus(state: GameState): void {
+  for (const c of Object.values(state.clubs)) if (c.training?.next) state.clubs[c.id] = { ...c, training: { focus: c.training.next } };
+}
 /** 경량 시뮬 리그 출전 비중 대용: 스쿼드 OVR 순위 상위 11명 0.85, 12~16위 0.35, 나머지 0.05 (설계 13.2 모델) */
 const QUICK_SHARE = [
   [11, 0.85],
@@ -637,7 +657,9 @@ function lifecycleDaily(state: GameState, tiers: Map<ClubId, Tier>, notices: str
     const clubMatches = LIFECYCLE.weekMatches[w]!;
     for (const id of Object.keys(state.players).sort()) {
       const p = state.players[id]!;
-      const g = weeklyGrowth(p, lifeRng(state.gameSeed, season, `grow-w${w + 1}`, id), { clubMatches, share: share.get(id) }).player;
+      const club = p.clubId ? state.clubs[p.clubId] : undefined;
+      const focus = club ? trainingFocusOf(club) : 'BALANCED';
+      const g = weeklyGrowth(p, lifeRng(state.gameSeed, season, `grow-w${w + 1}`, id), { clubMatches, share: share.get(id), focus }).player;
       if (g !== p) state.players[id] = g;
     }
   }

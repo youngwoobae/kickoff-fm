@@ -1,7 +1,8 @@
 /** 공용 UI 프리미티브 (소유: B). 외부 UI 라이브러리 없이 CSS 변수 기반. */
 import { useEffect, useId, useRef, type ReactNode } from 'react';
 import type { GameError } from '../../services';
-import type { FitLevel, Step } from '../../types';
+import type { FitLevel, Player, Step } from '../../types';
+import { YELLOW_LIMIT, yellowAccumOf } from '../types23';
 import { FIT_LABEL, FIT_SYMBOL, TRANSFER_ERROR_TEXT, conditionTone, kcToM, mToKc, starsText, stepText } from '../format';
 
 /** tour: 튜토리얼 코치마크가 찾는 data-tour 표식 */
@@ -139,6 +140,23 @@ export function FitMark({ fit }: { fit: FitLevel }) {
 
 export function Badge({ tone = 'neutral', children }: { tone?: 'neutral' | 'good' | 'warn' | 'bad' | 'accent'; children: ReactNode }) {
   return <span className={`badge badge-${tone}`}>{children}</span>;
+}
+
+/** 경고 누적·출장 정지 배지 (2.3.0). 색 + 텍스트. 누적 0·정지 0 이면 아무것도 그리지 않는다 */
+export function DisciplineBadges({ p }: { p: Player }) {
+  const accum = yellowAccumOf(p);
+  const ban = p.availability.suspendedMatches;
+  return (
+    <>
+      {ban > 0 && <Badge tone="bad">🟥 정지 {ban}경기</Badge>}
+      {accum > 0 && (
+        <Badge tone={accum >= YELLOW_LIMIT - 1 ? 'warn' : 'neutral'}>
+          🟨 {accum}/{YELLOW_LIMIT}
+          {accum >= YELLOW_LIMIT - 1 && ' 다음 경고 시 정지'}
+        </Badge>
+      )}
+    </>
+  );
 }
 
 export function Empty({ children }: { children: ReactNode }) {

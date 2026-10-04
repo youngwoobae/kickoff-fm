@@ -62,7 +62,9 @@ import type {
   TacticCap,
   TacticSlot,
   Tier,
+  TrainingFocus,
   UiLogKind,
+  YouthIntake,
 } from '../types';
 
 /**
@@ -108,7 +110,12 @@ import type {
  * 선택 메서드 getPlayerValue?(판매 등록 전 범위), getPlayer 가 NPC 매물 선수도 반환, getFinance().reserved·spendable(예약 차감·정규 창 B_off).
  * 세이브 스키마 3 유지(새 필드는 모두 선택). 아키텍처 16장.
  */
-export const CONTRACT_VERSION = '2.2.1';
+/**
+ * 2.3.0 (M5.1, 추가만): 훈련 포커스·유스·경고 누적. TrainingFocus, Club.training?, YouthCandidate·YouthIntake, GameState.youthIntake?,
+ * Availability.yellowAccum?, PlayerSeasonStats.yellowCards?, LifecycleEvent(types 로 이동 + YOUTH_AUTO_NONE), ActionLogKind TRAINING_FOCUS_SET·YOUTH_DECIDED.
+ * 선택 메서드 setTrainingFocus / getYouthIntake / decideYouth (OWNER 전용). 세이브 스키마 3 유지(새 필드는 모두 선택). 아키텍처 16장.
+ */
+export const CONTRACT_VERSION = '2.3.0';
 
 /** 슬롯 번호 목록 (D28: 3개) */
 export const SAVE_SLOT_IDS: readonly SaveSlotId[] = [1, 2, 3];
@@ -281,6 +288,23 @@ export interface GameService {
    * 등록 뒤 매물의 값은 등록 시점에 고정된다. 없는 선수 = NOT_FOUND. 모든 좌석
    */
   getPlayerValue?(playerId: PlayerId): { value: Kc; minPrice: Kc; maxPrice: Kc };
+
+  // ── 훈련·유스 (2.3.0, 선택 메서드, 수명주기 7·8장) ─────────────────
+  /**
+   * 훈련 포커스 예약. 다음 주 시작(Day 1·8·15·22 00:00)부터 적용(Club.training.next). 지금 포커스와 같으면 예약을 지운다.
+   * OWNER 전용(코치 PERMISSION_DENIED). 모르는 값 = INVALID_TACTIC
+   */
+  setTrainingFocus?(focus: TrainingFocus): GameSnapshot;
+  /**
+   * 이번 시즌 유스 후보(Day 1~7, 결정 뒤에도 Day 7 까지 decided·promotedIds 로 남음). 없으면 null.
+   * 후보의 potential 은 ovr 로 가려서 내보낸다 — scoutRange(절대)·tierRange(티어 기준 상대, U3)를 쓴다
+   */
+  getYouthIntake?(): YouthIntake | null;
+  /**
+   * 0~2명 승격(계약 3시즌, 유스 연봉), 나머지는 사라진다. 한 번만(그 뒤 getYouthIntake().decided = true). OWNER 전용.
+   * 후보 없음·이미 결정 = INVALID_PHASE, 후보 아님 = NOT_FOUND, 2명 초과·선수단 25명 초과 = SQUAD_FULL
+   */
+  decideYouth?(promoteIds: readonly PlayerId[]): GameSnapshot;
 
   // ── 받은 편지함 (2.2.0, 선택 메서드) ─────────────────────────────
   /** 사용자 구단 편지함, 최신 먼저. unreadOnly 면 안 읽은 것만. 같은 상태면 같은 내용 */

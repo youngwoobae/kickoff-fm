@@ -22,6 +22,7 @@ import { PlanScreen } from '../screens/PlanScreen';
 import { SquadScreen } from '../screens/SquadScreen';
 import { TacticsScreen } from '../screens/TacticsScreen';
 import { TransferScreen } from '../screens/TransferScreen';
+import { YouthScreen } from '../screens/YouthScreen';
 import { SettingsButton } from '../screens/SettingsSheet';
 import { TitleScreen } from '../screens/TitleScreen';
 import { Tour } from '../tutorial/Tour';
@@ -177,6 +178,7 @@ function useTabBadges(): Partial<Record<TabId, string>> {
 
 function TabContent({ tab }: { tab: TabId }) {
   const { nav, go } = useNav();
+  const service = useService();
   const snap = useSnapshot();
   const sub = (node: ReactNode, seg: ReactNode) => (
     <>
@@ -187,11 +189,20 @@ function TabContent({ tab }: { tab: TabId }) {
   switch (tab) {
     case 'home':
       return nav.homeView === 'inbox' ? <InboxScreen /> : <HomeScreen />;
-    case 'squad':
+    case 'squad': {
+      // 유스는 2.3.0 getYouthIntake 가 있는 서비스에서만
+      const youth = !!service.getYouthIntake;
+      const cur = !youth && nav.squad === 'youth' ? 'list' : nav.squad;
       return sub(
-        nav.squad === 'list' ? <SquadScreen /> : <LineupScreen />,
-        <Segmented label="스쿼드 하위 화면" value={nav.squad} onChange={(v) => go({ squad: v })} options={[{ value: 'list', label: '선수 목록' }, { value: 'lineup', label: '선발·벤치' }]} />,
+        cur === 'list' ? <SquadScreen /> : cur === 'lineup' ? <LineupScreen /> : <YouthScreen />,
+        <Segmented
+          label="스쿼드 하위 화면"
+          value={cur}
+          onChange={(v) => go({ squad: v })}
+          options={[{ value: 'list', label: '선수 목록' }, { value: 'lineup', label: '선발·벤치' }, ...(youth ? [{ value: 'youth' as const, label: '유스' }] : [])]}
+        />,
       );
+    }
     case 'tactics':
       return sub(
         nav.tactics === 'team' ? <TacticsScreen /> : <PlanScreen />,
