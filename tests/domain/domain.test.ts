@@ -402,7 +402,7 @@ describe('advanceDay 상태 머신', () => {
     expect(salary).toBe(total);
     // 이월 판정: 잔액 ≤ C
     expect(s.finances[s.userClubId]!.balance).toBeLessThanOrEqual(TIER_ECONOMY.T3.seasonBudget * 0.2);
-    expect(() => advanceDayState(s, 'now')).toThrow(/시즌이 끝났습니다/);
+    expect(() => advanceDayState(s, 'now')).toThrow(/시즌이 끝났어요/);
     const next = startNewSeasonState(s, 'now');
     expect(next.time).toEqual({ season: 2, day: 1 });
     expect(next.phase).toBe('MATCHDAY');

@@ -16,6 +16,7 @@ import type {
 } from '../../types';
 import { EngineConstants, FORMATIONS, hashString, mulberry32 } from '../../engine';
 import { buildPlan, isAvailable, pickLineup, slotScore } from '../ai/managerAi';
+import { josa } from '../josa';
 
 export interface ResolvePlanContext {
   club: Club;
@@ -118,7 +119,7 @@ export function resolvePlan(ctx: ResolvePlanContext): ResolvedPlan {
       delete plan.opponentOrders;
       adjustments.push({
         kind: 'OPP_ORDERS_CLEARED',
-        note: wrongOpp ? '다른 상대를 기준으로 작성된 맞춤 지시를 초기화했습니다' : '집중 마크 대상이 오늘 상대 명단에 없어 맞춤 지시를 초기화했습니다',
+        note: wrongOpp ? '다른 상대를 기준으로 작성된 맞춤 지시를 초기화했어요' : '집중 마크 대상이 오늘 상대 명단에 없어 맞춤 지시를 초기화했어요',
       });
     } else if (oo.marker && (!own.has(oo.marker) || !isAvailable(players[oo.marker]))) {
       const { marker: _m, ...rest } = oo;
@@ -178,7 +179,7 @@ export function resolvePlan(ctx: ResolvePlanContext): ResolvedPlan {
     const refs = conditionalPlayerRefs(c);
     if (c.enabled && refs.some((r) => removed.has(r))) {
       c.enabled = false;
-      adjustments.push({ kind: 'CONDITIONAL_DISABLED', conditionalId: c.id, note: '대체로 빠진 선수를 참조하는 조건부 지시를 비활성화했습니다' });
+      adjustments.push({ kind: 'CONDITIONAL_DISABLED', conditionalId: c.id, note: '대체로 빠진 선수를 참조하는 조건부 지시를 껐어요' });
     }
   }
   return { plan, source, adjustments };
@@ -212,7 +213,7 @@ function validityFix(plan: MatchPlan, club: Club, players: Readonly<Record<strin
       if (!fill) continue;
       starters[i] = fill;
       seen.add(fill);
-      notes.push(`선발 ${i + 1}번 자리를 ${players[fill]?.name ?? fill}(으)로 채웠습니다`);
+      notes.push(`선발 ${i + 1}번 자리를 ${players[fill]?.name ?? fill}(으)로 채웠어요`);
     }
   }
   // GK 자리에 GK 가 아니면 가용 GK 로 교체
@@ -257,7 +258,7 @@ function validityFix(plan: MatchPlan, club: Club, players: Readonly<Record<strin
   }
   if (plan.conditionals.length > MAX_CONDITIONALS) {
     plan.conditionals = plan.conditionals.slice(0, MAX_CONDITIONALS);
-    notes.push('조건부 지시는 최대 3개까지만 적용됩니다');
+    notes.push('조건부 지시는 최대 3개까지만 적용돼요');
   }
   return notes;
 }
@@ -266,24 +267,24 @@ export function validatePlan(plan: MatchPlan, club: Club, players: Readonly<Reco
   const issues: PlanValidationIssue[] = [];
   const err = (code: string, message: string, playerId?: string) => issues.push({ severity: 'ERROR', code, message, ...(playerId ? { playerId } : {}) });
   const warn = (code: string, message: string, playerId?: string) => issues.push({ severity: 'WARNING', code, message, ...(playerId ? { playerId } : {}) });
-  if (plan.clubId !== club.id) err('WRONG_CLUB', '다른 구단의 플랜입니다');
-  if (plan.startSlot !== 'A' && plan.startSlot !== 'B') err('INVALID_SLOT', '시작 전술 슬롯은 A 또는 B 여야 합니다');
+  if (plan.clubId !== club.id) err('WRONG_CLUB', '다른 구단의 플랜이에요');
+  if (plan.startSlot !== 'A' && plan.startSlot !== 'B') err('INVALID_SLOT', '시작 전술 슬롯은 A 또는 B여야 해요');
   const tactic = club.tactics[plan.startSlot] ?? club.tactics.A;
   const formation = FORMATIONS[tactic.formation];
   const own = ownIds(club);
-  if (plan.lineup.starters.length !== 11) err('STARTERS_COUNT', `선발은 11명이어야 합니다 (현재 ${plan.lineup.starters.length}명)`);
-  if (plan.lineup.bench.length > BENCH_SIZE) err('BENCH_COUNT', `벤치는 최대 ${BENCH_SIZE}명입니다`);
+  if (plan.lineup.starters.length !== 11) err('STARTERS_COUNT', `선발은 11명이어야 해요 (현재 ${plan.lineup.starters.length}명)`);
+  if (plan.lineup.bench.length > BENCH_SIZE) err('BENCH_COUNT', `벤치는 최대 ${BENCH_SIZE}명이에요`);
   const all = [...plan.lineup.starters, ...plan.lineup.bench];
   const dup = all.filter((id, i) => all.indexOf(id) !== i);
-  for (const id of new Set(dup)) err('DUPLICATE', `${players[id]?.name ?? id} 선수가 중복 배치되었습니다`, id);
+  for (const id of new Set(dup)) err('DUPLICATE', `${players[id]?.name ?? id} 선수가 중복 배치됐어요`, id);
   for (const id of all) {
     const p = players[id];
     if (!own.has(id) || !p) {
-      err('NOT_IN_SQUAD', `${id} 는 우리 선수단이 아닙니다`, id);
+      err('NOT_IN_SQUAD', `${josa(id, '은/는')} 우리 선수단이 아니에요`, id);
       continue;
     }
-    if (p.availability.injuryDays > 0) warn('INJURED', `${p.name} 부상 (${p.availability.injuryDays}일) — 마감 시 자동 대체됩니다`, id);
-    if (p.availability.suspendedMatches > 0) warn('SUSPENDED', `${p.name} 출장 정지 — 마감 시 자동 대체됩니다`, id);
+    if (p.availability.injuryDays > 0) warn('INJURED', `${p.name} 부상 (${p.availability.injuryDays}일) — 마감 때 자동으로 바뀌어요`, id);
+    if (p.availability.suspendedMatches > 0) warn('SUSPENDED', `${p.name} 출장 정지 — 마감 때 자동으로 바뀌어요`, id);
   }
   plan.lineup.starters.forEach((id, i) => {
     const p = players[id];
@@ -291,27 +292,27 @@ export function validatePlan(plan: MatchPlan, club: Club, players: Readonly<Reco
     if (!p || !fs) return;
     if (fs.position === 'GK' && p.primary !== 'GK') err('GK_SLOT', `GK 자리에 ${p.name}(${p.primary}) 배치`, id);
     const fit = p.positions[fs.position] ?? (p.primary === fs.position ? 'NATURAL' : 'UNSUITED');
-    if (fit === 'UNSUITED' && fs.position !== 'GK') warn('UNSUITED', `${p.name} 는 ${fs.position} 부적합 (효율 × 0.75)`, id);
+    if (fit === 'UNSUITED' && fs.position !== 'GK') warn('UNSUITED', `${josa(p.name, '은/는')} ${fs.position} 부적합 (효율 × 0.75)`, id);
     if (plan.autoRotation && p.condition < EngineConstants.CONDITION.autoRotationBelow) {
-      warn('LOW_CONDITION', `${p.name} 컨디션 ${Math.round(p.condition)} — 자동 로테이션 대상입니다`, id);
+      warn('LOW_CONDITION', `${p.name} 컨디션 ${Math.round(p.condition)} — 자동 로테이션 대상이에요`, id);
     }
   });
-  if (!plan.lineup.bench.some((id) => players[id]?.primary === 'GK')) warn('NO_BENCH_GK', '벤치에 GK 가 없습니다');
-  if (plan.conditionals.length > MAX_CONDITIONALS) err('CONDITIONALS_COUNT', '조건부 지시는 최대 3개입니다');
+  if (!plan.lineup.bench.some((id) => players[id]?.primary === 'GK')) warn('NO_BENCH_GK', '벤치에 GK가 없어요');
+  if (plan.conditionals.length > MAX_CONDITIONALS) err('CONDITIONALS_COUNT', '조건부 지시는 최대 3개예요');
   const ids = new Set<string>();
   for (const c of plan.conditionals) {
     if (ids.has(c.id)) err('CONDITIONAL_ID', `조건부 지시 id 중복: ${c.id}`);
     ids.add(c.id);
-    if (c.conditions.length === 0 || c.conditions.length > MAX_CONDITIONS) err('CONDITIONS_COUNT', '조건은 1~2개여야 합니다');
+    if (c.conditions.length === 0 || c.conditions.length > MAX_CONDITIONS) err('CONDITIONS_COUNT', '조건은 1~2개여야 해요');
     if (c.action.kind === 'HT_ADJUST' && !c.conditions.some((x) => x.kind === 'TIME' && x.after === 'HT')) {
-      err('HT_ADJUST_ONLY_HT', '하프타임 조정은 하프타임 조건과만 쓸 수 있습니다');
+      err('HT_ADJUST_ONLY_HT', '하프타임 조정은 하프타임 조건과만 쓸 수 있어요');
     }
   }
-  if (!(plan.autoSubThreshold >= 0 && plan.autoSubThreshold <= 100)) err('AUTO_SUB_RANGE', '자동 교체 임계치는 0~100 입니다');
+  if (!(plan.autoSubThreshold >= 0 && plan.autoSubThreshold <= 100)) err('AUTO_SUB_RANGE', '자동 교체 기준은 0~100이에요');
   const oo = plan.opponentOrders;
-  if (oo?.marker && !own.has(oo.marker)) err('MARKER_NOT_OURS', '마커는 우리 선수여야 합니다', oo.marker);
-  if (oo?.markTarget && own.has(oo.markTarget)) err('MARK_TARGET_OURS', '집중 마크 대상은 상대 선수여야 합니다', oo.markTarget);
-  if (plan.setPieceTaker && !all.includes(plan.setPieceTaker)) warn('SET_PIECE_TAKER', '세트피스 키커가 명단에 없습니다', plan.setPieceTaker);
+  if (oo?.marker && !own.has(oo.marker)) err('MARKER_NOT_OURS', '마커는 우리 선수여야 해요', oo.marker);
+  if (oo?.markTarget && own.has(oo.markTarget)) err('MARK_TARGET_OURS', '집중 마크 대상은 상대 선수여야 해요', oo.markTarget);
+  if (plan.setPieceTaker && !all.includes(plan.setPieceTaker)) warn('SET_PIECE_TAKER', '세트피스 키커가 명단에 없어요', plan.setPieceTaker);
   return issues;
 }
 

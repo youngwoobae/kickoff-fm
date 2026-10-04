@@ -60,7 +60,7 @@ const SPECS: StyleSpec[] = [
   {
     id: 'BALANCED',
     label: '균형',
-    realModel: '일반적인 4-2-3-1',
+    realModel: '공수 균형형 4-2-3-1',
     summary: '특정 국면에 치우치지 않는 더블 피벗 4-2-3-1',
     principle: '더블 피벗이 하프스페이스와 역습을 모두 막는다. 스스로 켜는 큰 이득은 없지만 큰 약점도 없다.',
     i: [0, 0, 0, 0, 0, 0],
@@ -75,7 +75,7 @@ const SPECS: StyleSpec[] = [
   {
     id: 'HIGH_PRESS',
     label: '게겐프레싱',
-    realModel: '클롭 도르트문트·리버풀',
+    realModel: '전방 압박으로 공을 되찾는 팀',
     summary: '잃자마자 되찾는 역압박, 높은 위치의 탈취가 곧 찬스',
     principle: '짧게 빌드업하는 상대를 질식시키고 탈취 직후 역습한다. 압박을 한 번에 넘기는 롱볼과 뒷공간에 약하고 후반 체력이 떨어진다.',
     i: [1, 2, 1, 0, 2, 1, true],
@@ -93,7 +93,7 @@ const SPECS: StyleSpec[] = [
   {
     id: 'POSSESSION',
     label: '포지셔널 플레이',
-    realModel: '과르디올라 바르사·맨시티',
+    realModel: '짧은 패스로 점유하는 팀',
     summary: '5레인 점유와 하프스페이스 과부하 (티키타카)',
     principle: '인버티드 풀백과 메짤라로 중앙 수적 우위를 만들고 공을 오래 가진다. 깊은 블록 앞에서는 박스 안 공간을 못 찾고, 잃으면 높은 라인 뒤가 빈다.',
     i: [1, 1, 1, 1, -1, -2],
@@ -111,7 +111,7 @@ const SPECS: StyleSpec[] = [
   {
     id: 'LOW_BLOCK',
     label: '로우 블록',
-    realModel: '시메오네, 무리뉴 (카테나치오)',
+    realModel: '깊게 내려앉아 지키는 팀',
     summary: '박스 앞 두 줄로 중앙·뒷공간을 지우고 역습',
     principle: '5백 두 줄로 중앙·하프스페이스·뒷공간을 모두 지운다. 측면 크로스·중거리·세트피스에 약하고 코너를 많이 준다.',
     i: [-1, -1, -2, -1, -1, 1, true],
@@ -129,7 +129,7 @@ const SPECS: StyleSpec[] = [
   {
     id: 'COUNTER',
     label: '미드 블록 역습',
-    realModel: '안첼로티 레알, 라니에리 레스터',
+    realModel: '중원에서 기다렸다 역습하는 팀',
     summary: '중앙선 두 줄로 기다리다 빠른 공격수에게 수직 패스',
     principle: '상대가 올라올수록 뒷공간이 커진다. 빠른 러너가 핵심이며, 내려앉아 공을 주는 상대에게는 공략할 공간이 없다.',
     i: [-1, 0, 0, 0, 1, 1, true],
@@ -147,7 +147,7 @@ const SPECS: StyleSpec[] = [
   {
     id: 'DIRECT',
     label: '다이렉트 롱볼',
-    realModel: '다이치 번리, 앨러다이스',
+    realModel: '롱볼과 세컨드볼로 싸우는 팀',
     summary: '빌드업을 건너뛰고 타깃맨에게 길게, 세컨드볼 싸움',
     principle: '압박하는 팀에 가장 강하다. 타깃맨이 공중볼을 따내고 중원이 세컨드볼을 줍는다. 키 큰 CB·3백 앞에서는 공만 준다.',
     i: [0, 0, 0, 1, 1, 2],
@@ -162,7 +162,7 @@ const SPECS: StyleSpec[] = [
   {
     id: 'WING_PLAY',
     label: '윙 플레이',
-    realModel: '하인케스 바이에른, 전통 잉글랜드 4-4-2',
+    realModel: '측면 크로스 중심의 4-4-2',
     summary: '폭을 최대로 벌려 측면 2 대 1, 크로스·컷백',
     principle: '좁은 수비를 측면 과부하로 벌린다. 풀백이 올라가 역습 뒷공간이 생기고 중앙 인원이 부족하다.',
     i: [1, 0, 0, 2, 0, 0],
@@ -180,7 +180,7 @@ const SPECS: StyleSpec[] = [
   {
     id: 'HIGH_LINE',
     label: '하이 라인 트랩',
-    realModel: '사키 밀란, 플릭 바르사',
+    realModel: '라인을 높여 오프사이드를 노리는 팀',
     summary: '라인을 하프라인까지 올려 압축, 최전방 침투는 오프사이드',
     principle: '경기장을 좁혀 상대 중원을 질식시킨다. 라인 뒤가 비어 빠른 러너·2선 침투에 무너진다. 수비수 속도가 필수다.',
     i: [0, 1, 2, 0, 0, 0, false, true],
@@ -198,7 +198,7 @@ const SPECS: StyleSpec[] = [
   {
     id: 'WINGBACK_3',
     label: '3백 윙백',
-    realModel: '콘테 첼시·인테르',
+    realModel: '3백과 윙백으로 폭을 쓰는 팀',
     summary: '3CB + 2윙백, 공격 3-2-5 / 수비 5백',
     principle: '3CB 가 상대 2톱에 수적 우위를 갖고 윙백이 폭을 맡는다. 윙백 뒤 공간(윙어 1:1)과 윙백 체력이 약점이다.',
     i: [0, 1, 0, 2, 0, 0, true],

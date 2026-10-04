@@ -4,6 +4,7 @@
 export {
   CONTRACT_VERSION,
   SAVE_SLOT_IDS,
+  type BuildInfo,
   type GameService,
   type NewGameOptions,
   type TacticSlotInput,

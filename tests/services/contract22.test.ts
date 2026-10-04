@@ -22,8 +22,8 @@ function codeOf(fn: () => unknown): GameErrorCode | null {
 
 describe('서비스 계약 2.2.0 (2.2.1 연결 뒤에도 유지되는 부분)', () => {
   it('버전', () => {
-    expect(CONTRACT_VERSION).toBe('2.3.0');
-    expect(mk().contractVersion).toBe('2.3.0');
+    expect(CONTRACT_VERSION).toBe('2.4.0');
+    expect(mk().contractVersion).toBe('2.4.0');
   });
 
   it('게임 없으면 NO_GAME', () => {

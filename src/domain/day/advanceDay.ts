@@ -61,6 +61,7 @@ import { TIER_REFERENCE_OVR, botName, createBotClub, gauss, generateSquad } from
 import { LIFECYCLE, lifeRng, rollRetirement, trainingFocusOf, weeklyGrowth } from '../squad/lifecycle';
 import { youthDeadline } from '../career/youth';
 import { mailLifecycle, transferDaily } from '../transfer/flow';
+import { josa } from '../josa';
 
 /**
  * 세이브 스키마. 2 (엔진 0.4.0): Club.botStyle → Club.style (WIDE → WING_PLAY), 3·5백 FB 공격형 풀백 → 윙백.
@@ -382,8 +383,8 @@ function dailyProcessing(state: GameState, usedSlots: Map<ClubId, SlotKey[]>, si
       if (f.transferOnlyBudget <= 0) continue;
       const lp = f.transferOnlyBudget;
       state.finances[cid] = { ...f, transferOnlyBudget: 0, legacyPoints: (f.legacyPoints ?? 0) + lp / 1_000_000 };
-      post(state, cid, { kind: 'TRANSFER_BUDGET_EXPIRED', amount: 0, memo: `이적창 한정 예산 ${lp} KC → ${(lp / 1_000_000).toFixed(2)} LP 전환` }, sink);
-      if (cid === state.userClubId) notices.push(`이적창 한정 예산 ${(lp / 1_000_000).toFixed(2)}M 이 LP 로 전환되었습니다`);
+      post(state, cid, { kind: 'TRANSFER_BUDGET_EXPIRED', amount: 0, memo: `쓰지 않은 이적창 한정 예산 ${lp} KC 소멸` }, sink);
+      if (cid === state.userClubId) notices.push(`쓰지 않은 이적창 한정 예산 ${josa(`${(lp / 1_000_000).toFixed(2)}M`, '이/가')} 사라졌어요`);
     }
   }
   // Day 27: 순위 상금·우승 수당 (사용자 리그 = 판정표, 다른 리그 = 경량 시뮬 스코어로 계산한 순위)
@@ -409,7 +410,7 @@ function dailyProcessing(state: GameState, usedSlots: Map<ClubId, SlotKey[]>, si
         post(state, cid, { kind: 'CARRY_EXCESS_SPLIT', amount: -co.excess, memo: `이월 상한 ${co.cap} 초과분 → 이적창 한정 예산` }, sink);
         const g = state.finances[cid]!;
         state.finances[cid] = { ...g, transferOnlyBudget: g.transferOnlyBudget + co.excess };
-        if (cid === state.userClubId) notices.push(`이월 상한 초과분 ${(co.excess / 1_000_000).toFixed(2)}M 이 이적창 한정 예산으로 분리되었습니다`);
+        if (cid === state.userClubId) notices.push(`이월 상한 초과분 ${josa(`${(co.excess / 1_000_000).toFixed(2)}M`, '이/가')} 이적창 한정 예산으로 옮겨졌어요. 다음 시즌 Day 3 전에 쓰지 않으면 사라져요`);
       }
     }
   }
@@ -435,7 +436,7 @@ function shallowCopy(input: GameState): GameState {
 }
 
 export function advanceDayState(input: GameState, nowIso: string): AdvanceOutcome {
-  if (input.phase === 'SEASON_OVER') throw new DomainError('INVALID_PHASE', '시즌이 끝났습니다. 새 시즌을 시작하세요');
+  if (input.phase === 'SEASON_OVER') throw new DomainError('INVALID_PHASE', '시즌이 끝났어요. 새 시즌을 시작해 보세요');
   const state = shallowCopy(input);
   const from = { ...state.time };
   state.seq += 1;
@@ -453,7 +454,7 @@ export function advanceDayState(input: GameState, nowIso: string): AdvanceOutcom
     seasonOutcome = state.pendingOutcome;
     return {
       state,
-      result: { from, to: { ...state.time }, phaseAfter: state.phase, matches, ledger, expiredProposals: expired, ...(seasonOutcome ? { seasonOutcome } : {}), notices: ['시즌이 종료되었습니다. 새 시즌을 시작할 수 있습니다'], processedAt: ts(state) },
+      result: { from, to: { ...state.time }, phaseAfter: state.phase, matches, ledger, expiredProposals: expired, ...(seasonOutcome ? { seasonOutcome } : {}), notices: ['시즌이 끝났어요. 새 시즌을 시작할 수 있어요'], processedAt: ts(state) },
     };
   }
 
@@ -670,7 +671,7 @@ function lifecycleDaily(state: GameState, tiers: Map<ClubId, Tier>, notices: str
         if (p.retiring || !rollRetirement(p, lifeRng(state.gameSeed, season, 'retire', p.id), ref)) continue;
         state.players[p.id] = { ...p, retiring: true };
         if (cid === state.userClubId) {
-          notices.push(`${p.name}(${p.age}세)이 이번 시즌을 끝으로 은퇴합니다`);
+          notices.push(`${p.name}(${p.age}세) 선수가 이번 시즌을 끝으로 은퇴해요`);
           mailLifecycle(state, [{ kind: 'RETIRE_ANNOUNCED', playerId: p.id, clubId: cid }]);
         }
       }

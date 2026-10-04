@@ -115,7 +115,20 @@ import type {
  * Availability.yellowAccum?, PlayerSeasonStats.yellowCards?, LifecycleEvent(types 로 이동 + YOUTH_AUTO_NONE), ActionLogKind TRAINING_FOCUS_SET·YOUTH_DECIDED.
  * 선택 메서드 setTrainingFocus / getYouthIntake / decideYouth (OWNER 전용). 세이브 스키마 3 유지(새 필드는 모두 선택). 아키텍처 16장.
  */
-export const CONTRACT_VERSION = '2.3.0';
+/**
+ * 2.4.0 (M6.2, 추가만): 2D 중계용 CommentaryLine.event?·pitch?(PitchCue), MatchReplay.formations?·starters?·ballTrack? (엔진 결정 로그·이벤트 복사, 엔진 수치 불변),
+ * 선택 메서드 getBuildInfo?, StyleDef.realModel 선택 필드화(값은 가상 표현). 세이브 스키마 3 유지. 아키텍처 16장.
+ */
+export const CONTRACT_VERSION = '2.4.0';
+
+/** 2.4.0: 정보 화면용 빌드 정보 (온보딩_UX 2.3) */
+export interface BuildInfo {
+  /** package.json 버전 (빌드 define __APP_VERSION__, 없으면 'dev') */
+  app: string;
+  engineVersion: string;
+  contractVersion: string;
+  saveSchema: number;
+}
 
 /** 슬롯 번호 목록 (D28: 3개) */
 export const SAVE_SLOT_IDS: readonly SaveSlotId[] = [1, 2, 3];
@@ -185,6 +198,8 @@ export interface ResimulateOverrides {
 
 export interface GameService {
   readonly contractVersion: string;
+  /** 2.4.0: 앱·엔진·계약·세이브 형식 버전 (선택 메서드, 좌석 무관, 게임 없어도 된다) */
+  getBuildInfo?(): BuildInfo;
 
   // ── 상태 구독 (useSyncExternalStore 용) ──────────────────────────
   /** 게임이 없으면 null. 같은 상태면 같은 참조를 돌려준다 */

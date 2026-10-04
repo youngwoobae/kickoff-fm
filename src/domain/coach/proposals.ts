@@ -50,18 +50,18 @@ export function createProposal(
 ): Proposal {
   const reason = input.reason.trim();
   if (reason.length < 1 || reason.length > MAX_REASON_LENGTH) {
-    throw new DomainError('PROPOSAL_INVALID', `제안 사유는 1~${MAX_REASON_LENGTH}자여야 합니다`);
+    throw new DomainError('PROPOSAL_INVALID', `제안 사유는 1~${MAX_REASON_LENGTH}자여야 해요`);
   }
-  if (input.payload.kind !== 'PLAN_CHANGE') throw new DomainError('PROPOSAL_INVALID', 'Phase 0 은 플랜 변경 제안만 지원합니다');
+  if (input.payload.kind !== 'PLAN_CHANGE') throw new DomainError('PROPOSAL_INVALID', '지금은 플랜 변경 제안만 할 수 있어요');
   const parsed = parseMatchId(input.payload.matchId);
   if (!parsed) throw new DomainError('PROPOSAL_INVALID', `알 수 없는 경기: ${input.payload.matchId}`);
   const open = existing.filter((p) => p.status === 'OPEN' && p.authorId === author.userId);
   if (open.length >= MAX_OPEN_PER_COACH) {
-    throw new DomainError('PROPOSAL_LIMIT', `미결 제안은 코치 1인당 ${MAX_OPEN_PER_COACH}장까지입니다`);
+    throw new DomainError('PROPOSAL_LIMIT', `미결 제안은 코치 1인당 ${MAX_OPEN_PER_COACH}장까지예요`);
   }
   const after = applyPatch(base, input.payload.patch);
   const diff = diffBundles(base, after, nameOf);
-  if (diff.length === 0) throw new DomainError('PROPOSAL_INVALID', '현재 플랜과 달라지는 내용이 없습니다');
+  if (diff.length === 0) throw new DomainError('PROPOSAL_INVALID', '현재 플랜과 달라지는 내용이 없어요');
   const paths = diff.map((d) => d.path).sort().join('|');
   const dup = open.find(
     (p) =>
@@ -71,7 +71,7 @@ export function createProposal(
         .sort()
         .join('|') === paths,
   );
-  if (dup) throw new DomainError('PROPOSAL_DUPLICATE', '같은 항목을 바꾸는 미결 제안이 이미 있습니다', [dup.id]);
+  if (dup) throw new DomainError('PROPOSAL_DUPLICATE', '같은 항목을 바꾸는 미결 제안이 이미 있어요', [dup.id]);
   return {
     id,
     clubId: author.clubId,
@@ -95,7 +95,7 @@ function structuredCloneSafe<T>(x: T): T {
 export function applyPatch(base: PlanBundle, patch: PlanChangePatch): PlanBundle {
   const badSlot = (k: unknown) => k !== undefined && k !== 'A' && k !== 'B';
   if (!patch || badSlot(patch.startSlot) || (patch.instructions && badSlot(patch.instructions.slot)) || (patch.lineup && (!Array.isArray(patch.lineup.starters) || !Array.isArray(patch.lineup.bench)))) {
-    throw new DomainError('PROPOSAL_INVALID', '제안 내용 형식이 올바르지 않습니다');
+    throw new DomainError('PROPOSAL_INVALID', '제안 내용 형식이 올바르지 않아요');
   }
   const plan: MatchPlan = structuredCloneSafe(base.plan);
   const tactics: Record<SlotKey, TacticSlot> = structuredCloneSafe(base.tactics);

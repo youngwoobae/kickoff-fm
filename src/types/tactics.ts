@@ -116,8 +116,8 @@ export interface StyleRequirement {
 export interface StyleDef {
   id: StyleId;
   label: string;
-  /** 실제 모델 (참고) */
-  realModel: string;
+  /** 2.4.0: 선택 필드로 바꿈. 값은 가상 표현(실존 감독·구단 이름 없음), 참고용 */
+  realModel?: string;
   /** 한 줄 원리 */
   summary: string;
   /** 원리 설명 (3줄 이내) */

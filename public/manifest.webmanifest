@@ -1,7 +1,7 @@
 {
   "name": "킥오프 FM",
   "short_name": "킥오프 FM",
-  "description": "서버 없이 휴대폰에서 끝까지 즐기는 축구 감독 게임",
+  "description": "오프라인으로 즐기는 모바일 축구 구단 경영 게임",
   "lang": "ko",
   "dir": "ltr",
   "id": "./",

@@ -168,6 +168,7 @@ import {
 } from '../domain';
 import {
   CONTRACT_VERSION,
+  type BuildInfo,
   type FixtureFilter,
   type GameService,
   type NewGameOptions,
@@ -317,6 +318,15 @@ interface PendingWrite {
 
 class LocalGameService implements GameService {
   readonly contractVersion = CONTRACT_VERSION;
+
+  getBuildInfo(): BuildInfo {
+    return {
+      app: typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev',
+      engineVersion: ENGINE_VERSION,
+      contractVersion: CONTRACT_VERSION,
+      saveSchema: SCHEMA_VERSION,
+    };
+  }
   private readonly storage: LegacyStoragePort;
   private readonly slots: StoragePort;
   private readonly clock: Clock;
@@ -1338,7 +1348,10 @@ class LocalGameService implements GameService {
     const players: Record<string, string> = {};
     for (const t of [rec.home, rec.away]) for (const p of [...t.starters, ...t.bench]) players[p.id] = p.name;
     const clubs: Record<string, string> = { [rec.home.clubId]: rec.home.name, [rec.away.clubId]: rec.away.name };
-    const replay = buildReplay(result, { clubs, players });
+    const replay: MatchReplay = {
+      ...buildReplay(result, { clubs, players }),
+      starters: { home: rec.home.starters.map((p) => p.id), away: rec.away.starters.map((p) => p.id) },
+    };
     this.replayCache.set(matchId, replay);
     return replay;
   }
