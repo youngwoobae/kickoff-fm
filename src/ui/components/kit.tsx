@@ -221,11 +221,10 @@ export function Stars({ n }: { n: number }) {
 /** 이적·계약 오류 안내: 코드별 해요체 문구 + 서비스가 준 구체 사유(범위 등). 코드는 개발자 모드에서만 */
 export function ErrorNote({ error, dev }: { error: GameError | null; dev?: boolean }) {
   if (!error) return null;
-  const hint = TRANSFER_ERROR_TEXT[error.code];
+  // 2.2.1: 서비스 문구가 이미 해요체 + 허용 범위라 그대로 보여 주고, 비어 있을 때만 코드별 대체 문구
   return (
     <div className="error-note" role="alert">
-      <span>⚠ {hint ?? error.message}</span>
-      {hint && error.message && <small className="muted">{error.message}</small>}
+      <span>⚠ {error.message || TRANSFER_ERROR_TEXT[error.code] || error.code}</span>
       {dev && <small className="muted">({error.code})</small>}
     </div>
   );

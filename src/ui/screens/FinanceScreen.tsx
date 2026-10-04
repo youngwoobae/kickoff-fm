@@ -3,6 +3,9 @@ import { Card, Empty, Meter, Stat } from '../components/kit';
 import { LEDGER_LABEL, formatKc, pct } from '../format';
 import { useQuery } from '../service/ServiceContext';
 
+/** 메모가 정보가 되는 항목만(선수 이름·한정 예산 사용분). 연봉·수당 메모는 내부 id 가 섞여 숨긴다 */
+const MEMO_KINDS = new Set<string>(['TRANSFER_FEE_PAID', 'TRANSFER_FEE_RECEIVED', 'TRANSFER_TAX', 'SIGNING_BONUS', 'RENEWAL_BONUS', 'RELEASE_PENALTY', 'FORCED_SALE', 'PARACHUTE']);
+
 export function FinanceScreen() {
   const q = useQuery((s) => s.getFinance());
   const f = q.data;
@@ -14,7 +17,7 @@ export function FinanceScreen() {
       <Card>
         <div className="stat-grid">
           <Stat label="KC 잔액" value={formatKc(f.balance)} />
-          <Stat label="지출 가능액" value={formatKc(f.spendable)} sub="잔액 − 남은 연봉 − 입찰 예약액" />
+          <Stat label="지출 가능액" value={formatKc(f.spendable)} sub="이적에 쓸 수 있는 돈 (입찰 예약액 제외)" />
           <Stat label="입찰 예약액" value={formatKc(f.reserved ?? 0)} sub="정산 때 풀리거나 지급돼요" />
           <Stat label="이번 시즌 수입" value={<span className="pos">{formatKc(f.seasonIncome, true)}</span>} />
           <Stat label="이번 시즌 지출" value={<span className="neg">{formatKc(-Math.abs(f.seasonExpense))}</span>} />
@@ -62,6 +65,7 @@ export function FinanceScreen() {
                     시즌 {l.season} · Day {l.day}
                   </span>{' '}
                   {LEDGER_LABEL[l.kind]}
+                  {l.memo && MEMO_KINDS.has(l.kind) && <span className="small muted"> · {l.memo}</span>}
                 </span>
                 <strong className={l.amount >= 0 ? 'pos' : 'neg'}>{formatKc(l.amount, true)}</strong>
               </li>

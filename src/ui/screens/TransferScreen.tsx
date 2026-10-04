@@ -1,12 +1,13 @@
 /**
- * Q05 이적시장 (소유: B, M4.5). 계약 2.2.0 선택 메서드만으로 그린다:
- * getTransferWindow · listTransferListings · placeBid/withdrawBid/listBids · listForSale/withdrawListing · getFinance().spendable/reserved.
+ * Q05 이적시장 (소유: B, M4.5). 계약 2.2.1 선택 메서드만으로 그린다:
+ * getTransferWindow · listTransferListings · placeBid/withdrawBid/listBids · listForSale/withdrawListing · getPlayerValue · getFinance().spendable/reserved.
+ * 정규 창은 Day 25 열림 → 다음 시즌 Day 2 정산이라 SEASON_OVER·새 시즌 Day 1 에도 열려 있다.
  * AI 입찰·다른 구단 입찰 수는 보이지 않는다(블라인드, 경제 6.6). 메서드가 없거나 창이 닫혀 있으면 "닫힘" 안내만.
  */
 import { useState } from 'react';
-import type { Bid, ListingKind, Player, PlayerId, Position, TransferListing } from '../../types';
+import type { Bid, GameSnapshot, ListingKind, Player, PlayerId, Position, TransferListing, TransferWindow } from '../../types';
 import { Badge, Card, Empty, ErrorNote, MoneyField, Segmented, Sheet, Stat } from '../components/kit';
-import { LISTING_KIND_LABEL, POS_LABEL, POS_NAME, POS_ORDER, WINDOW_KIND_LABEL, formatKc } from '../format';
+import { LISTING_KIND_LABEL, POS_LABEL, POS_NAME, POS_ORDER, WINDOW_KIND_LABEL, exactM, formatKc } from '../format';
 import { useGame, useInlineAction, useIsOwner, useQuery } from '../service/ServiceContext';
 
 type View = 'market' | 'bids' | 'sell';
@@ -22,15 +23,17 @@ export function TransferScreen() {
   const [view, setView] = useState<View>('market');
   const forSale = all.filter((l) => l.sellerClubId !== snap.userClubId).length;
 
-  const daysLeft = win ? (win.settleSeason > snap.time.season ? 28 - snap.time.day + win.settleDay : win.settleDay - snap.time.day) : 0;
+  // 정산은 그날로 넘어가는 처리에서 일어난다(그날이 되면 창은 이미 닫혀 있다)
+  const nextSeason = !!win && win.settleSeason > snap.time.season;
+  const daysLeft = win && !nextSeason ? win.settleDay - snap.time.day : 0;
 
   return (
     <div className="screen transfer">
       <Card title="이적 창" extra={win ? <Badge tone="good">● 열림</Badge> : <Badge>○ 닫힘</Badge>}>
         {win ? (
           <p>
-            <strong>{WINDOW_KIND_LABEL[win.kind]}</strong> · 정산 시즌 {win.settleSeason} · Day {win.settleDay}
-            <span className="muted small"> ({daysLeft > 0 ? `${daysLeft}일 뒤` : '오늘 넘기면 정산'})</span>
+            <strong>{WINDOW_KIND_LABEL[win.kind]}</strong> · {nextSeason ? '다음 시즌' : `시즌 ${win.settleSeason}`} Day {win.settleDay} 정산
+            <span className="muted small"> ({nextSeason ? '새 시즌을 시작한 뒤 정산돼요' : daysLeft <= 1 ? '다음 날로 넘어가면 정산돼요' : `${daysLeft}일 뒤`})</span>
           </p>
         ) : (
           <p className="muted">지금은 이적 창이 닫혀 있어요. 창이 열리면 받은 편지함으로 알려 드려요.</p>
@@ -38,7 +41,7 @@ export function TransferScreen() {
         {fin && (
           <div className="stat-grid">
             <Stat label="잔액" value={formatKc(fin.balance)} />
-            <Stat label="지출 가능액" value={formatKc(fin.spendable)} sub="입찰 예약액을 뺀 값" />
+            <Stat label="지출 가능액" value={formatKc(fin.spendable)} sub={nextSeason ? '다음 시즌 배정금·연봉을 미리 반영, 입찰 예약액 제외' : '입찰 예약액을 뺀 값'} />
             <Stat label="입찰 예약액" value={formatKc(fin.reserved ?? 0)} />
             <Stat label="내 입찰" value={`${bids.length}건`} />
           </div>
@@ -60,7 +63,7 @@ export function TransferScreen() {
           />
           {view === 'market' && <MarketView all={all} bids={bids} />}
           {view === 'bids' && <BidsView all={all} bids={bids} />}
-          {view === 'sell' && <SellView all={all} />}
+          {view === 'sell' && <SellView all={all} win={win} />}
         </>
       )}
     </div>
@@ -83,6 +86,12 @@ function usePlayers(ids: readonly PlayerId[]): Record<PlayerId, Player> {
       return out;
     }, [key]).data ?? {}
   );
+}
+
+/** Day 28 부터 FA 매물에는 아직 다른 구단(또는 우리 구단) 소속인 만료 예정 선수가 섞인다(시즌이 끝나면 FA). 그 소속 문구, 아니면 null */
+function expiringText(l: TransferListing, p: Player, snap: GameSnapshot): string | null {
+  if (l.kind !== 'FA' || !p.clubId) return null;
+  return p.clubId === snap.userClubId ? '우리 선수' : `현 소속 ${snap.clubs[p.clubId]?.shortName ?? p.clubId}`;
 }
 
 function priceText(l: TransferListing): string {
@@ -174,19 +183,22 @@ function MarketView({ all, bids }: { all: TransferListing[]; bids: Bid[] }) {
             const p = players[l.playerId];
             if (!p) return null;
             const mine = bidOn.get(l.id);
+            const expiring = expiringText(l, p, snap);
             return (
               <li key={l.id}>
-                <button type="button" className="player-row" onClick={() => setSel(l.id)} aria-label={`${p.name}, ${POS_NAME[p.primary]}, OVR ${p.ovr}, ${LISTING_KIND_LABEL[l.kind]}${mine ? ', 입찰함' : ''}`}>
+                <button type="button" className="player-row" onClick={() => setSel(l.id)} aria-label={`${p.name}, ${POS_NAME[p.primary]}, OVR ${p.ovr}, ${LISTING_KIND_LABEL[l.kind]}${expiring ? `, 계약 만료 예정, ${expiring}` : ''}${mine ? ', 입찰함' : ''}`}>
                   <span className={`pos-badge pos-${p.primary}`}>{POS_LABEL[p.primary]}</span>
                   <span className="pr-main">
                     <span className="pr-name">
                       {p.name}
                       <span className="tag tag-muted">{LISTING_KIND_LABEL[l.kind]}</span>
+                      {expiring && <span className="tag tag-warn">⌛ 계약 만료 예정</span>}
                       {mine && <span className="tag">✓ 입찰함</span>}
                     </span>
                     <span className="pr-sub">
                       {p.age}세 · 평가가치 {formatKc(l.value)}
                       {l.sellerClubId && ` · ${snap.clubs[l.sellerClubId]?.shortName ?? ''}`}
+                      {expiring && ` · ${expiring}`}
                     </span>
                     <span className="listing-meta">{priceText(l)}</span>
                   </span>
@@ -305,6 +317,12 @@ function BidForm({ l, bid, onClose }: { l: TransferListing; bid?: Bid; onClose: 
               {l.sellerClubId && ` · ${snap.clubs[l.sellerClubId]?.name ?? ''}`}
             </span>
           </li>
+          {p && expiringText(l, p, snap) && (
+            <li className="list-row">
+              <span>상태</span>
+              <Badge tone="warn">⌛ 계약 만료 예정 · {expiringText(l, p, snap)}</Badge>
+            </li>
+          )}
           <li className="list-row">
             <span>평가가치</span>
             <strong>{formatKc(l.value)}</strong>
@@ -316,15 +334,15 @@ function BidForm({ l, bid, onClose }: { l: TransferListing; bid?: Bid; onClose: 
         </ul>
         {fa ? (
           <>
-            <MoneyField label="계약금" value={bonus} onChange={setBonus} invalid={bonusBad} hint={`0~${formatKc(l.bonusMax ?? 0)}`} />
-            <MoneyField label="연봉" value={salary} onChange={setSalary} invalid={salaryBad} hint={`${formatKc(l.salaryFloor ?? 0)} 이상`} />
+            <MoneyField label="계약금" value={bonus} onChange={setBonus} invalid={bonusBad} hint={`0~${exactM(l.bonusMax ?? 0)}`} />
+            <MoneyField label="연봉" value={salary} onChange={setSalary} invalid={salaryBad} hint={`${exactM(l.salaryFloor ?? 0)} 이상`} />
             <div className="field">
               <span>계약 기간</span>
               <Segmented label="계약 기간" size="sm" value={String(seasons)} onChange={(v) => setSeasons(Number(v))} options={seasonOpts.map((v) => ({ value: v, label: `${v}시즌` }))} />
             </div>
           </>
         ) : (
-          <MoneyField label="이적료" value={fee} onChange={setFee} invalid={feeBad} hint={`${formatKc(l.minPrice)}~${formatKc(l.maxPrice)} 사이로 정해요`} />
+          <MoneyField label="이적료" value={fee} onChange={setFee} invalid={feeBad} hint={`${exactM(l.minPrice)}~${exactM(l.maxPrice)} 사이로 정해요`} />
         )}
         <p className="small muted">입찰하면 금액이 예약돼 지출 가능액에서 빠져요. 다른 구단 입찰은 보이지 않아요.</p>
         <ErrorNote error={error} dev={snap.settings.devMode} />
@@ -333,7 +351,7 @@ function BidForm({ l, bid, onClose }: { l: TransferListing; bid?: Bid; onClose: 
   );
 }
 
-function SellView({ all }: { all: TransferListing[] }) {
+function SellView({ all, win }: { all: TransferListing[]; win: TransferWindow }) {
   const snap = useGame();
   const isOwner = useIsOwner();
   const squad = useQuery((s) => s.getSquad()).data ?? [];
@@ -373,19 +391,23 @@ function SellView({ all }: { all: TransferListing[] }) {
         <ul className="list">
           {squad
             .filter((p) => !listed.has(p.id))
-            .map((p) => (
+            .map((p) => {
+              const blocked = win.kind === 'REGULAR' && p.contract.seasonsLeft <= 1 ? '계약이 이번 시즌에 끝나는 선수는 정규 창에 올릴 수 없어요' : undefined;
+              return (
               <li key={p.id} className="list-row">
                 <span>
                   <span className={`pos-badge pos-${p.primary}`}>{POS_LABEL[p.primary]}</span> {p.name}
                   <span className="listing-meta">
                     OVR {p.ovr} · {p.age}세 · 계약 {p.contract.seasonsLeft}시즌 · 연봉 {formatKc(p.contract.salary)}
+                    {blocked && ' · 만료 예정이라 정규 창 등록 불가'}
                   </span>
                 </span>
-                <button type="button" className="btn btn-secondary btn-sm" disabled={!isOwner} title={isOwner ? undefined : '구단주만 할 수 있어요'} onClick={() => setSel(p)}>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={!isOwner || !!blocked} title={!isOwner ? '구단주만 할 수 있어요' : blocked} onClick={() => setSel(p)}>
                   판매 등록
                 </button>
               </li>
-            ))}
+              );
+            })}
         </ul>
       </Card>
       {sel && <SellSheet p={sel} onClose={() => setSel(null)} />}
@@ -396,7 +418,10 @@ function SellView({ all }: { all: TransferListing[] }) {
 function SellSheet({ p, onClose }: { p: Player; onClose: () => void }) {
   const snap = useGame();
   const { run, error } = useInlineAction();
-  const [price, setPrice] = useState<number | null>(null);
+  // 2.2.1 선택 메서드: 평가가치 V 와 허용 최저가 범위(0.7V~1.3V). 없으면 서비스 오류 문구가 범위를 알려 준다
+  const v = useQuery((s) => s.getPlayerValue?.(p.id) ?? null, [p.id]).data ?? null;
+  const [price, setPrice] = useState<number | null>(v?.value ?? null);
+  const outOfRange = !!v && price !== null && (price < v.minPrice || price > v.maxPrice);
   const submit = () => {
     const r = run((s) => s.listForSale?.(p.id, price ?? 0), `${p.name} 선수를 판매 명단에 올렸어요`);
     if (r) onClose();
@@ -407,7 +432,7 @@ function SellSheet({ p, onClose }: { p: Player; onClose: () => void }) {
       title={`${p.name} 판매 등록`}
       onClose={onClose}
       footer={
-        <button type="button" className="btn btn-primary btn-block" disabled={price === null || price <= 0} onClick={submit}>
+        <button type="button" className="btn btn-primary btn-block" disabled={price === null || price <= 0 || outOfRange} onClick={submit}>
           판매 명단에 올리기
         </button>
       }
@@ -416,7 +441,27 @@ function SellSheet({ p, onClose }: { p: Player; onClose: () => void }) {
         <p>
           {POS_NAME[p.primary]} · {p.age}세 · OVR {p.ovr} · 계약 {p.contract.seasonsLeft}시즌
         </p>
-        <MoneyField label="최저가" value={price} onChange={setPrice} hint="평가가치의 0.7~1.3배 사이에서 정해요. 범위를 벗어나면 정확한 범위를 알려 드려요" />
+        {v && (
+          <ul className="list compact">
+            <li className="list-row">
+              <span>평가가치</span>
+              <strong>{formatKc(v.value)}</strong>
+            </li>
+            <li className="list-row">
+              <span>최저가 허용 범위</span>
+              <span>
+                {formatKc(v.minPrice)}~{formatKc(v.maxPrice)}
+              </span>
+            </li>
+          </ul>
+        )}
+        <MoneyField
+          label="최저가"
+          value={price}
+          onChange={setPrice}
+          invalid={outOfRange}
+          hint={v ? `${exactM(v.minPrice)}~${exactM(v.maxPrice)} 사이로 정해요. 이보다 낮은 입찰은 받지 않아요` : '평가가치의 0.7~1.3배 사이에서 정해요'}
+        />
         <ErrorNote error={error} dev={snap.settings.devMode} />
       </div>
     </Sheet>

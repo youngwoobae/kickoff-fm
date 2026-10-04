@@ -686,7 +686,6 @@ export class FakeGameService implements GameService {
     }
     this.reports = {};
     this.replays = {};
-    this.openWindow(s, 'MID', 4, 1); // fake 체험용: 첫 시즌 Day 1~4 창
     if (opts.slotId !== undefined) this.setSlot(opts.slotId);
     this.commit(s);
     return s;
@@ -1177,9 +1176,21 @@ export class FakeGameService implements GameService {
     this.replays = {};
     s.time = { season: s.time.season + 1, day: 1 };
     s.phase = 'MATCHDAY';
+    // 계약 경계(실제 서비스 2.2.1 근사): 우리 구단은 성립 재계약 적용, 재계약 안 한 만료자는 FA 로. AI 는 자동 1시즌 재계약
+    const renewals = new Map((s.pendingRenewals ?? []).map((r) => [r.playerId, r]));
+    for (const p of this.squadOf(s, s.userClubId)) {
+      const r = renewals.get(p.id);
+      if (r) p.contract = { seasonsLeft: r.seasons + 1, salary: r.salary, bonusPerSeason: r.bonusPerSeason };
+      else if (p.contract.seasonsLeft <= 1) {
+        this.movePlayer(s, p, null);
+        p.contract = { seasonsLeft: 0, salary: 0 };
+        this.inbox(s, 'CONTRACT_EXPIRED', `${p.name} 계약 만료`, `${p.name} 선수의 계약이 끝나 FA 풀로 떠났어요.`, { playerId: p.id, clubId: s.userClubId });
+      }
+    }
+    s.pendingRenewals = [];
     for (const p of Object.values(s.players)) {
       p.age += 1;
-      p.contract.seasonsLeft = Math.max(1, p.contract.seasonsLeft - 1);
+      if (p.clubId) p.contract.seasonsLeft = Math.max(1, p.contract.seasonsLeft - 1);
       p.season = { apps: 0, starts: 0, minutes: 0, goals: 0, shots: 0, keyPasses: 0, tackles: 0, redCards: 0 };
       p.condition = 100;
     }
@@ -1190,6 +1201,7 @@ export class FakeGameService implements GameService {
       this.paySalary(s, id);
     }
     this.mkt(s).signings = 0;
+    this.emergencyFill(s);
     this.log(s, 'SEASON_STARTED', { season: s.time.season });
     this.commit(s);
     return s;
@@ -1317,7 +1329,7 @@ export class FakeGameService implements GameService {
         notices.push('시즌이 끝났습니다. 리그 화면에서 결산을 확인하세요');
       }
     }
-    if (s.phase !== 'SEASON_OVER') this.marketTick(s, from, notices, userLedger);
+    if (s.phase !== 'SEASON_OVER') this.marketTick(s, notices, userLedger);
     const processedAt = this.ts(s);
     this.log(s, 'DAY_ADVANCED', { from, to: s.time });
     return {
@@ -1883,8 +1895,9 @@ export class FakeGameService implements GameService {
     return r;
   }
   // ── 이적·계약·받은 편지함 (2.2.0 가짜 구현, 경제 설계 5·6장 근사) ─────────
-  // 창: 새 게임 Day 1~4(체험용), 매 시즌 Day 12~15 = MID, Day 27 → 다음 시즌 Day 2 = REGULAR.
-  // 정산은 settleDay 처리 시점. AI 경쟁 입찰은 V × (1.0~1.25) 난수 하나로 근사한다.
+  // 일정은 실제 서비스(2.2.1 transferDaily)와 같다. 날짜 = 처리 중인 새 날:
+  // Day 11 중간 창 열림 → Day 15 정산 / Day 20 재계약 창 / Day 25 정규 창 열림 / Day 28 만료 예정자 FA 매물 → 다음 시즌 Day 2 정산.
+  // AI 경쟁 입찰은 V × (1.0~1.25) 난수 하나로 근사한다.
   private mkt(s: GameState): FakeMarket {
     const f = s as FakeState;
     f.market ??= { window: null, listings: [], bids: [], signings: 0, nextId: 1 };
@@ -1896,8 +1909,7 @@ export class FakeGameService implements GameService {
     if (s.inbox.length > 200) s.inbox.splice(0, s.inbox.length - 200);
   }
   private tledger(s: GameState, clubId: ClubId, kind: TransferLedgerKind, amount: number): LedgerEntry {
-    // ponytail: TransferLedgerKind 는 아직 LedgerKind 밖(M4.4 에서 합침). fake 는 캐스팅으로 미리 쓴다
-    return this.ledger(s, clubId, kind as unknown as LedgerKind, amount);
+    return this.ledger(s, clubId, kind, amount);
   }
   private remainingSalary(s: GameState): number {
     const salary = this.squadOf(s, s.userClubId).reduce((a, p) => a + p.contract.salary, 0);
@@ -1911,12 +1923,12 @@ export class FakeGameService implements GameService {
   }
   private requireWindow(s: GameState): TransferWindow {
     const w = this.mkt(s).window;
-    if (!w) throw new GameError('WINDOW_CLOSED', '이적 창이 닫혀 있어요');
+    if (!w) throw new GameError('WINDOW_CLOSED', '지금은 이적 창이 닫혀 있어요');
     return w;
   }
   private myPlayer(s: GameState, playerId: PlayerId): Player {
     const p = s.players[playerId];
-    if (!p || p.clubId !== s.userClubId) throw new GameError('NOT_FOUND', `내 선수가 아니에요: ${playerId}`);
+    if (!p || p.clubId !== s.userClubId) throw new GameError('NOT_FOUND', `우리 구단 선수가 아니에요: ${playerId}`);
     return p;
   }
   private openWindow(s: GameState, kind: WindowKind, settleDay: number, settleSeason: SeasonNo): void {
@@ -1959,7 +1971,21 @@ export class FakeGameService implements GameService {
       const p = pid ? s.players[pid] : undefined;
       if (p) add('CLUB', p, club.id, 0.85 + rng() * 0.3);
     }
-    this.inbox(s, 'WINDOW_OPENED', `${kind === 'MID' ? '시즌 중간' : '정규'} 이적 창이 열렸어요`, `매물 ${m.listings.length}건이 올라왔어요. 정산은 시즌 ${settleSeason} Day ${settleDay}에 해요.`);
+    this.inbox(s, 'WINDOW_OPENED', `${kind === 'MID' ? '시즌 중간' : '정규'} 이적 창이 열렸어요`, `매물 ${m.listings.length}건이 올라왔어요. 정산은 ${settleSeason > s.time.season ? '다음 시즌' : `시즌 ${settleSeason}`} Day ${settleDay}에 해요.`);
+  }
+  /** Day 28: 재계약 안 된 만료 예정자를 FA 매물로 (아직 소속 구단이 있다. 우리 구단 선수도 포함) */
+  private registerExpiringFa(s: GameState): void {
+    const m = this.mkt(s);
+    if (m.window?.kind !== 'REGULAR') return;
+    const renewed = new Set((s.pendingRenewals ?? []).map((r) => r.playerId));
+    const listed = new Set(m.listings.map((l) => l.playerId));
+    for (const club of Object.values(s.clubs)) {
+      for (const p of this.squadOf(s, club.id)) {
+        if (p.contract.seasonsLeft > 1 || p.isTemporary || renewed.has(p.id) || listed.has(p.id)) continue;
+        const S = fakeS(p.ovr);
+        m.listings.push({ id: `L${s.time.season}-${s.time.day}-${m.nextId++}`, kind: 'FA', playerId: p.id, sellerClubId: null, value: fakeValue(p), minPrice: 0, maxPrice: 0, bonusMax: round1k(S), salaryFloor: round1k(Math.max(200_000, 0.9 * S)), seasonsRange: seasonsRangeOf(p.age) });
+      }
+    }
   }
   private movePlayer(s: GameState, p: Player, to: ClubId | null): void {
     if (p.clubId) {
@@ -2020,15 +2046,17 @@ export class FakeGameService implements GameService {
     m.listings = [];
     m.bids = [];
   }
-  /** step() 이 날짜를 바꾼 뒤 부른다. processed = 방금 처리한 날 */
-  private marketTick(s: GameState, processed: { season: SeasonNo; day: number }, notices: string[], userLedger: LedgerEntry[]): void {
+  /** step() 이 날짜를 바꾼 뒤 부른다. 실제 서비스처럼 s.time = 처리 중인 새 날 */
+  private marketTick(s: GameState, notices: string[], userLedger: LedgerEntry[]): void {
     const m = this.mkt(s);
-    if (m.window && processed.season === m.window.settleSeason && processed.day === m.window.settleDay) this.settleWindow(s, notices, userLedger);
+    const d = s.time.day;
+    if (m.window && s.time.season === m.window.settleSeason && d === m.window.settleDay) this.settleWindow(s, notices, userLedger);
     if (!m.window) {
-      if (s.time.day === 12 && s.phase === 'MATCHDAY') this.openWindow(s, 'MID', 15, s.time.season);
-      if (s.time.day === 27 && s.phase === 'OFFSEASON') this.openWindow(s, 'REGULAR', 2, s.time.season + 1);
+      if (d === 11) this.openWindow(s, 'MID', 15, s.time.season);
+      if (d === 25) this.openWindow(s, 'REGULAR', 2, s.time.season + 1);
     }
-    if (s.time.day === 20 && s.phase === 'MATCHDAY') {
+    if (d === 28) this.registerExpiringFa(s);
+    if (d === 20) {
       const due = this.squadOf(s, s.userClubId).filter((p) => p.contract.seasonsLeft === 1 && !p.isTemporary);
       if (due.length)
         this.inbox(s, 'RENEWAL_OPEN', `재계약 기간이 시작됐어요 (${due.length}명)`, `${due.map((p) => p.name).join(', ')}의 계약이 이번 시즌에 끝나요. Day 27까지 선수 상세에서 재계약할 수 있어요.`, { playerId: due[0]?.id });
@@ -2058,34 +2086,35 @@ export class FakeGameService implements GameService {
     this.requireWindow(s);
     const m = this.mkt(s);
     const L = m.listings.find((l) => l.id === input.listingId);
-    if (!L || L.sellerClubId === s.userClubId) throw new GameError('NOT_FOUND', '매물을 찾지 못했어요');
+    if (!L) throw new GameError('NOT_FOUND', `매물이 없어요: ${input.listingId}`);
+    if (L.sellerClubId === s.userClubId) throw new GameError('BID_OUT_OF_RANGE', '우리 구단 매물에는 입찰할 수 없어요');
     const fin = s.finances[s.userClubId];
-    if ((fin?.balance ?? 0) < 0) throw new GameError('NEGATIVE_BALANCE_LOCK', '잔액이 마이너스예요');
+    if ((fin?.balance ?? 0) < 0) throw new GameError('NEGATIVE_BALANCE_LOCK', '잔액이 0 아래인 동안에는 입찰할 수 없어요');
     const bid: Bid = { listingId: L.id, clubId: s.userClubId, placedDay: s.time.day };
     if (L.kind === 'FA') {
       const [lo, hi] = L.seasonsRange ?? [1, 1];
       const bonus = input.bonus ?? 0;
       const salary = input.salary ?? 0;
       const seasons = input.seasons ?? lo;
-      if (bonus < 0 || bonus > (L.bonusMax ?? 0)) throw new GameError('BID_OUT_OF_RANGE', `계약금은 0~${formatKc(L.bonusMax ?? 0)}이에요`);
+      if (bonus < 0 || bonus > (L.bonusMax ?? 0)) throw new GameError('BID_OUT_OF_RANGE', `계약금은 0~${formatKc(L.bonusMax ?? 0)} 사이여야 해요`);
       if (salary < (L.salaryFloor ?? 0)) throw new GameError('BID_OUT_OF_RANGE', `연봉은 ${formatKc(L.salaryFloor ?? 0)} 이상이어야 해요`);
-      if (seasons < lo || seasons > hi) throw new GameError('BID_OUT_OF_RANGE', `계약 기간은 ${lo}~${hi}시즌이에요`);
+      if (seasons < lo || seasons > hi) throw new GameError('BID_OUT_OF_RANGE', `계약 기간은 ${lo}~${hi}시즌 사이여야 해요`);
       Object.assign(bid, { bonus, salary, seasons });
     } else {
       const fee = input.fee ?? 0;
-      if (fee < L.minPrice || fee > L.maxPrice) throw new GameError('BID_OUT_OF_RANGE', `이적료는 ${formatKc(L.minPrice)}~${formatKc(L.maxPrice)}이에요`);
+      if (fee < L.minPrice || fee > L.maxPrice) throw new GameError('BID_OUT_OF_RANGE', `입찰가는 ${formatKc(L.minPrice)}~${formatKc(L.maxPrice)} 사이여야 해요`);
       bid.fee = fee;
     }
     const others = m.bids.filter((b) => b.listingId !== L.id);
     const squad = this.squadOf(s, s.userClubId);
-    if (squad.length + others.length + 1 > 25) throw new GameError('SQUAD_FULL', '선수단 25명 상한');
-    if (m.signings + others.length + 1 > 8) throw new GameError('SIGNING_LIMIT', '시즌 영입 한도 8명');
+    if (squad.length + others.length + 1 > 25) throw new GameError('SQUAD_FULL', '선수단이 25명으로 꽉 차요. 선수를 판매하거나 방출한 뒤 입찰해 주세요');
+    if (m.signings + others.length + 1 > 8) throw new GameError('SIGNING_LIMIT', '이번 시즌 영입 한도(8명)를 넘어요');
     const newSalary = L.kind === 'FA' ? bid.salary ?? 0 : fakeS(s.players[L.playerId]?.ovr ?? 50);
     const salaryTotal = squad.reduce((a, x) => a + x.contract.salary, 0);
-    if (salaryTotal + newSalary > ECON.cap) throw new GameError('CAP_EXCEEDED', `영입 후 연봉 합계 ${formatKc(salaryTotal + newSalary)} > 캡 ${formatKc(ECON.cap)}`);
+    if (salaryTotal + newSalary > ECON.cap) throw new GameError('CAP_EXCEEDED', `영입하면 연봉 캡을 넘어요 (연봉 합계 ${formatKc(salaryTotal + newSalary)}, 캡 ${formatKc(ECON.cap)})`);
     const spendable = (fin?.balance ?? 0) - this.remainingSalary(s) - this.reservedTotal(s, L.id);
     const need = this.reservationOf(s, bid);
-    if (need > spendable) throw new GameError('INSUFFICIENT_FUNDS', `필요 ${formatKc(need)} > 지출 가능액 ${formatKc(Math.round(spendable))}`);
+    if (need > spendable) throw new GameError('INSUFFICIENT_FUNDS', `지출 가능액이 모자라요. 이 입찰에 쓸 수 있는 돈은 ${formatKc(Math.max(0, Math.round(spendable)))}까지예요 (필요 ${formatKc(need)})`);
     m.bids = [...others, bid];
     this.commit(s);
     return bid;
@@ -2108,14 +2137,15 @@ export class FakeGameService implements GameService {
     const w = this.requireWindow(s);
     const p = this.myPlayer(s, playerId);
     const m = this.mkt(s);
-    if (m.listings.some((l) => l.playerId === playerId)) throw new GameError('BID_OUT_OF_RANGE', '이미 명단에 올린 선수예요');
-    if (w.kind === 'REGULAR' && p.contract.seasonsLeft <= 1) throw new GameError('BID_OUT_OF_RANGE', '계약이 1시즌 남은 선수는 정규 창 명단에 올릴 수 없어요');
+    if (w.kind === 'REGULAR' && p.contract.seasonsLeft <= 1) throw new GameError('BID_OUT_OF_RANGE', '계약이 이번 시즌에 끝나는 선수는 정규 창에 올릴 수 없어요');
     const V = fakeValue(p);
     const lo = round1k(V * 0.7);
     const hi = round1k(V * 1.3);
-    if (minPrice < lo || minPrice > hi) throw new GameError('BID_OUT_OF_RANGE', `최저가는 ${formatKc(lo)}~${formatKc(hi)}예요 (평가가치 ${formatKc(V)})`);
-    const L: TransferListing = { id: `L${s.time.season}-${s.time.day}-${m.nextId++}`, kind: 'CLUB', playerId, sellerClubId: s.userClubId, value: V, minPrice: round1k(minPrice), maxPrice: hi };
-    m.listings.push(L);
+    if (minPrice < lo || minPrice > hi) throw new GameError('BID_OUT_OF_RANGE', `최저가는 ${formatKc(lo)}~${formatKc(hi)} 사이로 정해 주세요`);
+    // 같은 선수 재등록 = 최저가 수정 (실제 서비스와 같다)
+    const prev = m.listings.find((l) => l.playerId === playerId);
+    const L: TransferListing = { id: prev?.id ?? `L${s.time.season}-${s.time.day}-${m.nextId++}`, kind: 'CLUB', playerId, sellerClubId: s.userClubId, value: V, minPrice: round1k(minPrice), maxPrice: hi };
+    m.listings = [...m.listings.filter((l) => l.id !== L.id), L];
     this.commit(s);
     return L;
   }
@@ -2139,7 +2169,7 @@ export class FakeGameService implements GameService {
   getRenewalQuote(playerId: PlayerId): RenewalQuote {
     const s = this.req();
     const p = this.myPlayer(s, playerId);
-    if (s.phase !== 'MATCHDAY' || s.time.day < 20 || s.time.day > 27 || p.contract.seasonsLeft !== 1 || p.isTemporary) throw new GameError('RENEWAL_NOT_OPEN', '재계약 기간이 아니에요');
+    if (s.time.day < 20 || s.time.day > 27 || p.contract.seasonsLeft !== 1 || p.isTemporary) throw new GameError('RENEWAL_NOT_OPEN', '재계약은 계약이 1시즌 남은 선수와 Day 20~27에만 할 수 있어요');
     return { playerId, askSalary: this.renewalAsk(s, p), seasonsRange: seasonsRangeOf(p.age), bonusPerSeasonRate: 0.1 };
   }
   offerRenewal(playerId: PlayerId, salary: number, seasons: number): RenewalResult {
@@ -2147,15 +2177,15 @@ export class FakeGameService implements GameService {
     this.requireOwner(s);
     const q = this.getRenewalQuote(playerId);
     const p = this.myPlayer(s, playerId);
-    if ((s.finances[s.userClubId]?.balance ?? 0) < 0 && salary > p.contract.salary) throw new GameError('NEGATIVE_BALANCE_LOCK', '잔액이 마이너스예요');
+    if ((s.finances[s.userClubId]?.balance ?? 0) < 0 && salary > p.contract.salary) throw new GameError('NEGATIVE_BALANCE_LOCK', '잔액이 0 아래인 동안에는 연봉을 올리는 재계약을 할 수 없어요');
     const total = this.squadOf(s, s.userClubId).reduce((a, x) => a + x.contract.salary, 0) - p.contract.salary + salary;
-    if (total > ECON.cap) throw new GameError('CAP_EXCEEDED', `재계약 후 연봉 합계 ${formatKc(total)} > 캡 ${formatKc(ECON.cap)}`);
+    if (total > ECON.cap) throw new GameError('CAP_EXCEEDED', `재계약하면 연봉 캡을 넘어요 (연봉 합계 ${formatKc(total)}, 캡 ${formatKc(ECON.cap)})`);
     const accepted = salary >= q.askSalary && seasons >= q.seasonsRange[0] && seasons <= q.seasonsRange[1];
     if (!accepted) return { accepted, ask: q.askSalary };
     const bonus = round1k(q.bonusPerSeasonRate * salary * seasons);
-    p.contract = { seasonsLeft: seasons + 1, salary, bonusPerSeason: Math.round(bonus / seasons) };
+    // 실제 서비스처럼 성립 재계약은 pendingRenewals 에 두고 시즌 경계에 적용 (같은 선수 재제안 = 덮어쓰기)
+    s.pendingRenewals = [...(s.pendingRenewals ?? []).filter((r) => r.playerId !== playerId), { playerId, salary, seasons, bonusPerSeason: Math.round(bonus / seasons) }];
     this.tledger(s, s.userClubId, 'RENEWAL_BONUS', -bonus);
-    this.inbox(s, 'GENERAL', `${p.name} 재계약을 마쳤어요`, `연봉 ${formatKc(salary)} · ${seasons}시즌 연장 · 재계약 보너스 ${formatKc(bonus)}를 지급했어요.`, { playerId });
     this.commit(s);
     return { accepted, ask: q.askSalary };
   }
@@ -2174,18 +2204,34 @@ export class FakeGameService implements GameService {
     if (q.penalty > 0) this.tledger(s, s.userClubId, 'RELEASE_PENALTY', -q.penalty);
     this.movePlayer(s, p, null);
     const m = this.mkt(s);
-    m.listings = m.listings.filter((l) => l.playerId !== playerId);
-    this.inbox(s, 'PLAYER_RELEASED', `${p.name} 방출을 마쳤어요`, q.penalty > 0 ? `위약금 ${formatKc(q.penalty)}를 지급했어요. 선수는 FA가 돼요.` : '위약금 없이 방출했어요. 선수는 FA가 돼요.', { playerId });
-    if (this.squadOf(s, s.userClubId).length < 18) {
+    const gone = new Set(m.listings.filter((l) => l.playerId === playerId).map((l) => l.id));
+    m.listings = m.listings.filter((l) => !gone.has(l.id));
+    m.bids = m.bids.filter((b) => !gone.has(b.listingId));
+    s.pendingRenewals = s.pendingRenewals?.filter((r) => r.playerId !== playerId);
+    p.contract = { seasonsLeft: 0, salary: 0 };
+    this.inbox(s, 'PLAYER_RELEASED', `${p.name} 방출`, q.penalty > 0 ? `${p.name} 선수와 계약을 끝냈어요. 위약금 ${formatKc(q.penalty)}를 냈어요.` : `${p.name} 선수와 위약금 없이 계약을 끝냈어요.`, { playerId, clubId: s.userClubId });
+    this.emergencyFill(s);
+    this.commit(s);
+  }
+  /** 등록 18명 미만이면 긴급 FA 1시즌 계약 (실제 서비스는 FA 풀에서, fake 는 새로 만든다). 방출·시즌 경계 뒤 */
+  private emergencyFill(s: GameState): void {
+    const m = this.mkt(s);
+    const signed: string[] = [];
+    while (this.squadOf(s, s.userClubId).length < 18) {
       const tid = `t${s.time.season}-${s.time.day}-${m.nextId++}`;
-      const t = genPlayer(mulberry32(s.gameSeed + m.nextId), tid, s.userClubId, p.primary, 45);
-      t.isTemporary = true;
+      const t = genPlayer(mulberry32(s.gameSeed + m.nextId), tid, s.userClubId, 'CM', 45);
       t.contract = { seasonsLeft: 1, salary: 200_000 };
       s.players[tid] = t;
       s.clubs[s.userClubId]?.playerIds.push(tid);
-      this.inbox(s, 'GENERAL', '임시 계약 선수가 합류했어요', `선수단이 18명보다 적어서 ${t.name} 선수가 임시로 들어왔어요.`, { playerId: tid });
+      signed.push(t.name);
     }
-    this.commit(s);
+    if (signed.length) this.inbox(s, 'GENERAL', '긴급 FA 계약', `선수단이 18명 아래로 줄어 FA ${signed.length}명(${signed.join(', ')})과 1시즌 계약했어요.`, { clubId: s.userClubId });
+  }
+  getPlayerValue(playerId: PlayerId): { value: number; minPrice: number; maxPrice: number } {
+    const p = this.req().players[playerId];
+    if (!p) throw new GameError('NOT_FOUND', `선수 없음: ${playerId}`);
+    const value = fakeValue(p);
+    return { value, minPrice: round1k(value * 0.7), maxPrice: round1k(value * 1.3) };
   }
   private inboxCache: { state: GameState; unread: boolean; list: InboxMessage[] } | null = null;
   getInbox(filter: { unreadOnly?: boolean } = {}): InboxMessage[] {

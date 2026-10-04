@@ -394,6 +394,10 @@ h3 {
   background: var(--surface-2);
   color: var(--muted);
 }
+.tag-warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
 .warn-line {
   background: var(--warn-soft);
   color: var(--warn);

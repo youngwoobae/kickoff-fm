@@ -1,9 +1,9 @@
 /** 받은 편지함 (소유: B, M4.6). getInbox·markRead, 항목의 playerId·matchId·listingId·clubId 로 화면 이동 */
 import { useState } from 'react';
-import type { InboxMessage, PlayerId } from '../../types';
+import type { InboxKind, InboxMessage, PlayerId } from '../../types';
 import { Badge, Card, Empty } from '../components/kit';
-import { INBOX_ICON } from '../format';
-import { useNav } from '../app/nav';
+import { INBOX_ICON, INBOX_KIND_LABEL } from '../format';
+import { useNav, type NavState } from '../app/nav';
 import { useQuery, useService } from '../service/ServiceContext';
 import { PlayerSheet } from './SquadScreen';
 
@@ -58,15 +58,31 @@ export function InboxScreen() {
   );
 }
 
+/** 종류별 바로 가기 (clubId 는 늘 우리 구단이라 링크로 쓰지 않는다. 창은 정산 뒤 닫히므로 이적시장은 창 열림 편지만) */
+const KIND_LINK: Partial<Record<InboxKind, { label: string; to: Partial<NavState> }>> = {
+  WINDOW_OPENED: { label: '이적시장', to: { tab: 'club', club: 'transfer' } },
+  BID_WON: { label: '재정', to: { tab: 'club', club: 'finance' } },
+  PLAYER_SOLD: { label: '재정', to: { tab: 'club', club: 'finance' } },
+  PLAYER_RELEASED: { label: '재정', to: { tab: 'club', club: 'finance' } },
+  NEGATIVE_BALANCE: { label: '재정', to: { tab: 'club', club: 'finance' } },
+  FORCED_SALE: { label: '재정', to: { tab: 'club', club: 'finance' } },
+  RENEWAL_OPEN: { label: '선수단', to: { tab: 'squad', squad: 'list' } },
+  CONTRACT_EXPIRED: { label: '선수단', to: { tab: 'squad', squad: 'list' } },
+  GENERAL: { label: '선수단', to: { tab: 'squad', squad: 'list' } }, // 긴급 FA 자동 계약
+};
+
 function InboxItem({ m, onRead, onPlayer }: { m: InboxMessage; onRead: () => void; onPlayer: (id: PlayerId) => void }) {
   const { go } = useNav();
+  // 방출된 유스·팔리지 않은 신규 선수처럼 세계에서 사라진 선수는 링크를 숨긴다
+  const hasPlayer = useQuery((s) => (m.playerId ? !!s.getPlayer(m.playerId) : false), [m.playerId]).data ?? false;
+  const link = KIND_LINK[m.kind];
   const open = (fn: () => void) => () => {
     onRead();
     fn();
   };
   return (
     <li className={`inbox-item ${m.read ? '' : 'is-unread'}`}>
-      <button type="button" className="inbox-head" onClick={onRead} aria-label={`${m.read ? '' : '새 편지, '}${m.title}`}>
+      <button type="button" className="inbox-head" onClick={onRead} aria-label={`${m.read ? '' : '새 편지, '}${INBOX_KIND_LABEL[m.kind]}: ${m.title}`}>
         <span aria-hidden="true">{INBOX_ICON[m.kind]}</span>
         <span className="inbox-title">{m.title}</span>
         {!m.read && <Badge tone="accent">새 편지</Badge>}
@@ -74,10 +90,10 @@ function InboxItem({ m, onRead, onPlayer }: { m: InboxMessage; onRead: () => voi
       <p className="inbox-body">{m.body}</p>
       <div className="row-between small">
         <span className="muted">
-          시즌 {m.season} · Day {m.day}
+          {INBOX_KIND_LABEL[m.kind]} · 시즌 {m.season} · Day {m.day}
         </span>
         <span className="btn-row">
-          {m.playerId && (
+          {hasPlayer && (
             <button type="button" className="btn btn-ghost btn-sm" onClick={open(() => onPlayer(m.playerId as PlayerId))}>
               선수 보기
             </button>
@@ -87,14 +103,9 @@ function InboxItem({ m, onRead, onPlayer }: { m: InboxMessage; onRead: () => voi
               경기 리포트
             </button>
           )}
-          {(m.listingId || m.kind === 'WINDOW_OPENED') && (
-            <button type="button" className="btn btn-ghost btn-sm" onClick={open(() => go({ tab: 'club', club: 'transfer' }))}>
-              이적시장
-            </button>
-          )}
-          {m.clubId && !m.listingId && (
-            <button type="button" className="btn btn-ghost btn-sm" onClick={open(() => go({ tab: 'club', club: 'league' }))}>
-              리그 보기
+          {link && (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={open(() => go(link.to))}>
+              {link.label}
             </button>
           )}
         </span>

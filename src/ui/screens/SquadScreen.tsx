@@ -1,9 +1,8 @@
 /** Q01 선수 목록 · Q02 선수 상세(시트) (소유: B) */
 import { useMemo, useState } from 'react';
-import { isGameError } from '../../services';
 import type { AttrDef, Player, PlayerId } from '../../types';
 import { Badge, Card, ConditionBar, Empty, ErrorNote, FitMark, MoneyField, Segmented, Sheet } from '../components/kit';
-import { FIT_LABEL, MORALE_LABEL, MORALE_SHORT, POS_LABEL, POS_NAME, POS_ORDER, TRANSFER_ERROR_TEXT, fitOf, formatKc, isAvailable } from '../format';
+import { FIT_LABEL, MORALE_LABEL, MORALE_SHORT, POS_LABEL, POS_NAME, POS_ORDER, fitOf, formatKc, isAvailable } from '../format';
 import { useGame, useInlineAction, useIsOwner, useQuery } from '../service/ServiceContext';
 import { josa } from '../josa';
 
@@ -226,13 +225,14 @@ function GrowthHistory({ p }: { p: Player }) {
   );
 }
 
-/** 계약·재계약·방출 (M4.6, 계약 2.2.0 선택 메서드). 내 선수만, 실행은 구단주만 */
+/** 계약·재계약·방출 (M4.6, 계약 2.2.1). 내 선수만, 실행은 구단주만. 성립한 재계약은 시즌 경계까지 snap.pendingRenewals 에 있다 */
 function ContractSection({ p, onClose }: { p: Player; onClose: () => void }) {
   const snap = useGame();
   const isOwner = useIsOwner();
   const [mode, setMode] = useState<'none' | 'renew' | 'release'>('none');
   const mine = p.clubId === snap.userClubId;
   const c = p.contract;
+  const renewed = snap.pendingRenewals?.find((r) => r.playerId === p.id);
   if (!p.clubId) return <p className="small muted">무소속(FA) 선수예요.</p>;
   return (
     <>
@@ -241,9 +241,18 @@ function ContractSection({ p, onClose }: { p: Player; onClose: () => void }) {
         <li className="list-row">
           <span>연봉 · 남은 기간</span>
           <span>
-            {formatKc(c.salary)} · {c.seasonsLeft}시즌{c.seasonsLeft === 1 && <> <Badge tone="warn">⌛ 이번 시즌 만료</Badge></>}
+            {formatKc(c.salary)} · {c.seasonsLeft}시즌
+            {c.seasonsLeft === 1 && (renewed ? <> <Badge tone="good">✓ 재계약함</Badge></> : <> <Badge tone="warn">⌛ 이번 시즌 만료</Badge></>)}
           </span>
         </li>
+        {renewed && (
+          <li className="list-row">
+            <span>다음 시즌부터</span>
+            <span>
+              연봉 {formatKc(renewed.salary)} · {renewed.seasons}시즌
+            </span>
+          </li>
+        )}
         {c.capCharge !== undefined && (
           <li className="list-row">
             <span>연봉 캡 산입액</span>
@@ -285,15 +294,15 @@ function RenewalPanel({ p }: { p: Player }) {
   const [salary, setSalary] = useState<number | null>(quote?.askSalary ?? null);
   const [seasons, setSeasons] = useState<number>(quote?.seasonsRange[0] ?? 1);
   const [result, setResult] = useState<{ accepted: boolean; ask: number; bonus: number } | null>(null);
-  // 수락 뒤에는 계약이 늘어 견적이 RENEWAL_NOT_OPEN 이 되므로 결과를 먼저 보여 준다
+  // 수락한 재계약은 시즌 경계에 적용된다(그 전에 다시 제안하면 덮어쓴다)
   if (result?.accepted)
     return (
       <p className="small">
-        <Badge tone="good">✓ 수락</Badge> 재계약했어요. 재계약 보너스 {josa(formatKc(result.bonus), '을/를')} 지급했어요.
+        <Badge tone="good">✓ 수락</Badge> 재계약했어요. 재계약 보너스 {josa(formatKc(result.bonus), '을/를')} 지급했고, 새 계약은 다음 시즌부터 적용돼요.
       </p>
     );
-  if (q.error) return <p className="small muted">{(isGameError(q.error) && TRANSFER_ERROR_TEXT[q.error.code]) || q.error.message}</p>;
-  if (!quote) return <p className="small muted">재계약은 곧 열려요. 지금은 시즌이 끝나면 계약이 자동으로 이어져요.</p>;
+  if (q.error) return <p className="small muted">{q.error.message}</p>;
+  if (!quote) return <p className="small muted">재계약은 아직 열리지 않았어요.</p>;
   const [lo, hi] = quote.seasonsRange;
   const bonus = Math.round((quote.bonusPerSeasonRate * (salary ?? 0) * seasons) / 1000) * 1000;
   const offer = () => {
@@ -334,9 +343,9 @@ function ReleasePanel({ p, onDone }: { p: Player; onDone: () => void }) {
   const snap = useGame();
   const q = useQuery((s) => s.getReleaseQuote?.(p.id), [p.id]);
   const { run, error } = useInlineAction();
-  if (q.error) return <p className="small muted">지금은 방출할 수 없어요. 방출 기능이 열리면 위약금을 보여 드릴게요.</p>;
+  if (q.error) return <p className="small muted">{q.error.message}</p>;
   const quote = q.data;
-  if (!quote) return <p className="small muted">방출은 곧 열려요.</p>;
+  if (!quote) return <p className="small muted">방출은 아직 열리지 않았어요.</p>;
   const release = () => {
     const ok = run((s) => {
       s.releasePlayer?.(p.id);
@@ -347,7 +356,7 @@ function ReleasePanel({ p, onDone }: { p: Player; onDone: () => void }) {
   return (
     <div className="form-stack">
       <p>{quote.exempt ? '위약금 없이 방출할 수 있어요.' : <>바로 내야 할 위약금: <strong className="neg">{formatKc(quote.penalty)}</strong> (남은 연봉의 절반)</>}</p>
-      <p className="small muted">방출한 선수는 FA가 되고 연봉 캡에서 빠져요. 18명보다 적어지면 임시 계약 선수가 채워요.</p>
+      <p className="small muted">방출은 언제든 할 수 있어요. 방출한 선수는 FA가 되고 연봉 캡에서 빠져요. 등록 선수가 18명보다 적어지면 FA 선수와 1시즌 긴급 계약을 자동으로 맺고 받은 편지함으로 알려 드려요.</p>
       <button type="button" className="btn btn-danger" onClick={release}>
         {quote.exempt ? '방출하기' : `위약금 ${formatKc(quote.penalty)} 내고 방출`}
       </button>

@@ -139,7 +139,13 @@ export const INBOX_ICON: Record<InboxKind, string> = {
   RENEWAL_OPEN: '✍', CONTRACT_EXPIRED: '⌛', PLAYER_RELEASED: '↩', NEGATIVE_BALANCE: '⚠', FORCED_SALE: '⚠',
   RETIREMENT_NOTICE: '👋', YOUTH_INTAKE: '🌱', YOUTH_AUTO_DECIDED: '🌱', DISCIPLINE_WARNING: '🟨', SUSPENDED: '🟥', GENERAL: '✉',
 };
-/** 이적·계약 오류 코드 → 해요체 안내 (문구 가이드 3.5: 무엇이 + 이유 + 할 수 있는 행동) */
+/** 편지 종류 이름 (아이콘은 aria-hidden 이라 화면 읽기용으로도 쓴다) */
+export const INBOX_KIND_LABEL: Record<InboxKind, string> = {
+  WINDOW_OPENED: '이적 창', BID_WON: '영입', BID_LOST: '영입 실패', PLAYER_SOLD: '판매', LISTING_UNSOLD: '미판매',
+  RENEWAL_OPEN: '재계약', CONTRACT_EXPIRED: '계약 만료', PLAYER_RELEASED: '방출', NEGATIVE_BALANCE: '잔액 부족', FORCED_SALE: '강제 매각',
+  RETIREMENT_NOTICE: '은퇴 예고', YOUTH_INTAKE: '유스', YOUTH_AUTO_DECIDED: '유스 승격', DISCIPLINE_WARNING: '징계 경고', SUSPENDED: '출장 정지', GENERAL: '알림',
+};
+/** 이적·계약 오류 코드 → 해요체 안내. 서비스 문구(2.2.1: 해요체 + 범위)가 비어 있을 때만 쓰는 대체 문구 */
 export const TRANSFER_ERROR_TEXT: Partial<Record<GameErrorCode, string>> = {
   WINDOW_CLOSED: '이적 창이 닫혀 있어요. 창이 열리면 받은 편지함으로 알려 드려요.',
   BID_OUT_OF_RANGE: '금액이나 기간이 허용 범위를 벗어났어요. 표시된 범위 안으로 고쳐 주세요.',
@@ -151,12 +157,13 @@ export const TRANSFER_ERROR_TEXT: Partial<Record<GameErrorCode, string>> = {
   RENEWAL_NOT_OPEN: '재계약은 계약이 1시즌 남은 선수만 Day 20~27에 할 수 있어요.',
   PERMISSION_DENIED: '구단주만 할 수 있어요.',
   NOT_FOUND: '대상을 찾지 못했어요. 이미 정리된 매물이나 선수일 수 있어요.',
-  INVALID_PHASE: '지금은 할 수 없어요. 시즌 진행 중에 다시 해 보세요.',
 };
 
 /** M 단위 입력값 ↔ KC (1,000 KC = 0.001M 단위) */
 export const kcToM = (v: number) => Math.round(v / 1000) / 1000;
 export const mToKc = (m: number) => Math.round((m * 1_000_000) / 1000) * 1000;
+/** 입력 칸 옆 범위 표시용: 입력 단위(0.001M) 그대로. formatKc 의 반올림 때문에 보이는 상한이 실제 상한을 넘지 않게 */
+export const exactM = (v: number) => `${kcToM(v)}M`;
 
 /** 2.1.0 피라미드 (기획서 6.1). 표시용 이름만, 규칙은 서비스(LeagueInfo)가 정한다 */
 export const TIER_NAME: Record<Tier, string> = { T1: '프리미어 디비전', T2: '디비전 1', T3: '디비전 2', T4: '디비전 3', T5: '루키 리그' };
