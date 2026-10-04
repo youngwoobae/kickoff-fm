@@ -17,7 +17,7 @@ function toSeasonOver(s: GameState): GameState {
 describe('시즌 경계 (M3.3)', () => {
   it('새 게임 → 3시즌: 승강 반영, 사용자 티어 변경, 70구단·각 14팀 불변, 선수 수 안정, 기록·보관 규칙', () => {
     const s = svc();
-    s.newGame({ seed: 7 }); // T5 시작, 이 시드는 1시즌에 승격
+    s.newGame({ seed: 1 }); // T5 시작, 이 시드는 1시즌에 승격 (M3.6 생성기 조정 뒤)
     const tiers: Tier[] = [s.getSnapshot()!.settings.tier];
     for (let season = 1; season <= 3; season++) {
       s.advanceToSeasonEnd();

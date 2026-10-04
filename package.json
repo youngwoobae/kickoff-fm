@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "sim:batch": "tsx scripts/sim-batch.ts"
+    "sim:batch": "tsx scripts/sim-batch.ts",
+    "sim:career": "tsx scripts/sim-career.ts"
   },
   "dependencies": {
     "react": "^18.3.1",

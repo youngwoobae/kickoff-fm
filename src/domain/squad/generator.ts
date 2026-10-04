@@ -141,14 +141,14 @@ export function generatePlayer(rng: Rng, position: Position, targetOvr: number, 
     if (delta === 0) break;
     for (const k of Object.keys(weights) as AttrKey[]) attrs[k] = clamp(attrs[k] + delta, 1, 20);
   }
-  const ageV = age ?? clamp(Math.round(25 + gauss(rng) * 4), 17, 35);
+  const ageV = age ?? clamp(Math.round(24.5 + gauss(rng) * 5), 17, 35);
   const positions: Partial<Record<Position, FitLevel>> = { [position]: 'NATURAL' };
   for (const [pos, levels] of SECONDARY[position]) {
     const lv = pick(rng, levels);
     if (lv !== 'UNSUITED') positions[pos] = lv;
   }
   const ovr = computeOvr({ attrs, primary: position });
-  const growth = ageV <= 21 ? randInt(rng, 6, 16) : ageV <= 24 ? randInt(rng, 2, 9) : ageV <= 28 ? randInt(rng, 0, 3) : 0;
+  const growth = ageV <= 21 ? randInt(rng, 2, 6) : ageV <= 24 ? randInt(rng, 0, 3) : ageV <= 28 ? randInt(rng, 0, 1) : 0;
   const potential = clamp(ovr + growth, ovr, 95);
   const seasonsLeft = ageV <= 23 ? randInt(rng, 1, 3) : randInt(rng, 1, 5);
   return {

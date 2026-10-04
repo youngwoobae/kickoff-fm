@@ -102,14 +102,15 @@ export function startNewSeasonState(input: GameState, nowIso: string): GameState
     state.boundarySeason = ending;
   } else if (outcome) state.seasonHistory.push(outcome);
 
-  // ⑤ 계약 −1 (만료 시 자동 1시즌 재계약 [해석], 재계약은 M4.2), 컨디션·사기·부상·시즌 스탯 초기화
+  // ⑤ 계약 −1 (만료 시 자동 1시즌 재계약 [해석], AI 구단은 연봉 = 현재 OVR 의 S(OVR) (M3.6: 고정 연봉이면 성장한 유스가 싼 연봉에 묶여 지출이 줄고 잔액이 쌓인다. 사람 구단 재계약 연봉은 M4.2 사용자 결정이라 유지). 재계약은 M4.2), 컨디션·사기·부상·시즌 스탯 초기화
   for (const p of Object.values(state.players)) {
     const left = p.contract.seasonsLeft - 1;
+    const reprice = p.clubId !== null && left <= 0 && !state.clubs[p.clubId]?.isHuman;
     state.players[p.id] = {
       ...p,
       condition: 100,
       morale: 0,
-      contract: { ...p.contract, seasonsLeft: p.clubId === null ? p.contract.seasonsLeft : left <= 0 ? 1 : left },
+      contract: p.clubId === null ? p.contract : { ...p.contract, seasonsLeft: left <= 0 ? 1 : left, ...(reprice ? { salary: baseSalary(p.ovr) } : {}) },
       availability: { ...p.availability, injuryDays: 0 },
       season: { ...SEASON_RESET },
     };

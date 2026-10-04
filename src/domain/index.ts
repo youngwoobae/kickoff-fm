@@ -102,3 +102,4 @@ export {
   type AdvanceOutcome,
 } from './day/advanceDay';
 export { DomainError, isDomainError } from './errors';
+export { runCareerSim, runCareerSeed, judgeCareer, type CareerSimOptions, type CareerSimReport, type CareerGate, type SeedRun } from './calibration/careerSim';
