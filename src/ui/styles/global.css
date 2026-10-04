@@ -2099,3 +2099,88 @@ button.fx-row {
 .update-banner > span {
   flex: 1;
 }
+
+/* 2.2.0 이적·계약·편지함 (M4.5·M4.6) */
+.error-note {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bad-soft);
+  color: var(--bad);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.error-note small {
+  font-weight: 400;
+}
+.field input[aria-invalid='true'] {
+  border-color: var(--bad);
+}
+.form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.filter-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 8px 0;
+}
+.listing-meta {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.hdr-inbox {
+  position: relative;
+}
+.count-badge {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--bad);
+  color: #fff;
+  font-size: 0.6875rem;
+  font-weight: 800;
+  line-height: 18px;
+  text-align: center;
+}
+.inbox-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.inbox-item:last-child {
+  border-bottom: 0;
+}
+.inbox-head {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  width: 100%;
+  min-height: var(--tap);
+  border: 0;
+  background: none;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+.inbox-head .inbox-title {
+  flex: 1;
+}
+.inbox-item.is-unread .inbox-title {
+  font-weight: 800;
+}
+.inbox-body {
+  margin: 0;
+  font-size: 0.875rem;
+}

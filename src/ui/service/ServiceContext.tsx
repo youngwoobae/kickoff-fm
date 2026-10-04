@@ -4,8 +4,8 @@
  * - 조회: useQuery (스냅샷이 바뀔 때만 재계산, GameError 는 값으로 돌려준다)
  * - 변경: useAction (GameError → 토스트, 그 외 예외 → 치명 오류 화면)
  */
-import { createContext, useCallback, useContext, useMemo, useSyncExternalStore, type ReactNode } from 'react';
-import { isGameError, type GameService } from '../../services';
+import { createContext, useCallback, useContext, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { isGameError, type GameError, type GameService } from '../../services';
 import type { GameSnapshot, Membership, SaveStatus } from '../../types';
 import { useToast } from '../components/Toast';
 import type { ServiceMode } from './serviceHost';
@@ -93,6 +93,30 @@ export function useAction() {
     },
     [service, reportFatal, toast],
   );
+}
+
+/** 시트 안 변경 실행기: GameError 를 토스트 대신 error 로 남겨 그 자리에서 안내한다 (이적·계약) */
+export function useInlineAction() {
+  const { service, reportFatal } = useServiceCtx();
+  const toast = useToast();
+  const [error, setError] = useState<GameError | null>(null);
+  const run = useCallback(
+    <T,>(fn: (s: GameService) => T, success?: string): T | undefined => {
+      try {
+        const r = fn(service);
+        setError(null);
+        if (success) toast.show(success, 'success');
+        return r;
+      } catch (e) {
+        if (isGameError(e)) setError(e);
+        else reportFatal(e);
+        return undefined;
+      }
+    },
+    [service, reportFatal, toast],
+  );
+  const clear = useCallback(() => setError(null), []);
+  return { run, error, clear };
 }
 
 /** 비동기 변경(슬롯·flush) 실행기. useAction 과 같은 오류 처리 */

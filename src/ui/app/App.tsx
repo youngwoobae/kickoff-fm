@@ -14,12 +14,14 @@ import { CareerScreen } from '../screens/CareerScreen';
 import { CoachScreen } from '../screens/CoachScreen';
 import { FinanceScreen } from '../screens/FinanceScreen';
 import { HomeScreen } from '../screens/HomeScreen';
+import { InboxScreen, useUnreadCount } from '../screens/InboxScreen';
 import { LeagueScreen } from '../screens/LeagueScreen';
 import { LineupScreen } from '../screens/LineupScreen';
 import { MatchCenterScreen } from '../screens/MatchCenterScreen';
 import { PlanScreen } from '../screens/PlanScreen';
 import { SquadScreen } from '../screens/SquadScreen';
 import { TacticsScreen } from '../screens/TacticsScreen';
+import { TransferScreen } from '../screens/TransferScreen';
 import { SettingsButton } from '../screens/SettingsSheet';
 import { TitleScreen } from '../screens/TitleScreen';
 import { Tour } from '../tutorial/Tour';
@@ -142,7 +144,7 @@ function Shell() {
               type="button"
               className={t.id === nav.tab ? 'tab is-active' : 'tab'}
               aria-current={t.id === nav.tab ? 'page' : undefined}
-              onClick={() => go({ tab: t.id })}
+              onClick={() => go(t.id === 'home' ? { tab: t.id, homeView: 'today' } : { tab: t.id })}
             >
               <span className="tab-icon" aria-hidden="true">
                 {t.icon}
@@ -162,7 +164,9 @@ function useTabBadges(): Partial<Record<TabId, string>> {
   const actor = useActor();
   const ps = useQuery((s) => s.getPlanState()).data;
   const open = useQuery((s) => s.listProposals({ status: 'OPEN' })).data ?? [];
+  const unread = useUnreadCount();
   const out: Partial<Record<TabId, string>> = {};
+  if (unread > 0) out.home = `안 읽은 편지 ${unread}통`;
   if (ps?.matchId && !ps.confirmed) {
     out.home = '플랜 미제출';
     out.tactics = '플랜 미확정';
@@ -182,7 +186,7 @@ function TabContent({ tab }: { tab: TabId }) {
   );
   switch (tab) {
     case 'home':
-      return <HomeScreen />;
+      return nav.homeView === 'inbox' ? <InboxScreen /> : <HomeScreen />;
     case 'squad':
       return sub(
         nav.squad === 'list' ? <SquadScreen /> : <LineupScreen />,
@@ -199,7 +203,7 @@ function TabContent({ tab }: { tab: TabId }) {
       const dev = !!DevPanel && (snap?.settings.devMode ?? true);
       const cur = !dev && nav.club === 'dev' ? 'league' : nav.club;
       const body =
-        cur === 'league' ? <LeagueScreen /> : cur === 'career' ? <CareerScreen /> : cur === 'finance' ? <FinanceScreen /> : cur === 'coach' ? <CoachScreen /> : DevPanel && (
+        cur === 'league' ? <LeagueScreen /> : cur === 'career' ? <CareerScreen /> : cur === 'finance' ? <FinanceScreen /> : cur === 'transfer' ? <TransferScreen /> : cur === 'coach' ? <CoachScreen /> : DevPanel && (
           <Suspense fallback={<div className="boot">불러오는 중…</div>}>
             <DevPanel />
           </Suspense>
@@ -215,6 +219,7 @@ function TabContent({ tab }: { tab: TabId }) {
             { value: 'league', label: '리그' },
             { value: 'career', label: '커리어' },
             { value: 'finance', label: '재정' },
+            { value: 'transfer', label: '이적' },
             { value: 'coach', label: '코치실' },
             ...(dev ? [{ value: 'dev' as const, label: '개발자' }] : []),
           ]}
@@ -251,9 +256,26 @@ function TopBar() {
       >
         {actor?.seat === 'OWNER' ? '👑 구단주' : '🧢 코치'}
       </button>
+      <InboxButton />
       <SettingsButton inGame />
       <TitleButton />
     </header>
+  );
+}
+
+/** 상단 받은 편지함 버튼 + 안 읽은 수 배지 */
+function InboxButton() {
+  const { go } = useNav();
+  const unread = useUnreadCount();
+  return (
+    <button type="button" className="btn btn-ghost btn-icon hdr-inbox" aria-label={`받은 편지함${unread ? `, 안 읽은 편지 ${unread}통` : ''}`} title="받은 편지함" onClick={() => go({ tab: 'home', homeView: 'inbox' })}>
+      ✉
+      {unread > 0 && (
+        <span className="count-badge" aria-hidden="true">
+          {unread > 99 ? '99+' : unread}
+        </span>
+      )}
+    </button>
   );
 }
 

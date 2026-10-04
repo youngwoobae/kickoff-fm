@@ -6,6 +6,9 @@ import type {
   MatchupRuleHint,
   StyleDef,
   StyleFit,
+  GameErrorCode,
+  InboxKind,
+  ListingKind,
   Membership,
   ConditionalOrder,
   FitLevel,
@@ -15,6 +18,8 @@ import type {
   PromotionLabel,
   PromotionLedgerKind,
   Tier,
+  TransferLedgerKind,
+  WindowKind,
   PlanAdjustmentKind,
   PlanSource,
   Player,
@@ -104,8 +109,8 @@ export const ADJ_LABEL: Record<PlanAdjustmentKind, string> = {
   CONDITIONAL_DISABLED: '조건부 지시 비활성',
 };
 
-/** 2.1.0: PromotionLedgerKind 는 M3.3 이 LedgerKind 에 합칠 때까지 별도 유니온 */
-export const LEDGER_LABEL: Record<LedgerKind | PromotionLedgerKind, string> = {
+/** 2.2.0: TransferLedgerKind 는 M4.4 가 LedgerKind 에 합칠 때까지 별도 유니온 (라벨은 미리 둔다) */
+export const LEDGER_LABEL: Record<LedgerKind | PromotionLedgerKind | TransferLedgerKind, string> = {
   SEASON_BUDGET: '시즌 배정금',
   SALARY: '연봉',
   MATCH_WIN: '승리 수당',
@@ -117,7 +122,41 @@ export const LEDGER_LABEL: Record<LedgerKind | PromotionLedgerKind, string> = {
   TRANSFER_BUDGET_EXPIRED: '한정 예산 소멸',
   PROMOTION_BONUS: '승격 보너스',
   PARACHUTE: '강등 완충금',
+  TRANSFER_FEE_PAID: '이적료 지급',
+  TRANSFER_FEE_RECEIVED: '이적료 수입',
+  TRANSFER_TAX: '이적세',
+  SIGNING_BONUS: '계약금',
+  RENEWAL_BONUS: '재계약 보너스',
+  RELEASE_PENALTY: '방출 위약금',
+  FORCED_SALE: '강제 매각 수입',
 };
+
+/** 2.2.0 이적·편지함 표시 라벨 */
+export const WINDOW_KIND_LABEL: Record<WindowKind, string> = { MID: '시즌 중간 이적 창', REGULAR: '정규 이적 창' };
+export const LISTING_KIND_LABEL: Record<ListingKind, string> = { NPC: '신규', FA: 'FA', CLUB: '구단 명단' };
+export const INBOX_ICON: Record<InboxKind, string> = {
+  WINDOW_OPENED: '🔔', BID_WON: '✅', BID_LOST: '✕', PLAYER_SOLD: '💰', LISTING_UNSOLD: '–',
+  RENEWAL_OPEN: '✍', CONTRACT_EXPIRED: '⌛', PLAYER_RELEASED: '↩', NEGATIVE_BALANCE: '⚠', FORCED_SALE: '⚠',
+  RETIREMENT_NOTICE: '👋', YOUTH_INTAKE: '🌱', YOUTH_AUTO_DECIDED: '🌱', DISCIPLINE_WARNING: '🟨', SUSPENDED: '🟥', GENERAL: '✉',
+};
+/** 이적·계약 오류 코드 → 해요체 안내 (문구 가이드 3.5: 무엇이 + 이유 + 할 수 있는 행동) */
+export const TRANSFER_ERROR_TEXT: Partial<Record<GameErrorCode, string>> = {
+  WINDOW_CLOSED: '이적 창이 닫혀 있어요. 창이 열리면 받은 편지함으로 알려 드려요.',
+  BID_OUT_OF_RANGE: '금액이나 기간이 허용 범위를 벗어났어요. 표시된 범위 안으로 고쳐 주세요.',
+  INSUFFICIENT_FUNDS: '지출 가능액이 모자라요. 다른 입찰을 철회하거나 금액을 낮춰 보세요.',
+  CAP_EXCEEDED: '연봉 캡을 넘게 돼요. 연봉을 낮추거나 선수를 정리한 뒤 다시 해 보세요.',
+  SQUAD_FULL: '선수단이 25명으로 꽉 찼어요. 선수를 판매하거나 방출한 뒤 입찰해 주세요.',
+  SIGNING_LIMIT: '이번 시즌 영입 한도(8명)에 닿았어요. 다음 시즌에 다시 해 보세요.',
+  NEGATIVE_BALANCE_LOCK: '잔액이 마이너스라 입찰·재계약 인상이 막혀 있어요. 잔액을 먼저 회복해 주세요.',
+  RENEWAL_NOT_OPEN: '재계약은 계약이 1시즌 남은 선수만 Day 20~27에 할 수 있어요.',
+  PERMISSION_DENIED: '구단주만 할 수 있어요.',
+  NOT_FOUND: '대상을 찾지 못했어요. 이미 정리된 매물이나 선수일 수 있어요.',
+  INVALID_PHASE: '지금은 할 수 없어요. 시즌 진행 중에 다시 해 보세요.',
+};
+
+/** M 단위 입력값 ↔ KC (1,000 KC = 0.001M 단위) */
+export const kcToM = (v: number) => Math.round(v / 1000) / 1000;
+export const mToKc = (m: number) => Math.round((m * 1_000_000) / 1000) * 1000;
 
 /** 2.1.0 피라미드 (기획서 6.1). 표시용 이름만, 규칙은 서비스(LeagueInfo)가 정한다 */
 export const TIER_NAME: Record<Tier, string> = { T1: '프리미어 디비전', T2: '디비전 1', T3: '디비전 2', T4: '디비전 3', T5: '루키 리그' };

@@ -1,9 +1,10 @@
 /** Q01 선수 목록 · Q02 선수 상세(시트) (소유: B) */
 import { useMemo, useState } from 'react';
+import { isGameError } from '../../services';
 import type { AttrDef, Player, PlayerId } from '../../types';
-import { Badge, Card, ConditionBar, Empty, FitMark, Segmented, Sheet } from '../components/kit';
-import { FIT_LABEL, MORALE_LABEL, MORALE_SHORT, POS_LABEL, POS_NAME, POS_ORDER, fitOf, formatKc, isAvailable } from '../format';
-import { useGame, useQuery } from '../service/ServiceContext';
+import { Badge, Card, ConditionBar, Empty, ErrorNote, FitMark, MoneyField, Segmented, Sheet } from '../components/kit';
+import { FIT_LABEL, MORALE_LABEL, MORALE_SHORT, POS_LABEL, POS_NAME, POS_ORDER, TRANSFER_ERROR_TEXT, fitOf, formatKc, isAvailable } from '../format';
+import { useGame, useInlineAction, useIsOwner, useQuery } from '../service/ServiceContext';
 
 type SortKey = 'pos' | 'ovr' | 'cond' | 'form';
 
@@ -92,12 +93,12 @@ export function PlayerSheet({ playerId, onClose }: { playerId: PlayerId | null; 
   if (!playerId || !p) return null;
   return (
     <Sheet open title={p.name} onClose={onClose}>
-      <PlayerDetail p={p} attrs={catalog?.attributes ?? []} />
+      <PlayerDetail p={p} attrs={catalog?.attributes ?? []} onClose={onClose} />
     </Sheet>
   );
 }
 
-function PlayerDetail({ p, attrs }: { p: Player; attrs: AttrDef[] }) {
+function PlayerDetail({ p, attrs, onClose }: { p: Player; attrs: AttrDef[]; onClose: () => void }) {
   const groups: [AttrDef['group'], string][] = p.primary === 'GK'
     ? [['GOALKEEPING', '골키핑'], ['MENTAL', '정신'], ['PHYSICAL', '신체'], ['TECHNICAL', '기술']]
     : [['TECHNICAL', '기술'], ['MENTAL', '정신'], ['PHYSICAL', '신체']];
@@ -118,10 +119,8 @@ function PlayerDetail({ p, attrs }: { p: Player; attrs: AttrDef[] }) {
         <div>
           스카우트 등급 {p.scoutRange[0]}~{p.scoutRange[1]}
         </div>
-        <div>
-          계약 {p.contract.seasonsLeft}시즌 · 연봉 {formatKc(p.contract.salary)}
-        </div>
       </div>
+      <ContractSection p={p} onClose={onClose} />
       {!isAvailable(p) && (
         <p className="warn-line">
           {p.availability.injuryDays > 0 && `부상 ${p.availability.injuryDays}일 남음 `}
@@ -223,5 +222,135 @@ function GrowthHistory({ p }: { p: Player }) {
         ))}
       </ul>
     </>
+  );
+}
+
+/** 계약·재계약·방출 (M4.6, 계약 2.2.0 선택 메서드). 내 선수만, 실행은 구단주만 */
+function ContractSection({ p, onClose }: { p: Player; onClose: () => void }) {
+  const snap = useGame();
+  const isOwner = useIsOwner();
+  const [mode, setMode] = useState<'none' | 'renew' | 'release'>('none');
+  const mine = p.clubId === snap.userClubId;
+  const c = p.contract;
+  if (!p.clubId) return <p className="small muted">무소속(FA) 선수예요.</p>;
+  return (
+    <>
+      <h3 className="h3">계약</h3>
+      <ul className="list compact">
+        <li className="list-row">
+          <span>연봉 · 남은 기간</span>
+          <span>
+            {formatKc(c.salary)} · {c.seasonsLeft}시즌{c.seasonsLeft === 1 && <> <Badge tone="warn">⌛ 이번 시즌 만료</Badge></>}
+          </span>
+        </li>
+        {c.capCharge !== undefined && (
+          <li className="list-row">
+            <span>캡 산입액</span>
+            <span>{formatKc(c.capCharge)}</span>
+          </li>
+        )}
+        {!!c.bonusPerSeason && (
+          <li className="list-row">
+            <span>보너스 시즌 분할</span>
+            <span>{formatKc(c.bonusPerSeason)}</span>
+          </li>
+        )}
+      </ul>
+      {!mine ? null : !isOwner ? (
+        <p className="small muted">재계약과 방출은 구단주가 해요. 의견이 있으면 구단주에게 전해 주세요.</p>
+      ) : (
+        <>
+          <div className="btn-row">
+            <button type="button" className={`btn ${mode === 'renew' ? 'btn-primary' : 'btn-secondary'}`} aria-expanded={mode === 'renew'} onClick={() => setMode(mode === 'renew' ? 'none' : 'renew')}>
+              재계약
+            </button>
+            <button type="button" className={`btn ${mode === 'release' ? 'btn-danger' : 'btn-secondary'}`} aria-expanded={mode === 'release'} onClick={() => setMode(mode === 'release' ? 'none' : 'release')}>
+              방출
+            </button>
+          </div>
+          {mode === 'renew' && <RenewalPanel p={p} />}
+          {mode === 'release' && <ReleasePanel p={p} onDone={onClose} />}
+        </>
+      )}
+    </>
+  );
+}
+
+function RenewalPanel({ p }: { p: Player }) {
+  const snap = useGame();
+  const q = useQuery((s) => s.getRenewalQuote?.(p.id), [p.id]);
+  const quote = q.data;
+  const { run, error } = useInlineAction();
+  const [salary, setSalary] = useState<number | null>(quote?.askSalary ?? null);
+  const [seasons, setSeasons] = useState<number>(quote?.seasonsRange[0] ?? 1);
+  const [result, setResult] = useState<{ accepted: boolean; ask: number; bonus: number } | null>(null);
+  // 수락 뒤에는 계약이 늘어 견적이 RENEWAL_NOT_OPEN 이 되므로 결과를 먼저 보여 준다
+  if (result?.accepted)
+    return (
+      <p className="small">
+        <Badge tone="good">✓ 수락</Badge> 재계약했어요. 재계약 보너스 {formatKc(result.bonus)}를 지급했어요.
+      </p>
+    );
+  if (q.error) return <p className="small muted">{(isGameError(q.error) && TRANSFER_ERROR_TEXT[q.error.code]) || q.error.message}</p>;
+  if (!quote) return <p className="small muted">재계약은 곧 열려요. 지금은 시즌이 끝나면 계약이 자동으로 이어져요.</p>;
+  const [lo, hi] = quote.seasonsRange;
+  const bonus = Math.round((quote.bonusPerSeasonRate * (salary ?? 0) * seasons) / 1000) * 1000;
+  const offer = () => {
+    setResult(null);
+    const r = run((s) => s.offerRenewal?.(p.id, salary ?? 0, seasons));
+    if (r) setResult({ ...r, bonus });
+  };
+  return (
+    <div className="form-stack">
+      <p>
+        요구 연봉 <strong>{formatKc(quote.askSalary)}</strong> · 기간 {lo === hi ? lo : `${lo}~${hi}`}시즌
+      </p>
+      <MoneyField label="제안 연봉" value={salary} onChange={setSalary} hint={`요구 연봉 이상이면 받아들여요 · 재계약 보너스 ${formatKc(bonus)} 즉시 지급`} />
+      <div className="field">
+        <span>연장 기간</span>
+        <Segmented
+          label="연장 기간"
+          size="sm"
+          value={String(seasons)}
+          onChange={(v) => setSeasons(Number(v))}
+          options={Array.from({ length: hi - lo + 1 }, (_, i) => ({ value: String(lo + i), label: `${lo + i}시즌` }))}
+        />
+      </div>
+      <button type="button" className="btn btn-primary" disabled={!salary} onClick={offer}>
+        재계약 제안
+      </button>
+      {result && (
+        <p className="small">
+          <Badge tone="bad">✕ 거절</Badge> 선수가 거절했어요. 요구 연봉은 {formatKc(result.ask)}예요.
+        </p>
+      )}
+      <ErrorNote error={error} dev={snap.settings.devMode} />
+    </div>
+  );
+}
+
+function ReleasePanel({ p, onDone }: { p: Player; onDone: () => void }) {
+  const snap = useGame();
+  const q = useQuery((s) => s.getReleaseQuote?.(p.id), [p.id]);
+  const { run, error } = useInlineAction();
+  if (q.error) return <p className="small muted">지금은 방출할 수 없어요. 방출 기능이 열리면 위약금을 보여 드릴게요.</p>;
+  const quote = q.data;
+  if (!quote) return <p className="small muted">방출은 곧 열려요.</p>;
+  const release = () => {
+    const ok = run((s) => {
+      s.releasePlayer?.(p.id);
+      return true;
+    }, `${p.name} 선수를 방출했어요`);
+    if (ok) onDone();
+  };
+  return (
+    <div className="form-stack">
+      <p>{quote.exempt ? '위약금 없이 방출할 수 있어요.' : <>위약금 <strong className="neg">{formatKc(quote.penalty)}</strong>를 바로 내야 해요 (남은 연봉의 절반).</>}</p>
+      <p className="small muted">방출한 선수는 FA가 되고 연봉 캡에서 빠져요. 18명보다 적어지면 임시 계약 선수가 채워요.</p>
+      <button type="button" className="btn btn-danger" onClick={release}>
+        {quote.exempt ? '방출하기' : `위약금 ${formatKc(quote.penalty)} 내고 방출`}
+      </button>
+      <ErrorNote error={error} dev={snap.settings.devMode} />
+    </div>
   );
 }

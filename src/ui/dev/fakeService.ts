@@ -77,6 +77,19 @@ import type {
   LeagueInfo,
   Pyramid,
   Tier,
+  Bid,
+  BidInput,
+  InboxKind,
+  InboxMessage,
+  ListingKind,
+  ReleaseQuote,
+  RenewalQuote,
+  RenewalResult,
+  TransferLedgerKind,
+  TransferListing,
+  TransferListingFilter,
+  TransferWindow,
+  WindowKind,
 } from '../../types';
 import {
   CONTRACT_VERSION,
@@ -105,7 +118,7 @@ import {
   koreanName,
   mulberry32,
 } from './fakeData';
-import { TIER_NAME, conditionalText, nearestStyle } from '../format';
+import { TIER_NAME, conditionalText, formatKc, nearestStyle } from '../format';
 
 const FAKE_SAVE_KEY = 'kickoff-fm/fake/v2';
 const SCHEMA = 2;
@@ -194,6 +207,29 @@ const clone = <T>(v: T): T => structuredClone(v);
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const round2 = (v: number) => Math.round(v * 100) / 100;
 const clampStep = (v: number): Step => clamp(Math.round(v), -2, 2) as Step;
+const round1k = (v: number) => Math.round(v / 1000) * 1000;
+
+/** fake 이적 상태 (GameState 에 덧붙여 세이브에 함께 저장) */
+interface FakeMarket {
+  window: TransferWindow | null;
+  listings: TransferListing[];
+  bids: Bid[];
+  /** 이번 시즌 영입 수 */
+  signings: number;
+  nextId: number;
+}
+type FakeState = GameState & { market?: FakeMarket };
+/** 경제 3.2 근사: S(60) ≈ 3.0M, OVR 1점당 ×1.075 */
+const fakeS = (ovr: number) => 3_000_000 * 1.075 ** (ovr - 60);
+/** 경제 6.1 근사 평가가치 V (잠재력계수는 공개 정보가 없어 1.0) */
+function fakeValue(p: Player): number {
+  const age = p.age <= 21 ? 1.3 : p.age <= 27 ? 1 : p.age <= 30 ? 0.8 : 0.5;
+  const left = !p.clubId || p.contract.seasonsLeft >= 3 ? 1 : p.contract.seasonsLeft === 2 ? 0.85 : 0.6;
+  return round1k(5 * fakeS(p.ovr) * age * left);
+}
+function seasonsRangeOf(age: number): [number, number] {
+  return age <= 23 ? [1, 3] : age <= 29 ? [1, 4] : age <= 32 ? [1, 2] : [1, 1];
+}
 
 function fitOf(p: Player, pos: Position): FitLevel {
   if (p.primary === pos) return 'NATURAL';
@@ -532,7 +568,7 @@ export class FakeGameService implements GameService {
     plan.lineup.starters.forEach((id, i) => {
       const p = s.players[id];
       const pos = f.slots[i]?.position ?? 'CM';
-      if (!available(p)) {
+      if (!available(p) || p?.clubId !== plan.clubId) {
         const r = pickReplacement(pos, 0);
         if (r) {
           swapIn(i, r);
@@ -546,9 +582,10 @@ export class FakeGameService implements GameService {
         }
       }
     });
-    const bad = plan.lineup.bench.filter((id) => !available(s.players[id]));
+    const okBench = (id: PlayerId) => available(s.players[id]) && s.players[id]?.clubId === plan.clubId;
+    const bad = plan.lineup.bench.filter((id) => !okBench(id));
     if (bad.length) {
-      plan.lineup.bench = plan.lineup.bench.filter((id) => available(s.players[id]));
+      plan.lineup.bench = plan.lineup.bench.filter(okBench);
       adj.push({ kind: 'VALIDITY_FIX', note: `벤치 출전 불가 선수 ${bad.length}명 제외` });
     }
     const all = new Set([...plan.lineup.starters, ...plan.lineup.bench]);
@@ -649,6 +686,7 @@ export class FakeGameService implements GameService {
     }
     this.reports = {};
     this.replays = {};
+    this.openWindow(s, 'MID', 4, 1); // fake 체험용: 첫 시즌 Day 1~4 창
     if (opts.slotId !== undefined) this.setSlot(opts.slotId);
     this.commit(s);
     return s;
@@ -917,7 +955,8 @@ export class FakeGameService implements GameService {
       tier: s.settings.tier,
       balance: bal,
       transferOnlyBudget: fin.transferOnlyBudget,
-      spendable: Math.round(bal - (salaryTotal * remaining) / 28),
+      spendable: Math.round(bal - (salaryTotal * remaining) / 28 - (id === s.userClubId ? this.reservedTotal(s) : 0)),
+      reserved: id === s.userClubId ? this.reservedTotal(s) : 0,
       salaryTotal,
       salaryCap: ECON.cap,
       capUsage: salaryTotal / ECON.cap,
@@ -1150,6 +1189,7 @@ export class FakeGameService implements GameService {
       this.ledger(s, id, 'SEASON_BUDGET', ECON.budget);
       this.paySalary(s, id);
     }
+    this.mkt(s).signings = 0;
     this.log(s, 'SEASON_STARTED', { season: s.time.season });
     this.commit(s);
     return s;
@@ -1277,6 +1317,7 @@ export class FakeGameService implements GameService {
         notices.push('시즌이 끝났습니다. 리그 화면에서 결산을 확인하세요');
       }
     }
+    if (s.phase !== 'SEASON_OVER') this.marketTick(s, from, notices, userLedger);
     const processedAt = this.ts(s);
     this.log(s, 'DAY_ADVANCED', { from, to: s.time });
     return {
@@ -1841,6 +1882,333 @@ export class FakeGameService implements GameService {
     r.factorBars = { ...r.factorBars, tactics: round2(r.keyFactors.reduce((a, k) => a + k.xg, 0)) };
     return r;
   }
+  // ── 이적·계약·받은 편지함 (2.2.0 가짜 구현, 경제 설계 5·6장 근사) ─────────
+  // 창: 새 게임 Day 1~4(체험용), 매 시즌 Day 12~15 = MID, Day 27 → 다음 시즌 Day 2 = REGULAR.
+  // 정산은 settleDay 처리 시점. AI 경쟁 입찰은 V × (1.0~1.25) 난수 하나로 근사한다.
+  private mkt(s: GameState): FakeMarket {
+    const f = s as FakeState;
+    f.market ??= { window: null, listings: [], bids: [], signings: 0, nextId: 1 };
+    return f.market;
+  }
+  private inbox(s: GameState, kind: InboxKind, title: string, body: string, ref: Partial<Pick<InboxMessage, 'playerId' | 'clubId' | 'listingId' | 'matchId'>> = {}): void {
+    const m = this.mkt(s);
+    (s.inbox ??= []).push({ id: `s${s.time.season}-d${s.time.day}-${kind}-${m.nextId++}`, season: s.time.season, day: s.time.day, kind, title, body, read: false, ...ref });
+    if (s.inbox.length > 200) s.inbox.splice(0, s.inbox.length - 200);
+  }
+  private tledger(s: GameState, clubId: ClubId, kind: TransferLedgerKind, amount: number): LedgerEntry {
+    // ponytail: TransferLedgerKind 는 아직 LedgerKind 밖(M4.4 에서 합침). fake 는 캐스팅으로 미리 쓴다
+    return this.ledger(s, clubId, kind as unknown as LedgerKind, amount);
+  }
+  private remainingSalary(s: GameState): number {
+    const salary = this.squadOf(s, s.userClubId).reduce((a, p) => a + p.contract.salary, 0);
+    return (salary * Math.max(0, 28 - s.time.day)) / 28;
+  }
+  private reservationOf(s: GameState, b: Bid): number {
+    return (b.fee ?? 0) + (b.bonus ?? 0) + Math.round(((b.salary ?? 0) * Math.max(0, 28 - s.time.day)) / 28);
+  }
+  private reservedTotal(s: GameState, except?: string): number {
+    return this.mkt(s).bids.filter((b) => b.listingId !== except).reduce((a, b) => a + this.reservationOf(s, b), 0);
+  }
+  private requireWindow(s: GameState): TransferWindow {
+    const w = this.mkt(s).window;
+    if (!w) throw new GameError('WINDOW_CLOSED', '이적 창이 닫혀 있어요');
+    return w;
+  }
+  private myPlayer(s: GameState, playerId: PlayerId): Player {
+    const p = s.players[playerId];
+    if (!p || p.clubId !== s.userClubId) throw new GameError('NOT_FOUND', `내 선수가 아니에요: ${playerId}`);
+    return p;
+  }
+  private openWindow(s: GameState, kind: WindowKind, settleDay: number, settleSeason: SeasonNo): void {
+    const m = this.mkt(s);
+    const rng = mulberry32(s.gameSeed + s.time.season * 131 + s.time.day);
+    m.window = { kind, season: s.time.season, openDay: s.time.day, settleDay, settleSeason };
+    m.listings = [];
+    m.bids = [];
+    const POS: Position[] = ['GK', 'CB', 'FB', 'DM', 'CM', 'AM', 'W', 'ST'];
+    const add = (lk: ListingKind, p: Player, sellerClubId: ClubId | null, minRate = 1) => {
+      const V = fakeValue(p);
+      const S = fakeS(p.ovr);
+      const id = `L${s.time.season}-${s.time.day}-${m.nextId++}`;
+      m.listings.push(
+        lk === 'FA'
+          ? { id, kind: lk, playerId: p.id, sellerClubId: null, value: V, minPrice: 0, maxPrice: 0, bonusMax: round1k(S), salaryFloor: round1k(Math.max(200_000, 0.9 * S)), seasonsRange: seasonsRangeOf(p.age) }
+          : { id, kind: lk, playerId: p.id, sellerClubId, value: V, minPrice: round1k(V * minRate), maxPrice: round1k(V * 1.3) },
+      );
+    };
+    const pos = () => POS[Math.floor(rng() * POS.length)] ?? 'CM';
+    for (let i = 0; i < (kind === 'REGULAR' ? 10 : 6); i++) {
+      const pid = `n${s.time.season}-${s.time.day}-${i}`;
+      const p = genPlayer(rng, pid, USER_CLUB, pos(), 42 + rng() * 14);
+      p.clubId = null;
+      p.age = 19 + Math.floor(rng() * 12);
+      s.players[pid] = p;
+      add('NPC', p, null);
+    }
+    for (let i = 0; i < 4; i++) {
+      const pid = `f${s.time.season}-${s.time.day}-${i}`;
+      const p = genPlayer(rng, pid, USER_CLUB, pos(), 40 + rng() * 14);
+      p.clubId = null;
+      p.contract = { seasonsLeft: 0, salary: 0 };
+      s.players[pid] = p;
+      add('FA', p, null);
+    }
+    for (const club of Object.values(s.clubs)) {
+      if (club.isHuman || isVirtual(club.id) || rng() < 0.6) continue;
+      const pid = club.playerIds[Math.floor(rng() * club.playerIds.length)];
+      const p = pid ? s.players[pid] : undefined;
+      if (p) add('CLUB', p, club.id, 0.85 + rng() * 0.3);
+    }
+    this.inbox(s, 'WINDOW_OPENED', `${kind === 'MID' ? '시즌 중간' : '정규'} 이적 창이 열렸어요`, `매물 ${m.listings.length}건이 올라왔어요. 정산은 시즌 ${settleSeason} Day ${settleDay}에 해요.`);
+  }
+  private movePlayer(s: GameState, p: Player, to: ClubId | null): void {
+    if (p.clubId) {
+      const from = s.clubs[p.clubId];
+      if (from) from.playerIds = from.playerIds.filter((x) => x !== p.id);
+    }
+    p.clubId = to;
+    if (to) s.clubs[to]?.playerIds.push(p.id);
+  }
+  private settleWindow(s: GameState, notices: string[], userLedger: LedgerEntry[]): void {
+    const m = this.mkt(s);
+    const rng = mulberry32(s.gameSeed ^ (s.time.season * 977 + s.time.day));
+    const me = s.userClubId;
+    for (const L of m.listings) {
+      const p = s.players[L.playerId];
+      if (!p) continue;
+      const bid = m.bids.find((b) => b.listingId === L.id);
+      const ai = L.value * (1 + rng() * 0.25);
+      if (bid) {
+        const offer = L.kind === 'FA' ? (bid.bonus ?? 0) + (bid.salary ?? 0) * (bid.seasons ?? 1) * 0.5 : bid.fee ?? 0;
+        if (offer >= ai || rng() < 0.25) {
+          const cost = L.kind === 'FA' ? bid.bonus ?? 0 : bid.fee ?? 0;
+          userLedger.push(this.tledger(s, me, L.kind === 'FA' ? 'SIGNING_BONUS' : 'TRANSFER_FEE_PAID', -cost));
+          if (L.kind === 'CLUB' && L.sellerClubId) {
+            this.tledger(s, L.sellerClubId, 'TRANSFER_FEE_RECEIVED', cost);
+            this.tledger(s, L.sellerClubId, 'TRANSFER_TAX', -Math.round(cost * 0.1));
+          }
+          this.movePlayer(s, p, me);
+          p.contract =
+            L.kind === 'FA'
+              ? { seasonsLeft: bid.seasons ?? 1, salary: bid.salary ?? 0, bonusPerSeason: Math.round((bid.bonus ?? 0) / (bid.seasons ?? 1)) }
+              : { seasonsLeft: Math.min(3, seasonsRangeOf(p.age)[1]), salary: round1k(fakeS(p.ovr)) };
+          m.signings += 1;
+          this.inbox(s, 'BID_WON', `${p.name} 영입에 성공했어요`, `${L.kind === 'FA' ? '계약금' : '이적료'} ${formatKc(cost)} · 연봉 ${formatKc(p.contract.salary)} · ${p.contract.seasonsLeft}시즌 계약이에요.`, { playerId: p.id, listingId: L.id });
+          notices.push(`${p.name} 영입 성공`);
+        } else {
+          this.inbox(s, 'BID_LOST', `${p.name} 입찰에서 졌어요`, '다른 구단이 더 좋은 조건을 냈어요. 예약했던 금액은 풀렸어요.', { playerId: p.id, listingId: L.id });
+          notices.push(`${p.name} 입찰 실패`);
+        }
+        continue;
+      }
+      if (L.kind === 'CLUB' && L.sellerClubId === me) {
+        if (rng() < 0.6) {
+          const price = round1k(L.minPrice + rng() * (L.maxPrice - L.minPrice));
+          const buyer = Object.values(s.clubs).find((c) => !c.isHuman && !isVirtual(c.id) && rng() < 0.3) ?? s.clubs.c01;
+          userLedger.push(this.tledger(s, me, 'TRANSFER_FEE_RECEIVED', price));
+          userLedger.push(this.tledger(s, me, 'TRANSFER_TAX', -Math.round(price * 0.1)));
+          this.movePlayer(s, p, buyer?.id ?? null);
+          this.inbox(s, 'PLAYER_SOLD', `${p.name} 판매가 끝났어요`, `${buyer?.name ?? 'AI 구단'}에 ${formatKc(price)}에 팔렸어요. 이적세 10%를 뺀 ${formatKc(Math.round(price * 0.9))}이 들어왔어요.`, { playerId: p.id, clubId: buyer?.id, listingId: L.id });
+          notices.push(`${p.name} 판매 완료`);
+        } else {
+          this.inbox(s, 'LISTING_UNSOLD', `${p.name} 판매가 이뤄지지 않았어요`, '사려는 구단이 없어서 선수단에 그대로 남아요.', { playerId: p.id, listingId: L.id });
+        }
+      }
+    }
+    // 팔리지 않은 신규·FA 선수는 무소속(clubId null)으로 남는다 — 편지함 '선수 보기'가 계속 열리도록
+    m.window = null;
+    m.listings = [];
+    m.bids = [];
+  }
+  /** step() 이 날짜를 바꾼 뒤 부른다. processed = 방금 처리한 날 */
+  private marketTick(s: GameState, processed: { season: SeasonNo; day: number }, notices: string[], userLedger: LedgerEntry[]): void {
+    const m = this.mkt(s);
+    if (m.window && processed.season === m.window.settleSeason && processed.day === m.window.settleDay) this.settleWindow(s, notices, userLedger);
+    if (!m.window) {
+      if (s.time.day === 12 && s.phase === 'MATCHDAY') this.openWindow(s, 'MID', 15, s.time.season);
+      if (s.time.day === 27 && s.phase === 'OFFSEASON') this.openWindow(s, 'REGULAR', 2, s.time.season + 1);
+    }
+    if (s.time.day === 20 && s.phase === 'MATCHDAY') {
+      const due = this.squadOf(s, s.userClubId).filter((p) => p.contract.seasonsLeft === 1 && !p.isTemporary);
+      if (due.length)
+        this.inbox(s, 'RENEWAL_OPEN', `재계약 기간이 시작됐어요 (${due.length}명)`, `${due.map((p) => p.name).join(', ')}의 계약이 이번 시즌에 끝나요. Day 27까지 선수 상세에서 재계약할 수 있어요.`, { playerId: due[0]?.id });
+    }
+  }
+
+  getTransferWindow(): TransferWindow | null {
+    return this.mkt(this.req()).window;
+  }
+  listTransferListings(filter: TransferListingFilter = {}): TransferListing[] {
+    const s = this.req();
+    return this.mkt(s)
+      .listings.filter((l) => {
+        const p = s.players[l.playerId];
+        if (!p) return false;
+        if (filter.kind && l.kind !== filter.kind) return false;
+        if (filter.position && p.primary !== filter.position) return false;
+        if (filter.minOvr !== undefined && p.ovr < filter.minOvr) return false;
+        if (filter.maxPrice !== undefined && l.minPrice > filter.maxPrice) return false;
+        return true;
+      })
+      .sort((a, b) => b.value - a.value || a.id.localeCompare(b.id));
+  }
+  placeBid(input: BidInput): Bid {
+    const s = clone(this.req());
+    this.requireOwner(s);
+    this.requireWindow(s);
+    const m = this.mkt(s);
+    const L = m.listings.find((l) => l.id === input.listingId);
+    if (!L || L.sellerClubId === s.userClubId) throw new GameError('NOT_FOUND', '매물을 찾지 못했어요');
+    const fin = s.finances[s.userClubId];
+    if ((fin?.balance ?? 0) < 0) throw new GameError('NEGATIVE_BALANCE_LOCK', '잔액이 마이너스예요');
+    const bid: Bid = { listingId: L.id, clubId: s.userClubId, placedDay: s.time.day };
+    if (L.kind === 'FA') {
+      const [lo, hi] = L.seasonsRange ?? [1, 1];
+      const bonus = input.bonus ?? 0;
+      const salary = input.salary ?? 0;
+      const seasons = input.seasons ?? lo;
+      if (bonus < 0 || bonus > (L.bonusMax ?? 0)) throw new GameError('BID_OUT_OF_RANGE', `계약금은 0~${formatKc(L.bonusMax ?? 0)}이에요`);
+      if (salary < (L.salaryFloor ?? 0)) throw new GameError('BID_OUT_OF_RANGE', `연봉은 ${formatKc(L.salaryFloor ?? 0)} 이상이어야 해요`);
+      if (seasons < lo || seasons > hi) throw new GameError('BID_OUT_OF_RANGE', `계약 기간은 ${lo}~${hi}시즌이에요`);
+      Object.assign(bid, { bonus, salary, seasons });
+    } else {
+      const fee = input.fee ?? 0;
+      if (fee < L.minPrice || fee > L.maxPrice) throw new GameError('BID_OUT_OF_RANGE', `이적료는 ${formatKc(L.minPrice)}~${formatKc(L.maxPrice)}이에요`);
+      bid.fee = fee;
+    }
+    const others = m.bids.filter((b) => b.listingId !== L.id);
+    const squad = this.squadOf(s, s.userClubId);
+    if (squad.length + others.length + 1 > 25) throw new GameError('SQUAD_FULL', '선수단 25명 상한');
+    if (m.signings + others.length + 1 > 8) throw new GameError('SIGNING_LIMIT', '시즌 영입 한도 8명');
+    const newSalary = L.kind === 'FA' ? bid.salary ?? 0 : fakeS(s.players[L.playerId]?.ovr ?? 50);
+    const salaryTotal = squad.reduce((a, x) => a + x.contract.salary, 0);
+    if (salaryTotal + newSalary > ECON.cap) throw new GameError('CAP_EXCEEDED', `영입 후 연봉 합계 ${formatKc(salaryTotal + newSalary)} > 캡 ${formatKc(ECON.cap)}`);
+    const spendable = (fin?.balance ?? 0) - this.remainingSalary(s) - this.reservedTotal(s, L.id);
+    const need = this.reservationOf(s, bid);
+    if (need > spendable) throw new GameError('INSUFFICIENT_FUNDS', `필요 ${formatKc(need)} > 지출 가능액 ${formatKc(Math.round(spendable))}`);
+    m.bids = [...others, bid];
+    this.commit(s);
+    return bid;
+  }
+  withdrawBid(listingId: string): void {
+    const s = clone(this.req());
+    this.requireOwner(s);
+    this.requireWindow(s);
+    const m = this.mkt(s);
+    if (!m.bids.some((b) => b.listingId === listingId)) throw new GameError('NOT_FOUND', '이 매물에 낸 입찰이 없어요');
+    m.bids = m.bids.filter((b) => b.listingId !== listingId);
+    this.commit(s);
+  }
+  listBids(): Bid[] {
+    return this.mkt(this.req()).bids;
+  }
+  listForSale(playerId: PlayerId, minPrice: number): TransferListing {
+    const s = clone(this.req());
+    this.requireOwner(s);
+    const w = this.requireWindow(s);
+    const p = this.myPlayer(s, playerId);
+    const m = this.mkt(s);
+    if (m.listings.some((l) => l.playerId === playerId)) throw new GameError('BID_OUT_OF_RANGE', '이미 명단에 올린 선수예요');
+    if (w.kind === 'REGULAR' && p.contract.seasonsLeft <= 1) throw new GameError('BID_OUT_OF_RANGE', '계약이 1시즌 남은 선수는 정규 창 명단에 올릴 수 없어요');
+    const V = fakeValue(p);
+    const lo = round1k(V * 0.7);
+    const hi = round1k(V * 1.3);
+    if (minPrice < lo || minPrice > hi) throw new GameError('BID_OUT_OF_RANGE', `최저가는 ${formatKc(lo)}~${formatKc(hi)}예요 (평가가치 ${formatKc(V)})`);
+    const L: TransferListing = { id: `L${s.time.season}-${s.time.day}-${m.nextId++}`, kind: 'CLUB', playerId, sellerClubId: s.userClubId, value: V, minPrice: round1k(minPrice), maxPrice: hi };
+    m.listings.push(L);
+    this.commit(s);
+    return L;
+  }
+  withdrawListing(listingId: string): void {
+    const s = clone(this.req());
+    this.requireOwner(s);
+    this.requireWindow(s);
+    const m = this.mkt(s);
+    if (!m.listings.some((l) => l.id === listingId && l.sellerClubId === s.userClubId)) throw new GameError('NOT_FOUND', '내 명단이 아니에요');
+    m.listings = m.listings.filter((l) => l.id !== listingId);
+    this.commit(s);
+  }
+  private renewalAsk(s: GameState, p: Player): number {
+    const games = s.fixtures.filter((f) => f.played && f.season === s.time.season && (f.homeId === s.userClubId || f.awayId === s.userClubId)).length;
+    let mult = 1;
+    if (games > 0 && p.season.starts >= games / 2) mult += 0.1;
+    if (p.age >= 33) mult -= 0.2;
+    else if (p.age >= 31) mult -= 0.1;
+    return round1k(fakeS(p.ovr) * clamp(mult, 0.9, 1.3));
+  }
+  getRenewalQuote(playerId: PlayerId): RenewalQuote {
+    const s = this.req();
+    const p = this.myPlayer(s, playerId);
+    if (s.phase !== 'MATCHDAY' || s.time.day < 20 || s.time.day > 27 || p.contract.seasonsLeft !== 1 || p.isTemporary) throw new GameError('RENEWAL_NOT_OPEN', '재계약 기간이 아니에요');
+    return { playerId, askSalary: this.renewalAsk(s, p), seasonsRange: seasonsRangeOf(p.age), bonusPerSeasonRate: 0.1 };
+  }
+  offerRenewal(playerId: PlayerId, salary: number, seasons: number): RenewalResult {
+    const s = clone(this.req());
+    this.requireOwner(s);
+    const q = this.getRenewalQuote(playerId);
+    const p = this.myPlayer(s, playerId);
+    if ((s.finances[s.userClubId]?.balance ?? 0) < 0 && salary > p.contract.salary) throw new GameError('NEGATIVE_BALANCE_LOCK', '잔액이 마이너스예요');
+    const total = this.squadOf(s, s.userClubId).reduce((a, x) => a + x.contract.salary, 0) - p.contract.salary + salary;
+    if (total > ECON.cap) throw new GameError('CAP_EXCEEDED', `재계약 후 연봉 합계 ${formatKc(total)} > 캡 ${formatKc(ECON.cap)}`);
+    const accepted = salary >= q.askSalary && seasons >= q.seasonsRange[0] && seasons <= q.seasonsRange[1];
+    if (!accepted) return { accepted, ask: q.askSalary };
+    const bonus = round1k(q.bonusPerSeasonRate * salary * seasons);
+    p.contract = { seasonsLeft: seasons + 1, salary, bonusPerSeason: Math.round(bonus / seasons) };
+    this.tledger(s, s.userClubId, 'RENEWAL_BONUS', -bonus);
+    this.inbox(s, 'GENERAL', `${p.name} 재계약을 마쳤어요`, `연봉 ${formatKc(salary)} · ${seasons}시즌 연장 · 재계약 보너스 ${formatKc(bonus)}를 지급했어요.`, { playerId });
+    this.commit(s);
+    return { accepted, ask: q.askSalary };
+  }
+  getReleaseQuote(playerId: PlayerId): ReleaseQuote {
+    const s = this.req();
+    const p = this.myPlayer(s, playerId);
+    const remaining = (p.contract.salary * Math.max(0, 28 - s.time.day)) / 28 + p.contract.salary * Math.max(0, p.contract.seasonsLeft - 1);
+    const exempt = p.isTemporary;
+    return { playerId, penalty: exempt ? 0 : round1k(0.5 * remaining), exempt };
+  }
+  releasePlayer(playerId: PlayerId): void {
+    const s = clone(this.req());
+    this.requireOwner(s);
+    const p = this.myPlayer(s, playerId);
+    const q = this.getReleaseQuote(playerId);
+    if (q.penalty > 0) this.tledger(s, s.userClubId, 'RELEASE_PENALTY', -q.penalty);
+    this.movePlayer(s, p, null);
+    const m = this.mkt(s);
+    m.listings = m.listings.filter((l) => l.playerId !== playerId);
+    this.inbox(s, 'PLAYER_RELEASED', `${p.name} 방출을 마쳤어요`, q.penalty > 0 ? `위약금 ${formatKc(q.penalty)}를 지급했어요. 선수는 FA가 돼요.` : '위약금 없이 방출했어요. 선수는 FA가 돼요.', { playerId });
+    if (this.squadOf(s, s.userClubId).length < 18) {
+      const tid = `t${s.time.season}-${s.time.day}-${m.nextId++}`;
+      const t = genPlayer(mulberry32(s.gameSeed + m.nextId), tid, s.userClubId, p.primary, 45);
+      t.isTemporary = true;
+      t.contract = { seasonsLeft: 1, salary: 200_000 };
+      s.players[tid] = t;
+      s.clubs[s.userClubId]?.playerIds.push(tid);
+      this.inbox(s, 'GENERAL', '임시 계약 선수가 합류했어요', `선수단이 18명보다 적어서 ${t.name} 선수가 임시로 들어왔어요.`, { playerId: tid });
+    }
+    this.commit(s);
+  }
+  private inboxCache: { state: GameState; unread: boolean; list: InboxMessage[] } | null = null;
+  getInbox(filter: { unreadOnly?: boolean } = {}): InboxMessage[] {
+    const s = this.req();
+    const unread = !!filter.unreadOnly;
+    const c = this.inboxCache;
+    if (c && c.state === s && c.unread === unread) return c.list;
+    const list = (s.inbox ?? []).filter((m) => !unread || !m.read).reverse();
+    this.inboxCache = { state: s, unread, list };
+    return list;
+  }
+  markRead(ids?: readonly string[]): void {
+    const s = this.req();
+    const want = ids ? new Set(ids) : null;
+    let changed = false;
+    const inbox = (s.inbox ?? []).map((m) => {
+      if (m.read || (want && !want.has(m.id))) return m;
+      changed = true;
+      return { ...m, read: true };
+    });
+    if (changed) this.commit({ ...s, inbox });
+  }
+
   runCalibration(opts: CalibrationOptions, onProgress?: (p: CalibrationProgress) => void): Promise<CalibrationReport> {
     const scenarios = opts.scenarios ?? ['BASELINE', 'COUNTER_SPREAD', 'OVR_DIFF_10', 'OVR_DIFF_10_COUNTER', 'OVR_DIFF_25', 'TEMPO_VARIANCE', 'RULE_ISOLATION'];
     const started = Date.now();

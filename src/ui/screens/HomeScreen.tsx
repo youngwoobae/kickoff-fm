@@ -3,6 +3,7 @@ import { useState } from 'react';
 import type { DayResult, Fixture, MatchSummary } from '../../types';
 import { Badge, Card, Empty, Meter, Sheet, StickyActions } from '../components/kit';
 import { PromotionBanner } from './LeagueScreen';
+import { useUnreadCount } from './InboxScreen';
 import { ADJ_LABEL, BOT_STYLE_LABEL, PLAN_SOURCE_LABEL, formatKc, LEDGER_LABEL } from '../format';
 import { useNav } from '../app/nav';
 import { usePlanEditor } from '../plan/PlanEditor';
@@ -200,6 +201,8 @@ function TodoCard() {
   if (unavailable.length) items.push({ done: false, text: `출전 불가 ${unavailable.length}명 (${unavailable.map((p) => p.name).slice(0, 2).join(', ')}${unavailable.length > 2 ? '…' : ''})`, onClick: () => go({ tab: 'squad', squad: 'list' }) });
   if (tired.length) items.push({ done: false, text: `선발 예정 중 컨디션 70 미만 ${tired.length}명`, onClick: () => go({ tab: 'squad', squad: 'lineup' }) });
   if (open.length) items.push({ done: false, text: actor?.seat === 'OWNER' ? `코치 제안 ${open.length}건 처리` : `내 제안 ${open.length}건 대기 중`, onClick: () => go({ tab: 'club', club: 'coach' }) });
+  const unread = useUnreadCount();
+  if (unread) items.push({ done: false, text: `받은 편지함 안 읽은 편지 ${unread}통`, onClick: () => go({ homeView: 'inbox' }) });
   const last = lastUserFixture(snap);
   if (last) items.push({ done: false, text: '어제 경기 리포트 확인', onClick: () => go({ tab: 'match', matchId: last.id, matchView: 'report' }) });
   if (!items.length) return null;

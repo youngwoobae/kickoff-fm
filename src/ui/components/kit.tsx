@@ -1,7 +1,8 @@
 /** 공용 UI 프리미티브 (소유: B). 외부 UI 라이브러리 없이 CSS 변수 기반. */
 import { useEffect, useId, useRef, type ReactNode } from 'react';
+import type { GameError } from '../../services';
 import type { FitLevel, Step } from '../../types';
-import { FIT_LABEL, FIT_SYMBOL, conditionTone, starsText, stepText } from '../format';
+import { FIT_LABEL, FIT_SYMBOL, TRANSFER_ERROR_TEXT, conditionTone, kcToM, mToKc, starsText, stepText } from '../format';
 
 /** tour: 튜토리얼 코치마크가 찾는 data-tour 표식 */
 export function Card({ title, extra, children, className = '', tour }: { title?: ReactNode; extra?: ReactNode; children: ReactNode; className?: string; tour?: string }) {
@@ -214,5 +215,39 @@ export function Stars({ n }: { n: number }) {
     <span className="stars" role="img" aria-label={`역할 적합 ${n}/5`}>
       {starsText(n)}
     </span>
+  );
+}
+
+/** 이적·계약 오류 안내: 코드별 해요체 문구 + 서비스가 준 구체 사유(범위 등). 코드는 개발자 모드에서만 */
+export function ErrorNote({ error, dev }: { error: GameError | null; dev?: boolean }) {
+  if (!error) return null;
+  const hint = TRANSFER_ERROR_TEXT[error.code];
+  return (
+    <div className="error-note" role="alert">
+      <span>⚠ {hint ?? error.message}</span>
+      {hint && error.message && <small className="muted">{error.message}</small>}
+      {dev && <small className="muted">({error.code})</small>}
+    </div>
+  );
+}
+
+/** KC 금액 입력 (M 단위, 0.001M = 1K). value 는 KC 정수, 빈 칸이면 null */
+export function MoneyField({ label, value, onChange, hint, invalid }: { label: string; value: number | null; onChange: (kc: number | null) => void; hint?: ReactNode; invalid?: boolean }) {
+  const id = useId();
+  return (
+    <label className="field" htmlFor={id}>
+      <span>{label} (M KC)</span>
+      <input
+        id={id}
+        type="number"
+        inputMode="decimal"
+        step="0.001"
+        min="0"
+        aria-invalid={invalid || undefined}
+        value={value === null ? '' : kcToM(value)}
+        onChange={(e) => onChange(e.target.value === '' ? null : mToKc(Number(e.target.value)))}
+      />
+      {hint && <small className={invalid ? 'neg' : 'muted'}>{hint}</small>}
+    </label>
   );
 }
