@@ -8,7 +8,8 @@ import { baseSalary } from '../economy/economy';
 import { TIER_REFERENCE_OVR } from '../squad/generator';
 import { LIFECYCLE, squadStrength } from '../squad/lifecycle';
 import { clubListing, reservationOf, type MarketClub } from './market';
-import { TRANSFER, capChargeOf, capUse, h, maxContractSeasons, playerValue, round1k } from './value';
+import { capCharge, capUsage, maxContractSeasons } from '../contract/contract';
+import { TRANSFER, h, playerValue, round1k } from './value';
 
 /** [PH] 경제 7.2~7.4 */
 export const AI_TRANSFER = {
@@ -89,7 +90,7 @@ export function aiSellListings(args: { window: TransferWindow; tier: Tier; playe
     take(p, S.overPrice);
   }
   for (const p of [...bench].sort((a, b) => b.contract.salary - a.contract.salary || (a.id < b.id ? -1 : 1))) {
-    if (capUse(own.filter((x) => !picked.has(x.id))) <= args.capLimit) break;
+    if (capUsage(own.filter((x) => !picked.has(x.id))) <= args.capLimit) break;
     take(p, S.capPrice);
   }
   for (const p of bench) if (p.age >= S.agedAge && p.contract.seasonsLeft >= 2) take(p, S.agedPrice);
@@ -148,11 +149,11 @@ export function aiBids(args: {
       const bonus = Math.min(l.bonusMax ?? 0, round1k(s * AI_TRANSFER.faBonusRate * aggr * u));
       const seasons = Math.min(TRANSFER.newContractMaxSeasons, l.seasonsRange?.[1] ?? maxContractSeasons(p.age));
       bid = { listingId: l.id, clubId: club.id, placedDay: args.placedDay, bonus, salary, seasons };
-      cap = capChargeOf(p.ovr, { salary, bonusPerSeason: Math.round(bonus / seasons) });
+      cap = capCharge({ ovr: p.ovr, contract: { salary, bonusPerSeason: Math.round(bonus / seasons) } });
     } else {
       const fee = Math.min(l.maxPrice, Math.max(l.minPrice, round1k(l.value * (1 + AI_TRANSFER.bidAggrSpread * aggr * u))));
       bid = { listingId: l.id, clubId: club.id, placedDay: args.placedDay, fee };
-      cap = l.kind === 'NPC' ? capChargeOf(p.ovr, { salary: s }) : capChargeOf(p.ovr, p.contract);
+      cap = capCharge({ ovr: p.ovr, contract: l.kind === 'NPC' ? { salary: s } : p.contract });
     }
     const res = reservationOf(w, l, bid);
     cands.push({ bid, g, res, cap, score: (gain + (need ? AI_TRANSFER.needBonus : 0)) / Math.max(res, AI_TRANSFER.scoreFloor) });
@@ -163,7 +164,7 @@ export function aiBids(args: {
   const budget = Math.min(args.F, club.budget);
   const perGroup = new Map<Group, number>();
   let reserved = 0;
-  let capNow = capUse(own);
+  let capNow = capUsage(own);
   const out: Bid[] = [];
   for (const c of cands) {
     if (out.length >= maxBids || own.length + out.length >= TRANSFER.maxSquad || club.signings + out.length >= club.signingLimit) break;

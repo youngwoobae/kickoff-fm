@@ -20,10 +20,10 @@ function codeOf(fn: () => unknown): GameErrorCode | null {
   return null;
 }
 
-describe('서비스 계약 2.2.0', () => {
+describe('서비스 계약 2.2.0 (2.2.1 연결 뒤에도 유지되는 부분)', () => {
   it('버전', () => {
-    expect(CONTRACT_VERSION).toBe('2.2.0');
-    expect(mk().contractVersion).toBe('2.2.0');
+    expect(CONTRACT_VERSION).toBe('2.2.1');
+    expect(mk().contractVersion).toBe('2.2.1');
   });
 
   it('게임 없으면 NO_GAME', () => {
@@ -45,15 +45,14 @@ describe('서비스 계약 2.2.0', () => {
     expect(codeOf(() => s.listForSale!('nobody', 1))).toBe('NOT_FOUND');
   });
 
-  it('계약: 재계약 RENEWAL_NOT_OPEN, 방출 INVALID_PHASE, 남의 선수 NOT_FOUND', () => {
+  it('계약: 재계약 RENEWAL_NOT_OPEN, 방출 견적은 언제나(2.2.1), 남의 선수 NOT_FOUND', () => {
     const s = mk();
     const mine = s.getSquad()[0]!.id;
     const other = s.getSnapshot()!.userClubId === 'c02' ? 'c01' : 'c02';
     const theirs = s.getSquad(other)[0]!.id;
     expect(codeOf(() => s.getRenewalQuote!(mine))).toBe('RENEWAL_NOT_OPEN');
     expect(codeOf(() => s.offerRenewal!(mine, 1, 1))).toBe('RENEWAL_NOT_OPEN');
-    expect(codeOf(() => s.getReleaseQuote!(mine))).toBe('INVALID_PHASE');
-    expect(codeOf(() => s.releasePlayer!(mine))).toBe('INVALID_PHASE');
+    expect(s.getReleaseQuote!(mine)).toMatchObject({ playerId: mine, exempt: false });
     expect(codeOf(() => s.getRenewalQuote!(theirs))).toBe('NOT_FOUND');
     expect(codeOf(() => s.releasePlayer!(theirs))).toBe('NOT_FOUND');
   });

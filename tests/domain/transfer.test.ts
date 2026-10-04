@@ -7,7 +7,6 @@ import { TIER_REFERENCE_OVR, generatePlayer, generateSquad } from '../../src/dom
 import { squadStrength } from '../../src/domain/squad/lifecycle';
 import {
   budgetB,
-  capUse,
   isSettleDay,
   potentialEstimate,
   valueOf,
@@ -26,6 +25,7 @@ import {
   upsertBid,
   validateBid,
 } from '../../src/domain/transfer/market';
+import { capUsage as capUse } from '../../src/domain/contract/contract';
 import { aiAggr, aiBids, aiSellListings, aiTransferBudget } from '../../src/domain/transfer/ai';
 
 const SEED = 20261004;

@@ -22,16 +22,8 @@ import { DomainError } from '../errors';
 import { baseSalary, SEASON_DAYS } from '../economy/economy';
 import { TIER_REFERENCE_OVR, generatePlayer } from '../squad/generator';
 import { LIFECYCLE, scoutRangeOf } from '../squad/lifecycle';
-import {
-  TRANSFER,
-  capChargeOf,
-  capUse,
-  daysAfterSettle,
-  maxContractSeasons,
-  playerValue,
-  round1k,
-  salaryFloor,
-} from './value';
+import { capCharge, capUsage, maxContractSeasons, salaryFloor } from '../contract/contract';
+import { TRANSFER, daysAfterSettle, fmtM, playerValue, round1k } from './value';
 
 /** 정산·입찰에 필요한 구단 재정 요약 (M4.4 가 GameState 에서 만든다) */
 export interface MarketClub {
@@ -137,12 +129,13 @@ export function faListing(w: TransferWindow, p: Player): TransferListing {
 
 /** 구단 이적 명단 (6.2): 최저가 0.7V~1.3V. 정규 창은 잔여 1시즌 선수 불가(정산 전에 FA 가 된다) */
 export function clubListing(w: TransferWindow, p: Player, minPrice: Kc): TransferListing {
-  if (!p.clubId) throw new DomainError('NOT_FOUND', '소속 선수가 아닙니다', ['NO_CLUB']);
-  if (w.kind === 'REGULAR' && p.contract.seasonsLeft <= 1) throw new DomainError('BID_OUT_OF_RANGE', '계약 만료 예정 선수는 정규 창에 올릴 수 없습니다', ['EXPIRING']);
+  if (!p.clubId) throw new DomainError('NOT_FOUND', '소속 구단이 있는 선수만 올릴 수 있어요', ['NO_CLUB']);
+  if (w.kind === 'REGULAR' && p.contract.seasonsLeft <= 1) throw new DomainError('BID_OUT_OF_RANGE', '계약이 이번 시즌에 끝나는 선수는 정규 창에 올릴 수 없어요', ['EXPIRING']);
   const value = playerValue(p);
   const maxPrice = round1k(TRANSFER.maxMult * value);
-  if (minPrice < round1k(TRANSFER.clubMinMult * value) || minPrice > maxPrice) {
-    throw new DomainError('BID_OUT_OF_RANGE', '최저가는 0.7V~1.3V 입니다', ['MIN_PRICE']);
+  const lo = round1k(TRANSFER.clubMinMult * value);
+  if (!Number.isInteger(minPrice) || minPrice < lo || minPrice > maxPrice) {
+    throw new DomainError('BID_OUT_OF_RANGE', `최저가는 ${fmtM(lo)}~${fmtM(maxPrice)} 사이로 정해 주세요`, ['MIN_PRICE']);
   }
   return { id: listingId(w, 'CLUB', p.id), kind: 'CLUB', playerId: p.id, sellerClubId: p.clubId, value, minPrice, maxPrice };
 }
@@ -177,25 +170,30 @@ export function validateBid(args: {
   placedDay: Day;
 }): Bid {
   const { window: w, listing: l, input, club } = args;
-  if (l.sellerClubId === club.id) throw new DomainError('BID_OUT_OF_RANGE', '자기 매물에는 입찰할 수 없습니다', ['OWN_LISTING']);
-  if (club.balance < 0) throw new DomainError('NEGATIVE_BALANCE_LOCK', '잔액이 음수인 동안 입찰할 수 없습니다');
+  if (l.sellerClubId === club.id) throw new DomainError('BID_OUT_OF_RANGE', '우리 구단 매물에는 입찰할 수 없어요', ['OWN_LISTING']);
+  if (club.balance < 0) throw new DomainError('NEGATIVE_BALANCE_LOCK', '잔액이 0 아래인 동안에는 입찰할 수 없어요');
   let bid: Bid;
   if (l.kind === 'FA') {
     const { bonus, salary, seasons } = input;
     const [lo, hi] = l.seasonsRange ?? [1, 1];
     if (!isInt(bonus) || !isInt(salary) || !isInt(seasons) || bonus < 0 || bonus > (l.bonusMax ?? 0) || salary < (l.salaryFloor ?? 0) || seasons < lo || seasons > hi) {
-      throw new DomainError('BID_OUT_OF_RANGE', 'FA 조건이 허용 범위를 벗어났습니다', ['FA_TERMS']);
+      throw new DomainError(
+        'BID_OUT_OF_RANGE',
+        `FA 조건을 확인해 주세요: 계약금 0~${fmtM(l.bonusMax ?? 0)}, 연봉 ${fmtM(l.salaryFloor ?? 0)} 이상, 기간 ${lo === hi ? `${lo}시즌` : `${lo}~${hi}시즌`}`,
+        ['FA_TERMS'],
+      );
     }
     bid = { listingId: l.id, clubId: club.id, placedDay: args.placedDay, bonus, salary, seasons };
   } else {
     const fee = input.fee;
-    if (!isInt(fee) || fee < l.minPrice || fee > l.maxPrice) throw new DomainError('BID_OUT_OF_RANGE', '입찰가는 최저가~1.3V 입니다', ['FEE']);
+    if (!isInt(fee) || fee < l.minPrice || fee > l.maxPrice) throw new DomainError('BID_OUT_OF_RANGE', `입찰가는 ${fmtM(l.minPrice)}~${fmtM(l.maxPrice)} 사이여야 해요`, ['FEE']);
     bid = { listingId: l.id, clubId: club.id, placedDay: args.placedDay, fee };
   }
   const reservedOther = args.clubBids
     .filter((b) => b.clubId === club.id && b.listingId !== l.id)
     .reduce((s, b) => s + (args.listings[b.listingId] ? reservationOf(w, args.listings[b.listingId]!, b) : 0), 0);
-  if (reservedOther + reservationOf(w, l, bid) > club.budget) throw new DomainError('INSUFFICIENT_FUNDS', '지출 가능액이 부족합니다');
+  const room = club.budget - reservedOther;
+  if (reservationOf(w, l, bid) > room) throw new DomainError('INSUFFICIENT_FUNDS', `지출 가능액이 모자라요. 이 입찰에 쓸 수 있는 돈은 ${fmtM(Math.max(0, room))}까지예요`);
   return bid;
 }
 
@@ -278,7 +276,7 @@ export function settleWindow(input: SettleInput): SettleResult {
         c.id !== l.sellerClubId &&
         c.balance >= 0 &&
         c.budget - (committed.get(c.id) ?? 0) >= res &&
-        capUse(squad(c.id)) + capChargeOf(p0.ovr, contract) <= c.capLimit &&
+        capUsage(squad(c.id)) + capCharge({ ovr: p0.ovr, contract }) <= c.capLimit &&
         squad(c.id).filter((x) => !x.isTemporary).length + 1 <= TRANSFER.maxSquad &&
         c.signings < c.signingLimit;
       if (!ok) {

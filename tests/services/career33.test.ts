@@ -85,13 +85,19 @@ describe('시즌 경계 (M3.3)', () => {
       expect(f.parachute!).toBeLessThanOrEqual(parachuteOf(m.from, m.to));
       expect(f.parachute!).toBeGreaterThanOrEqual(0);
     }
+    let checked = 0;
     for (const m of mv.filter((x) => x.kind === 'PROMOTED')) {
-      // 승격 구단 잔액 = 이전 잔액 + 새 배정금 + 보너스 − 1일차 연봉 (경량 리그 구단은 원장 없이 잔액만)
+      // 승격 구단 잔액 = 이전 잔액 + 새 배정금 + 보너스 − 1일차 연봉 − AI 방출 위약금(M4.4 U4). 위약금을 원장으로 확인할 수 있는 사용자 리그 구단만
+      const ledger = next.finances[m.clubId]!.ledger;
+      if (!ledger.length) continue;
       const prev = over.finances[m.clubId]!.balance;
       const salary = next.clubs[m.clubId]!.playerIds.reduce((a, id) => a + next.players[id]!.contract.salary, 0);
       const day1 = Math.round(salary / 28);
-      expect(next.finances[m.clubId]!.balance).toBe(prev + TIER_ECONOMY[m.to].seasonBudget + Math.round(TIER_ECONOMY[m.to].seasonBudget * PROMOTION_BONUS_RATE) - day1);
+      const penalties = ledger.filter((e) => e.kind === 'RELEASE_PENALTY').reduce((a, e) => a + e.amount, 0);
+      expect(next.finances[m.clubId]!.balance).toBe(prev + TIER_ECONOMY[m.to].seasonBudget + Math.round(TIER_ECONOMY[m.to].seasonBudget * PROMOTION_BONUS_RATE) - day1 + penalties);
+      checked++;
     }
+    expect(checked).toBeGreaterThan(0);
     const end = toSeasonOver(next);
     for (const m of mv.filter((x) => x.kind === 'RELEGATED')) expect(end.finances[m.clubId]!.parachute).toBeUndefined();
   });

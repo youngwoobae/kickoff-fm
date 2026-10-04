@@ -3,7 +3,7 @@
  * startNewSeasonState: SEASON_OVER → 새 시즌 Day 1.
  *  ① 판정 보관(movements 채움) ② 선수 시즌 기록(history) ③ 승강 적용(leagues·settings.tier)
  *  ④ 수명주기 경계(설계 15.1: 은퇴 실행 → 나이 +1·노화 → FA 정리 → AI 선수단 관리, 다음 시즌 티어 기준) + 사람 구단 유스(AI 규칙 자동, UI 는 M5)
- *  ⑤ 계약 −1·컨디션·시즌 스탯 초기화 ⑥ 리포트 보관 정리(D28: 현재 + 직전 시즌) ⑦ 일정·재정(Day 1 배정금·연봉, K4 승격 보너스·연봉 전용 계정)
+ *  ②' 계약 −1·만료(M4.4 contractBoundary) ⑤ 컨디션·시즌 스탯 초기화 ⑥ 리포트 보관 정리(D28: 현재 + 직전 시즌) ⑦ 일정·재정(Day 1 배정금·연봉, K4 승격 보너스·연봉 전용 계정)
  * 멱등(U6): boundarySeason ≥ 끝난 시즌이면 ①~④·K4 를 건너뛴다.
  */
 import type { ClubMovement, Fixture, GameState, LeagueId, Player, StandingRow, Tier } from '../../types';
@@ -14,7 +14,9 @@ import { parseMatchId } from '../league/schedule';
 import { applyMovements, clubTierMap, leagueIdOf, leagueTable, leaguesOf, seasonMovements, userLeagueOf } from '../league/pyramid';
 import { quickSimScore, teamStrength } from '../league/quickSim';
 import { TIER_REFERENCE_OVR } from '../squad/generator';
-import { ageOneSeason, aiSquadMaintenance, cleanFreeAgents, generateYouthCandidates, lifeRng, pickYouthAi } from '../squad/lifecycle';
+import { ageOneSeason, aiSquadMaintenance, cleanFreeAgents, generateYouthCandidates, lifeRng, pickYouthAi, type LifecycleEvent } from '../squad/lifecycle';
+import { CONTRACT, type ContractEvent } from '../contract/contract';
+import { aiReleasePenalties, boundaryContracts, fillHumanSquads, mailContract, mailLifecycle, pruneMarket } from '../transfer/flow';
 import { clubPlayers, createInitialState, dayOneProcessing, emptyFinance, post, seasonFixtures } from '../day/advanceDay';
 
 /** 스키마 2 단일 리그 세이브가 들어갈 티어 (로드맵 M3.3) */
@@ -27,8 +29,14 @@ function withSalary(p: Player): Player {
   return p.contract.salary > 0 ? p : { ...p, contract: { ...p.contract, salary: baseSalary(p.ovr) } };
 }
 
-/** ④ 수명주기 경계 (설계 15.1). state 를 제자리에서 바꾼다(호출자가 복사본을 넘긴다) */
-function lifecycleBoundary(state: GameState, ending: number): void {
+interface BoundaryOut {
+  contractEvents: ContractEvent[];
+  lifeEvents: LifecycleEvent[];
+  penalties: { clubId: string; amount: number; memo: string }[];
+}
+
+/** ④ 수명주기 경계 (설계 15.1) + 계약 경계(M4.4). state 를 제자리에서 바꾼다(호출자가 복사본을 넘긴다) */
+function lifecycleBoundary(state: GameState, ending: number): BoundaryOut {
   const season = ending + 1;
   const players = state.players;
   const removeFromClubs = (gone: Set<string>) => {
@@ -39,6 +47,8 @@ function lifecycleBoundary(state: GameState, ending: number): void {
   removeFromClubs(new Set(Object.values(players).filter((p) => p.retiring).map((p) => p.id)));
   // ② 나이 +1·노화 (소속 + FA, 임시 제외는 함수가 처리)
   for (const id of Object.keys(players).sort()) players[id] = ageOneSeason(players[id]!, lifeRng(state.gameSeed, ending, 'age', id)).player;
+  // ②' 계약 −1, 만료 → 재계약(pendingRenewals: 사람 + Day 20 AI) 또는 FA (M4.4, 나이·OVR 변화 뒤·AI 선수단 관리 전)
+  const contractEvents = boundaryContracts(state, ending);
   // ③ FA 풀 정리
   const fa = cleanFreeAgents(Object.values(players).filter((p) => p.clubId === null).sort((a, b) => a.id.localeCompare(b.id)), ending);
   removeFromClubs(new Set(fa.events.map((e) => e.playerId)));
@@ -52,12 +62,14 @@ function lifecycleBoundary(state: GameState, ending: number): void {
     season,
     gameSeed: state.gameSeed,
   });
+  const penalties = aiReleasePenalties(players, r.events.flatMap((e) => (e.kind === 'RELEASED' ? [e] : [])));
   for (const id of r.removed) delete players[id];
   for (const p of r.pool) players[p.id] = p;
   for (const c of r.clubs) {
     for (const p of c.players) players[p.id] = withSalary(p);
     state.clubs[c.id] = { ...state.clubs[c.id]!, playerIds: c.players.map((p) => p.id) };
   }
+  const lifeEvents: LifecycleEvent[] = [];
   // 사람 구단 유스: 유스 선택 UI 는 M5 — 지금은 AI 규칙(22명까지 채움, 최대 2명)으로 자동
   for (const c of Object.values(state.clubs).filter((x) => x.isHuman).sort((a, b) => a.id.localeCompare(b.id))) {
     const tier = tiers.get(c.id) ?? state.settings.tier;
@@ -66,7 +78,11 @@ function lifecycleBoundary(state: GameState, ending: number): void {
     const picked = pickYouthAi(cands, size, TIER_REFERENCE_OVR[tier], true);
     for (const y of cands.filter((p) => picked.includes(p.id))) players[y.id] = withSalary({ ...y, clubId: c.id });
     state.clubs[c.id] = { ...c, playerIds: [...c.playerIds, ...picked] };
+    lifeEvents.push(...picked.map((id) => ({ kind: 'YOUTH_PROMOTED' as const, playerId: id, clubId: c.id, auto: true })));
   }
+  fillHumanSquads(state);
+  pruneMarket(state);
+  return { contractEvents, lifeEvents, penalties };
 }
 
 /** SEASON_OVER → 새 시즌 Day 1 */
@@ -80,6 +96,7 @@ export function startNewSeasonState(input: GameState, nowIso: string): GameState
   const outcome = state.pendingOutcome;
   delete state.pendingOutcome;
   let movements: ClubMovement[] = [];
+  let boundary: BoundaryOut | undefined;
   if (fresh) {
     // ① 판정 보관. M3.2 세이브(movements 없음)는 지금 전 리그 최종 순위로 계산
     const user = userLeagueOf(state);
@@ -98,22 +115,16 @@ export function startNewSeasonState(input: GameState, nowIso: string): GameState
       state.settings = { ...state.settings, tier: userLeagueOf(state).tier };
     }
     // ④ 수명주기
-    lifecycleBoundary(state, ending);
+    boundary = lifecycleBoundary(state, ending);
     state.boundarySeason = ending;
+    // 강등 시즌 무위약 방출권 (경제 5.3, 사람 구단)
+    if (movements.some((m) => m.clubId === state.userClubId && m.kind === 'RELEGATED')) state.freeReleasesLeft = CONTRACT.freeReleasesOnRelegation;
+    else delete state.freeReleasesLeft;
   } else if (outcome) state.seasonHistory.push(outcome);
 
-  // ⑤ 계약 −1 (만료 시 자동 1시즌 재계약 [해석], AI 구단은 연봉 = 현재 OVR 의 S(OVR) (M3.6: 고정 연봉이면 성장한 유스가 싼 연봉에 묶여 지출이 줄고 잔액이 쌓인다. 사람 구단 재계약 연봉은 M4.2 사용자 결정이라 유지). 재계약은 M4.2), 컨디션·사기·부상·시즌 스탯 초기화
+  // ⑤ 컨디션·사기·부상·시즌 스탯 초기화 (계약 −1·만료는 ②' contractBoundary, M4.4)
   for (const p of Object.values(state.players)) {
-    const left = p.contract.seasonsLeft - 1;
-    const reprice = p.clubId !== null && left <= 0 && !state.clubs[p.clubId]?.isHuman;
-    state.players[p.id] = {
-      ...p,
-      condition: 100,
-      morale: 0,
-      contract: p.clubId === null ? p.contract : { ...p.contract, seasonsLeft: left <= 0 ? 1 : left, ...(reprice ? { salary: baseSalary(p.ovr) } : {}) },
-      availability: { ...p.availability, injuryDays: 0 },
-      season: { ...SEASON_RESET },
-    };
+    state.players[p.id] = { ...p, condition: 100, morale: 0, availability: { ...p.availability, injuryDays: 0 }, season: { ...SEASON_RESET } };
   }
   // ⑥ 리포트 보관 (D28): 상세 기록은 끝난 시즌 것만 남기고(= 새 시즌에서 직전 시즌), 그 전은 버린다. 요약은 판정표(seasonHistory)로 충분
   state.records = Object.fromEntries(Object.entries(state.records).filter(([id]) => parseMatchId(id)?.season === ending));
@@ -138,6 +149,12 @@ export function startNewSeasonState(input: GameState, nowIso: string): GameState
   dayOneProcessing(state);
   for (const m of movements.filter((x) => x.kind === 'PROMOTED')) {
     post(state, m.clubId, { kind: 'PROMOTION_BONUS', amount: promotionBonus(m.to), memo: `승격 보너스 (${m.from} → ${m.to})` });
+  }
+  // U4: AI 방출 위약금, 경계 사건 → 편지(사람 구단만, 새 시즌 Day 1)
+  if (boundary) {
+    for (const x of boundary.penalties) post(state, x.clubId, { kind: 'RELEASE_PENALTY', amount: x.amount, memo: x.memo });
+    mailContract(state, boundary.contractEvents);
+    mailLifecycle(state, boundary.lifeEvents);
   }
   return state;
 }

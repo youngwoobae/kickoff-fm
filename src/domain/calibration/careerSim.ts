@@ -1,13 +1,15 @@
 /**
- * CAREER_SIM (로드맵 M3.6): 새 게임(T5) → 사람 구단 자동 운영(플랜 미설정 = 감독 AI) → N시즌 × 시드 M.
+ * CAREER_SIM (로드맵 M3.6): 새 게임(T5) → 사람 구단 자동 운영(플랜 미설정 = 감독 AI, M4.4: 재계약·입찰도 AI 규칙 aggr 0.75) → N시즌 × 시드 M.
  * 판정표: 오프라인_경제 11장(M3.6 열) + 선수_수명주기 16.2. scripts/sim-career.ts 와 Vitest 축약 게이트가 공유한다. 소유: A.
  * "S10"은 마지막 시즌(seasons), "S2"는 2시즌. 시즌 시작 = Day 1(경계 처리 뒤), 시즌 말 = SEASON_OVER(Day 28 정산 뒤).
  */
 import type { ClubMovement, GameState, Tier } from '../../types';
 import { advanceDayState, clubPlayers, createInitialState } from '../day/advanceDay';
 import { startNewSeasonState } from '../career/seasonTransition';
+import { autoManageDay } from '../transfer/flow';
 import { TIERS, leagueTable, leaguesOf } from '../league/pyramid';
-import { TIER_ECONOMY, startingBalance } from '../economy/economy';
+import { TIER_ECONOMY, baseSalary, startingBalance } from '../economy/economy';
+import { capUsage } from '../contract/contract';
 import { TIER_REFERENCE_OVR } from '../squad/generator';
 import { LIFECYCLE, generateYouthCandidates, lifeRng, squadStrength } from '../squad/lifecycle';
 
@@ -49,6 +51,8 @@ interface SeasonStart {
   ages: number[];
   maxOvr: number;
   regen: number;
+  /** E6: 티어별 구단 Σ캡 산입액 / ΣS(OVR) 중앙값 */
+  capRatio: Record<Tier, number>;
 }
 
 export interface SeedRun {
@@ -61,6 +65,10 @@ export interface SeedRun {
   negStreaks: number;
   /** 사람 구단 유스 후보 중 유망주(pot ≥ ref + 4) 가 있던 경계 수 / 경계 수 */
   youthProspect: [number, number];
+  /** E5: 이적료 거래(NPC·CLUB) 낙찰가 / V */
+  feeRatios: number[];
+  /** E9: 정산 시즌별 이적료 매물 낙찰 구단 수 */
+  sinkClubs: number[];
 }
 
 export interface CareerSimReport {
@@ -83,6 +91,9 @@ function measureStart(s: GameState): SeasonStart {
   const tiers = Object.fromEntries(TIERS.map((t) => [t, 0])) as Record<Tier, number>;
   const leagues = leaguesOf(s);
   for (const l of leagues) tiers[l.tier] = mean(l.clubIds.map((id) => squadStrength(clubPlayers(s, id))));
+  const capRatio = Object.fromEntries(
+    leagues.map((l) => [l.tier, median(l.clubIds.map((id) => clubPlayers(s, id)).map((ps) => capUsage(ps) / Math.max(1, ps.reduce((a, p) => a + baseSalary(p.ovr), 0))))]),
+  ) as Record<Tier, number>;
   const salary = new Map(Object.keys(s.clubs).map((id) => [id, clubPlayers(s, id).reduce((a, p) => a + p.contract.salary, 0)]));
   const sizes = Object.values(s.clubs).map((c) => ({ human: c.isHuman, n: clubPlayers(s, c.id).filter((p) => !p.isTemporary).length }));
   const ps = Object.values(s.players);
@@ -100,6 +111,7 @@ function measureStart(s: GameState): SeasonStart {
     ages: members.map((p) => p.age),
     maxOvr: Math.max(...ps.map((p) => p.ovr)),
     regen: Object.keys(s.players).filter((id) => id.startsWith(`r${s.time.season}-`)).length,
+    capRatio,
   };
 }
 
@@ -111,7 +123,7 @@ function measureEnd(s: GameState): SeasonEnd {
 }
 
 export function runCareerSeed(seed: number, seasons: number, startTier: Tier, onSeason?: (season: number) => void): SeedRun {
-  const run: SeedRun = { seed, starts: [], ends: [], negClubDays: 0, clubDays: 0, negStreaks: 0, youthProspect: [0, 0] };
+  const run: SeedRun = { seed, starts: [], ends: [], negClubDays: 0, clubDays: 0, negStreaks: 0, youthProspect: [0, 0], feeRatios: [], sinkClubs: [] };
   const streak = new Map<string, number>();
   try {
     let s = createInitialState(seed, { clubName: 'AUTO', tier: startTier, devMode: false }, '2026-10-04T00:00:00.000Z');
@@ -128,7 +140,22 @@ export function runCareerSeed(seed: number, seasons: number, startTier: Tier, on
       for (let i = 0; s.phase !== 'SEASON_OVER'; i++) {
         if (i >= MAX_ITER_PER_SEASON) throw new Error(`교착: 시즌 ${season} ${MAX_ITER_PER_SEASON}회 진행에도 끝나지 않음`);
         const before = `${s.time.season}/${s.time.day}/${s.phase}`;
+        const market = s.transferMarket;
         s = advanceDayState(s, 'now').state;
+        if (market && !s.transferMarket) {
+          // 정산됨: 이적료 매물 중 소속이 바뀐 선수 = 낙찰 (낙찰가 = 그 구단의 입찰)
+          const winners = new Set<string>();
+          for (const l of market.listings) {
+            const to = s.players[l.playerId]?.clubId;
+            if (l.kind === 'FA' || !to || to === l.sellerClubId) continue;
+            const fee = market.bids.find((b) => b.listingId === l.id && b.clubId === to)?.fee;
+            if (fee === undefined) continue;
+            run.feeRatios.push(fee / l.value);
+            winners.add(to);
+          }
+          run.sinkClubs.push(winners.size);
+        }
+        if (s.phase !== 'SEASON_OVER') s = autoManageDay(s, HUMAN); // 7.7 자동 운영: 재계약(Day 20)·입찰(Day 11·28), aggr 0.75
         if (`${s.time.season}/${s.time.day}/${s.phase}` === before) throw new Error(`교착: ${before} 에서 진전 없음`);
         for (const [id, f] of Object.entries(s.finances)) {
           run.clubDays++;
@@ -251,13 +278,19 @@ export function judgeCareer(runs: readonly SeedRun[], seasons: number): CareerGa
   // ─ 11.2 경고
   const e4 = TIERS.map((t) => median(ends.flatMap((e) => [...e.money.values()].filter((m) => m.tier === t).map((m) => m.tob / TIER_ECONOMY[t].seasonBudget))));
   g('E4', 'ECON', 'WARN', 'LP 전환/배정금 티어 중앙값', TIERS.map((t, i) => `${t} ${f2(e4[i]!)}`).join(' '), '<= 0.30 (M4.8)', e4.every((x) => x <= 0.3));
-  g('E5', 'ECON', 'WARN', '낙찰가/V', '이적 없음', '[1.00, 1.20]', null);
-  g('E6', 'ECON', 'WARN', '캡 산입액/ΣS(OVR)', '계약 없음', '>= 0.85', null);
+  const fees = ok.flatMap((r) => r.feeRatios);
+  const e5 = median(fees);
+  g('E5', 'ECON', 'WARN', '낙찰가/V', fees.length ? `median=${f2(e5)} n=${fees.length}` : '이적 없음', '[1.00, 1.20]', fees.length ? within(e5, 1, 1.2) : null);
+  const e6 = TIERS.map((t) => median(starts.map((x) => x.capRatio[t])));
+  g('E6', 'ECON', 'WARN', '캡 산입액/ΣS(OVR)', TIERS.map((t, i) => `${t} ${f2(e6[i]!)}`).join(' '), '>= 0.85', e6.every((x) => x >= 0.85));
   const fa = starts.filter((_, i) => i % seasons !== 0).map((x) => x.fa);
   g('E7', 'ECON', 'WARN', 'FA 풀 크기 (S2~, 시즌 시작)', `min=${Math.min(...fa)} max=${Math.max(...fa)}`, '[40, 250]', fa.length ? Math.min(...fa) >= 40 && Math.max(...fa) <= 250 : null);
   const e8 = ok.map((r) => Math.max(...TIERS.map((t) => gini([...r.ends[last]!.money.values()].filter((m) => m.tier === t).map((m) => m.balance + m.tob)))));
   g('E8', 'ECON', 'WARN', `S${seasons} 티어 내 잔액 지니 (티어 최대)`, `p95=${f2(quantile(e8, 0.95))}`, '<= 0.30', within(quantile(e8, 0.95), 0, 0.3));
-  g('E9', 'ECON', 'WARN', '싱크 참여율', '이적 없음', '>= 40%', null);
+  // 시즌당 = 그 시즌 두 정산(정규 Day 2 + 중간 Day 15)의 낙찰 구단 합 근사 (같은 구단 두 번이면 과대)
+  const sink = ok.flatMap((r) => r.sinkClubs);
+  const e9 = sink.length ? (sink.reduce((a, b) => a + b, 0) / Math.max(1, ok.reduce((a, r) => a + r.ends.length, 0))) / 70 : NaN;
+  g('E9', 'ECON', 'WARN', '싱크 참여율', sink.length ? `${pct(e9)} (정산 ${sink.length}회)` : '이적 없음', '>= 40%', sink.length ? e9 >= 0.4 : null);
   let e10n = 0, e10k = 0;
   for (const r of ok) for (let s = 1; s < seasons; s++) (e10n++, r.ends[s]!.t1Champion === r.ends[s - 1]!.t1Champion && e10k++);
   g('E10', 'ECON', 'WARN', 'T1 연속 우승률', `${pct(e10k / e10n)} n=${e10n}`, '<= 30%', e10n ? e10k / e10n <= 0.3 : null);
@@ -323,7 +356,7 @@ export function judgeCareer(runs: readonly SeedRun[], seasons: number): CareerGa
   // ─ 알려진 문제: 사람 구단은 AI 보충(11장)이 없어 이적 없이 인원이 줄어든다 (M4 이적·M5 유스 UI 로 해소)
   const hs = starts.map((x) => x.humanSize);
   const below = starts.filter((x) => x.humanSize < 22).length;
-  g('H1', 'KNOWN', 'WARN', '사람 구단 인원 22명 미만 (이적 없음)', `min=${Math.min(...hs)} 22명 미만 시즌 ${pct(below / starts.length)}`, '>= 22', below === 0);
+  g('H1', 'KNOWN', 'WARN', '사람 구단 인원 22명 미만', `min=${Math.min(...hs)} 22명 미만 시즌 ${pct(below / starts.length)}`, '>= 22', below === 0);
   return gates;
 }
 

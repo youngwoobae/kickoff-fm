@@ -58,6 +58,7 @@ import { buildReport, computeLeagueAverages } from '../report/buildReport';
 import { applyDailyRecovery, applyMatchLine, applyMoraleResult } from '../squad/condition';
 import { TIER_REFERENCE_OVR, botName, createBotClub, gauss, generateSquad } from '../squad/generator';
 import { LIFECYCLE, lifeRng, rollRetirement, weeklyGrowth } from '../squad/lifecycle';
+import { mailLifecycle, transferDaily } from '../transfer/flow';
 
 /**
  * 세이브 스키마. 2 (엔진 0.4.0): Club.botStyle → Club.style (WIDE → WING_PLAY), 3·5백 FB 공격형 풀백 → 윙백.
@@ -367,7 +368,7 @@ function dailyProcessing(state: GameState, usedSlots: Map<ClubId, SlotKey[]>, si
       const f = state.finances[cid]!;
       if (f.transferOnlyBudget <= 0) continue;
       const lp = f.transferOnlyBudget;
-      state.finances[cid] = { ...f, transferOnlyBudget: 0 };
+      state.finances[cid] = { ...f, transferOnlyBudget: 0, legacyPoints: (f.legacyPoints ?? 0) + lp / 1_000_000 };
       post(state, cid, { kind: 'TRANSFER_BUDGET_EXPIRED', amount: 0, memo: `이적창 한정 예산 ${lp} KC → ${(lp / 1_000_000).toFixed(2)} LP 전환` }, sink);
       if (cid === state.userClubId) notices.push(`이적창 한정 예산 ${(lp / 1_000_000).toFixed(2)}M 이 LP 로 전환되었습니다`);
     }
@@ -399,6 +400,8 @@ function dailyProcessing(state: GameState, usedSlots: Map<ClubId, SlotKey[]>, si
       }
     }
   }
+  // 이적·계약·편지함 (M4.4): 창 열림·AI 입찰·정산·재계약 창·D18
+  transferDaily(state, sink, notices);
 }
 
 /** 하루 처리가 쓰는 컨테이너만 새로 만든다. 안쪽 값(선수·구단·재정·일정 한 건)은 교체만 하고 고치지 않는다 */
@@ -644,7 +647,10 @@ function lifecycleDaily(state: GameState, tiers: Map<ClubId, Tier>, notices: str
       for (const p of clubPlayers(state, cid)) {
         if (p.retiring || !rollRetirement(p, lifeRng(state.gameSeed, season, 'retire', p.id), ref)) continue;
         state.players[p.id] = { ...p, retiring: true };
-        if (cid === state.userClubId) notices.push(`${p.name}(${p.age}세)이 이번 시즌을 끝으로 은퇴합니다`);
+        if (cid === state.userClubId) {
+          notices.push(`${p.name}(${p.age}세)이 이번 시즌을 끝으로 은퇴합니다`);
+          mailLifecycle(state, [{ kind: 'RETIRE_ANNOUNCED', playerId: p.id, clubId: cid }]);
+        }
       }
     }
   }

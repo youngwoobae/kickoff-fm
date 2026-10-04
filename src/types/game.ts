@@ -12,6 +12,7 @@ import type { PlanRecord, ResolvedPlan } from './plan';
 import type { Player } from './player';
 import type { MatchReport } from './report';
 import type { TacticCap } from './tactics';
+import type { PendingRenewal, TransferMarketState } from './transfer';
 
 /**
  * 영속 상태의 국면. 하루 안의 세부 단계(DayStep)는 advanceDay 안에서만 존재하고 저장되지 않는다.
@@ -135,6 +136,14 @@ export interface GameState {
    * 서비스 연결은 M4.4. 스키마 버전은 올리지 않았다(선택 필드라 3 그대로 읽힌다)
    */
   inbox?: InboxMessage[];
+  /** 2.2.1 (M4.4): 열린 이적 창의 매물·입찰·NPC 선수. 창 밖이면 없음 (정규 창은 시즌 경계를 넘어 다음 시즌 Day 2 정산까지) */
+  transferMarket?: TransferMarketState;
+  /** 2.2.1: 시즌 영입 수(창 낙찰, 긴급 FA 제외). 시즌 경계에서 비운다. 없으면 0 */
+  signingsThisSeason?: Record<ClubId, number>;
+  /** 2.2.1: 성립된 재계약(사람 + Day 20 AI). 시즌 경계 contractBoundary 가 적용하고 비운다. 없으면(이전 세이브) 경계에서 AI 규칙으로 계산 */
+  pendingRenewals?: PendingRenewal[];
+  /** 2.2.1: 사용자 구단 강등 시즌 무위약 방출권 남은 장수. 없으면 0 */
+  freeReleasesLeft?: number;
   actionLog: ActionLogEntry[];
 }
 

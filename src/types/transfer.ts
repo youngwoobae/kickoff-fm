@@ -3,7 +3,7 @@
  * 실제 풀 생성·입찰 정산은 M4.3, 재계약·방출 공식은 M4.2, 서비스 연결은 M4.4.
  */
 import type { ClubId, Day, Kc, PlayerId, SeasonNo } from './common';
-import type { Position } from './player';
+import type { Player, Position } from './player';
 
 /** MID = 시즌 중간 창, REGULAR = 시즌 경계 정규 창(Day 28 → 다음 시즌 Day 2 정산) */
 export type WindowKind = 'MID' | 'REGULAR';
@@ -87,4 +87,23 @@ export interface ReleaseQuote {
   penalty: Kc;
   /** 임시 계약·무위약 방출권·유스 후보 */
   exempt: boolean;
+}
+
+/** 2.2.1 (M4.4): 성립된 재계약. 시즌 경계에서 새 계약이 된다(GameState.pendingRenewals, 사람·AI 구단 공통) */
+export interface PendingRenewal {
+  playerId: PlayerId;
+  salary: Kc;
+  seasons: number;
+  bonusPerSeason: Kc;
+}
+
+/** 2.2.1 (M4.4): 열린 창 하나의 시장 상태(GameState.transferMarket). 창이 열린 동안만 있고 정산일 처리에서 지운다 */
+export interface TransferMarketState {
+  window: TransferWindow;
+  /** 등록 순서 */
+  listings: TransferListing[];
+  /** 모든 구단의 미정산 입찰(사람 + AI). UI 에는 사람 구단 것만(listBids) */
+  bids: Bid[];
+  /** NPC 매물 선수. 낙찰되면 players 로 옮기고, 미판매분은 창과 함께 사라진다 */
+  npcPlayers: Record<PlayerId, Player>;
 }

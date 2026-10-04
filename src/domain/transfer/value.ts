@@ -2,7 +2,7 @@
  * 이적 도메인 기초 (M4.3): 상수·창 일정(D16)·평가가치 V(경제 6.1)·계약 도우미(5.1)·해시 균등값(7장).
  * 순수 함수만. 게임 상태 연결은 M4.4.
  */
-import type { Contract, GameTime, Kc, Player, ScoutGrade, SeasonNo, TransferWindow, WindowKind } from '../../types';
+import type { GameTime, Kc, Player, ScoutGrade, SeasonNo, TransferWindow, WindowKind } from '../../types';
 import { hashString } from '../../engine';
 import { baseSalary, SEASON_DAYS } from '../economy/economy';
 
@@ -22,9 +22,6 @@ export const TRANSFER = {
   taxRate: 0.1,
   faCompareSalaryRate: 0.5,
   faBonusMaxRate: 1.0,
-  minSalary: 200_000,
-  salaryFloorRate: 0.9,
-  capFloorRate: 0.8,
   signingLimit: 8,
   promotedSigningLimit: 12,
   maxSquad: 25,
@@ -51,6 +48,9 @@ export function h(...keys: readonly (string | number)[]): number {
 }
 
 export const round1k = (x: number): Kc => Math.round(x / 1000) * 1000;
+
+/** 금액 표시 (메시지용): 12.75M */
+export const fmtM = (kc: Kc): string => `${(kc / 1_000_000).toFixed(2)}M`;
 
 // ── 창 일정 (D16) ──
 
@@ -112,26 +112,6 @@ export function valueOf(x: ValueInput): Kc {
 /** 선수의 V. free = FA·NPC(계약 잔여 3시즌 취급) */
 export function playerValue(p: Pick<Player, 'ovr' | 'age' | 'scoutRange' | 'contract'>, free = false): Kc {
   return valueOf({ ovr: p.ovr, age: p.age, seasonsLeft: free ? 3 : p.contract.seasonsLeft, potEstimate: potentialEstimate(p.scoutRange) });
-}
-
-// ── 계약 도우미 (5.1. M4.2 contract 도메인과 같은 공식 — M4.4 에서 한쪽으로 합친다) ──
-
-/** 계약 시점 나이의 허용 최대 시즌 수: ≤23: 3 / 24~29: 4 / 30~32: 2 / ≥33: 1 */
-export function maxContractSeasons(age: number): number {
-  return age <= 23 ? 3 : age <= 29 ? 4 : age <= 32 ? 2 : 1;
-}
-
-export function salaryFloor(ovr: number): Kc {
-  return Math.max(TRANSFER.minSalary, round1k(TRANSFER.salaryFloorRate * baseSalary(ovr)));
-}
-
-/** 캡 산입액 = max(salary, 0.8 × S(ovr)) + bonusPerSeason */
-export function capChargeOf(ovr: number, c: Pick<Contract, 'salary' | 'bonusPerSeason'>): Kc {
-  return Math.max(c.salary, round1k(TRANSFER.capFloorRate * baseSalary(ovr))) + (c.bonusPerSeason ?? 0);
-}
-
-export function capUse(players: readonly Pick<Player, 'ovr' | 'contract'>[]): Kc {
-  return players.reduce((s, p) => s + capChargeOf(p.ovr, p.contract), 0);
 }
 
 /**

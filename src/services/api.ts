@@ -8,6 +8,7 @@
  * 변경 규칙: 추가(additive)는 CONTRACT_VERSION minor +1, 시그니처 변경·삭제는 A·B 합의 후 major +1.
  */
 import type {
+  Kc,
   ApproveResult,
   BidInput,
   Bid,
@@ -101,7 +102,13 @@ import type {
  * 선택 메서드 getTransferWindow … releasePlayer, getInbox / markRead. 변경 메서드는 모두 OWNER 전용(코치 PERMISSION_DENIED).
  * 실제 도메인은 M4.2·M4.3, 연결은 M4.4 — 그 전 로컬 서비스는 창 없음(null·[]·WINDOW_CLOSED), 재계약 RENEWAL_NOT_OPEN, 방출 INVALID_PHASE, 편지함은 GameState.inbox 그대로. 세이브 스키마 3 유지. 아키텍처 16장.
  */
-export const CONTRACT_VERSION = '2.2.0';
+/**
+ * 2.2.1 (M4.4, 패치 — 2.2.0 이 예고한 연결, 기존 시그니처 불변): 이적·계약·편지함 메서드가 실제 도메인을 쓴다.
+ * LedgerKind 에 TransferLedgerKind 7종 합침(별칭 deprecated), GameState.transferMarket?·signingsThisSeason?·pendingRenewals?·freeReleasesLeft?,
+ * 선택 메서드 getPlayerValue?(판매 등록 전 범위), getPlayer 가 NPC 매물 선수도 반환, getFinance().reserved·spendable(예약 차감·정규 창 B_off).
+ * 세이브 스키마 3 유지(새 필드는 모두 선택). 아키텍처 16장.
+ */
+export const CONTRACT_VERSION = '2.2.1';
 
 /** 슬롯 번호 목록 (D28: 3개) */
 export const SAVE_SLOT_IDS: readonly SaveSlotId[] = [1, 2, 3];
@@ -267,8 +274,13 @@ export interface GameService {
   offerRenewal?(playerId: PlayerId, salary: number, seasons: number): RenewalResult;
   /** 방출 견적(경제 5.3). 내 선수 아님 = NOT_FOUND */
   getReleaseQuote?(playerId: PlayerId): ReleaseQuote;
-  /** 방출(위약금 즉시 지급, FA 풀로). 내 선수 아님 = NOT_FOUND. 18명 미만이 되면 임시 계약 선수가 채운다 */
+  /** 방출(위약금 즉시 지급, FA 풀로). 내 선수 아님 = NOT_FOUND. 18명 미만이 되면 FA 풀에서 긴급 FA(1시즌)가 자동으로 채운다(2.2.1) */
   releasePlayer?(playerId: PlayerId): void;
+  /**
+   * 2.2.1: 선수 평가가치 V 와 구단 명단 최저가 범위(0.7V~1.3V, 판매 등록 전 표시용). 매물 선수(NPC·FA)도 된다(FA·NPC 는 계약 잔여 3시즌 취급).
+   * 등록 뒤 매물의 값은 등록 시점에 고정된다. 없는 선수 = NOT_FOUND. 모든 좌석
+   */
+  getPlayerValue?(playerId: PlayerId): { value: Kc; minPrice: Kc; maxPrice: Kc };
 
   // ── 받은 편지함 (2.2.0, 선택 메서드) ─────────────────────────────
   /** 사용자 구단 편지함, 최신 먼저. unreadOnly 면 안 읽은 것만. 같은 상태면 같은 내용 */

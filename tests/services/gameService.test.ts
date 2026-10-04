@@ -49,7 +49,7 @@ describe('GameService', () => {
     expect(calls).toBe(1);
   });
 
-  it('같은 시드로 두 번 시즌을 돌리면 같은 순위표 (결정성), 저장 크기 < 2MB', () => {
+  it('같은 시드로 두 번 시즌을 돌리면 같은 순위표 (결정성), 저장 크기 < 2.25MB (M4.4: SEASON_OVER 에는 정규 이적 창 매물·입찰·NPC·재계약 ~90KB 가 열려 있다)', () => {
     const a = svc();
     const b = svc();
     a.newGame({ seed: 99 });
@@ -59,7 +59,7 @@ describe('GameService', () => {
     expect(ra).toHaveLength(28);
     expect(a.getSnapshot()!.phase).toBe('SEASON_OVER');
     expect(JSON.stringify(a.getStandings())).toBe(JSON.stringify(b.getStandings()));
-    expect(a.exportSave().length).toBeLessThan(2 * 1024 * 1024);
+    expect(a.exportSave().length).toBeLessThan(2.25 * 1024 * 1024);
     expect(a.getSeasonOutcome()?.season).toBe(1);
     expect(code(() => a.advanceDay())).toBe('INVALID_PHASE');
     const next = a.startNewSeason();

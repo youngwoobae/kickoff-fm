@@ -65,6 +65,7 @@ import type {
   TeamInstructions,
   TransferListing,
   TransferListingFilter,
+  TransferMarketState,
   TransferWindow,
   UiLogKind,
 } from '../types';
@@ -133,6 +134,31 @@ import {
   stripOpponentOrders,
   validatePlan as validatePlanDomain,
   type PlanBundle,
+  TRANSFER,
+  capLimit,
+  capUsage,
+  clubListing,
+  clubMatches,
+  clubPlayers,
+  dropFromMarket,
+  fillHumanSquads,
+  listingRecord,
+  mailContract,
+  marketClubs,
+  marketPlayer,
+  offerRenewal as offerRenewalDomain,
+  playerValue,
+  post,
+  releasePlayer as releasePlayerDomain,
+  releaseQuote,
+  renewalOpen,
+  renewalQuote,
+  reservedTotal,
+  round1k,
+  upsertBid,
+  upsertRenewal,
+  validateBid,
+  type CapChargeInput,
 } from '../domain';
 import {
   CONTRACT_VERSION,
@@ -269,6 +295,9 @@ function saveProblem(x: unknown): string | null {
     }
     if (!seen.has(x.userClubId)) return '사용자 구단이 리그에 없습니다';
   }
+  // 2.2.1: 이적 시장(선택). 있으면 창·매물·입찰·NPC 선수 형태만 본다
+  const tm = x.transferMarket;
+  if (tm !== undefined && (!isObj(tm) || !isObj(tm.window) || !Array.isArray(tm.listings) || !Array.isArray(tm.bids) || !isObj(tm.npcPlayers))) return '이적 시장 형식 오류';
   const ms = x.memberships as unknown[];
   if (!ms.some((m) => isObj(m) && m.userId === x.actorUserId && m.clubId === x.userClubId)) return '현재 사용자 멤버십이 없습니다';
   return null;
@@ -708,7 +737,7 @@ class LocalGameService implements GameService {
   }
 
   getPlayer(playerId: PlayerId): Player {
-    const p = this.require().players[playerId];
+    const p = marketPlayer(this.require(), playerId); // NPC 매물 선수 포함 (2.2.1)
     if (!p) throw new GameError('NOT_FOUND', `선수 없음: ${playerId}`);
     return p;
   }
@@ -758,82 +787,191 @@ class LocalGameService implements GameService {
     return buildCareer(s.userClubId, outcomes, startTier, s.settings.tier);
   }
 
-  // ── 이적·계약 (2.2.0 기본 구현: 창이 열리지 않는다. 도메인 M4.2·M4.3, 연결 M4.4) ──
+  // ── 이적·계약 (2.2.1, M4.4: 도메인 연결. 경제 설계 5·6장) ──────────
 
   /** 이적·계약 변경은 OWNER 전용 (v1: 코치 제안 없음) */
   private ownerOnly(s: GameState): void {
-    if (this.membership(s).seat !== 'OWNER') throw new GameError('PERMISSION_DENIED', '이적·계약은 구단주만 할 수 있습니다', ['OWNER_ONLY']);
+    if (this.membership(s).seat !== 'OWNER') throw new GameError('PERMISSION_DENIED', '이적·계약은 구단주만 할 수 있어요', ['OWNER_ONLY']);
   }
 
   private ownPlayer(s: GameState, playerId: PlayerId): Player {
     const p = s.players[playerId];
-    if (!p || p.clubId !== s.userClubId) throw new GameError('NOT_FOUND', `내 선수가 아닙니다: ${playerId}`);
+    if (!p || p.clubId !== s.userClubId) throw new GameError('NOT_FOUND', `우리 구단 선수가 아니에요: ${playerId}`);
     return p;
   }
 
-  private windowClosed(): never {
-    throw new GameError('WINDOW_CLOSED', '이적 창이 닫혀 있습니다');
+  private market(s: GameState): TransferMarketState {
+    if (!s.transferMarket) throw new GameError('WINDOW_CLOSED', '지금은 이적 창이 닫혀 있어요');
+    return s.transferMarket;
+  }
+
+  /** 시장 변경 커밋 (게임 사건: seq +1) */
+  private commitMarket(s: GameState, m: TransferMarketState): void {
+    this.commit({ ...s, seq: s.seq + 1, transferMarket: m });
   }
 
   getTransferWindow(): TransferWindow | null {
-    this.require();
-    return null;
+    return this.require().transferMarket?.window ?? null;
   }
 
-  listTransferListings(_filter?: TransferListingFilter): TransferListing[] {
-    this.require();
-    return [];
+  listTransferListings(filter: TransferListingFilter = {}): TransferListing[] {
+    const s = this.require();
+    const m = s.transferMarket;
+    if (!m) return [];
+    return m.listings
+      .filter((l) => {
+        const p = marketPlayer(s, l.playerId);
+        if (!p) return false;
+        if (filter.kind !== undefined && l.kind !== filter.kind) return false;
+        if (filter.position !== undefined && p.primary !== filter.position) return false;
+        if (filter.minOvr !== undefined && p.ovr < filter.minOvr) return false;
+        if (filter.maxPrice !== undefined && (l.kind === 'FA' ? 0 : l.minPrice) > filter.maxPrice) return false;
+        return true;
+      })
+      .sort((a, b) => b.value - a.value || (a.id < b.id ? -1 : 1));
   }
 
-  placeBid(_bid: BidInput): Bid {
-    this.ownerOnly(this.require());
-    return this.windowClosed();
+  placeBid(input: BidInput): Bid {
+    const s = this.require();
+    this.ownerOnly(s);
+    const m = this.market(s);
+    const listings = listingRecord(m);
+    const listing = listings[input.listingId];
+    if (!listing) throw new GameError('NOT_FOUND', `매물이 없어요: ${input.listingId}`);
+    const club = marketClubs(s).get(s.userClubId)!;
+    const bid = this.run(() =>
+      validateBid({ window: m.window, listing, input, club, clubBids: m.bids.filter((b) => b.clubId === s.userClubId), listings, placedDay: s.time.day }),
+    );
+    this.commitMarket(s, { ...m, bids: upsertBid(m.bids, bid) });
+    return bid;
   }
 
-  withdrawBid(_listingId: string): void {
-    this.ownerOnly(this.require());
-    this.windowClosed();
+  withdrawBid(listingId: string): void {
+    const s = this.require();
+    this.ownerOnly(s);
+    const m = this.market(s);
+    const mine = (b: Bid) => b.listingId === listingId && b.clubId === s.userClubId;
+    if (!m.bids.some(mine)) throw new GameError('NOT_FOUND', `이 매물에 낸 입찰이 없어요: ${listingId}`);
+    this.commitMarket(s, { ...m, bids: m.bids.filter((b) => !mine(b)) });
   }
 
   listBids(): Bid[] {
-    this.require();
-    return [];
+    const s = this.require();
+    return s.transferMarket?.bids.filter((b) => b.clubId === s.userClubId) ?? [];
   }
 
-  listForSale(playerId: PlayerId, _minPrice: number): TransferListing {
+  listForSale(playerId: PlayerId, minPrice: number): TransferListing {
     const s = this.require();
     this.ownerOnly(s);
-    this.ownPlayer(s, playerId);
-    return this.windowClosed();
+    const p = this.ownPlayer(s, playerId);
+    const m = this.market(s);
+    const listing = this.run(() => clubListing(m.window, p, minPrice));
+    // 같은 선수 재등록 = 최저가 수정. 새 최저가보다 낮아진 입찰은 무효라 뺀다
+    const bids = m.bids.filter((b) => b.listingId !== listing.id || (b.fee ?? 0) >= listing.minPrice);
+    this.commitMarket(s, { ...m, listings: [...m.listings.filter((l) => l.id !== listing.id), listing], bids });
+    return listing;
   }
 
-  withdrawListing(_listingId: string): void {
-    this.ownerOnly(this.require());
-    this.windowClosed();
+  withdrawListing(listingId: string): void {
+    const s = this.require();
+    this.ownerOnly(s);
+    const m = this.market(s);
+    if (!m.listings.some((l) => l.id === listingId && l.sellerClubId === s.userClubId)) throw new GameError('NOT_FOUND', `우리 구단 매물이 아니에요: ${listingId}`);
+    this.commitMarket(s, { ...m, listings: m.listings.filter((l) => l.id !== listingId), bids: m.bids.filter((b) => b.listingId !== listingId) });
+  }
+
+  getPlayerValue(playerId: PlayerId): { value: number; minPrice: number; maxPrice: number } {
+    const s = this.require();
+    const p = marketPlayer(s, playerId);
+    if (!p) throw new GameError('NOT_FOUND', `선수 없음: ${playerId}`);
+    const value = playerValue(p, p.clubId === null);
+    return { value, minPrice: round1k(TRANSFER.clubMinMult * value), maxPrice: round1k(TRANSFER.maxMult * value) };
+  }
+
+  /** 재계약 판단 기준: 다음 시즌 티어 캡(강등이면 110%), 이 선수를 뺀 다음 시즌 캡 사용(성립 재계약 반영, 만료 예정·은퇴 예정 제외) */
+  private renewalContext(s: GameState, p: Player) {
+    const club = marketClubs(s).get(s.userClubId)!;
+    const move = s.pendingOutcome?.movements?.find((x) => x.clubId === s.userClubId);
+    const pending = new Map((s.pendingRenewals ?? []).map((r) => [r.playerId, r]));
+    const usageWithoutPlayer = capUsage(
+      clubPlayers(s, s.userClubId)
+        .filter((x) => x.id !== p.id && !x.retiring)
+        .flatMap((x): CapChargeInput[] => {
+          const r = pending.get(x.id);
+          if (r) return [{ ovr: x.ovr, contract: { salary: r.salary, bonusPerSeason: r.bonusPerSeason } }];
+          return x.contract.seasonsLeft > 1 ? [x] : [];
+        }),
+    );
+    return {
+      tier: club.tier,
+      clubMatches: clubMatches(s, s.userClubId),
+      season: s.time.season,
+      day: s.time.day,
+      usageWithoutPlayer,
+      capLimit: capLimit(move?.to ?? club.tier, move?.kind === 'RELEGATED'),
+    };
+  }
+
+  private renewalNotOpen(): never {
+    throw new GameError('RENEWAL_NOT_OPEN', '재계약은 계약이 1시즌 남은 선수와 Day 20~27에만 할 수 있어요');
   }
 
   getRenewalQuote(playerId: PlayerId): RenewalQuote {
-    this.ownPlayer(this.require(), playerId);
-    throw new GameError('RENEWAL_NOT_OPEN', '재계약 기간이 아닙니다');
+    const s = this.require();
+    const p = this.ownPlayer(s, playerId);
+    if (!renewalOpen(p, s.time.day)) this.renewalNotOpen();
+    return renewalQuote(p, this.renewalContext(s, p));
   }
 
-  offerRenewal(playerId: PlayerId, _salary: number, _seasons: number): RenewalResult {
+  offerRenewal(playerId: PlayerId, salary: number, seasons: number): RenewalResult {
     const s = this.require();
     this.ownerOnly(s);
-    this.ownPlayer(s, playerId);
-    throw new GameError('RENEWAL_NOT_OPEN', '재계약 기간이 아닙니다');
+    const p = this.ownPlayer(s, playerId);
+    if (!renewalOpen(p, s.time.day)) this.renewalNotOpen();
+    if (s.finances[s.userClubId]!.balance < 0 && salary > p.contract.salary) {
+      throw new GameError('NEGATIVE_BALANCE_LOCK', '잔액이 0 아래인 동안에는 연봉을 올리는 재계약을 할 수 없어요');
+    }
+    const d = this.run(() => offerRenewalDomain(p, { salary, seasons }, this.renewalContext(s, p)));
+    if (!d.accepted) return { accepted: false, ask: d.ask };
+    const next: GameState = { ...s, seq: s.seq + 1, finances: { ...s.finances } };
+    upsertRenewal(next, d.pending!);
+    if (d.ledger) post(next, s.userClubId, { kind: d.ledger.kind, amount: d.ledger.amount, memo: `${p.name} 갱신 보너스 (${seasons}시즌)` });
+    this.commit(next);
+    return { accepted: true, ask: d.ask };
   }
 
   getReleaseQuote(playerId: PlayerId): ReleaseQuote {
-    this.ownPlayer(this.require(), playerId);
-    throw new GameError('INVALID_PHASE', '방출은 아직 지원하지 않습니다');
+    const s = this.require();
+    const q = releaseQuote(this.ownPlayer(s, playerId), { day: s.time.day, freeReleasesLeft: s.freeReleasesLeft ?? 0 });
+    return { playerId: q.playerId, penalty: q.penalty, exempt: q.exempt };
   }
 
   releasePlayer(playerId: PlayerId): void {
     const s = this.require();
     this.ownerOnly(s);
-    this.ownPlayer(s, playerId);
-    throw new GameError('INVALID_PHASE', '방출은 아직 지원하지 않습니다');
+    const p = this.ownPlayer(s, playerId);
+    const r = this.run(() => releasePlayerDomain(p, { season: s.time.season, day: s.time.day, freeReleasesLeft: s.freeReleasesLeft ?? 0 }));
+    const next: GameState = { ...s, seq: s.seq + 1, players: { ...s.players }, clubs: { ...s.clubs }, finances: { ...s.finances } };
+    const club = next.clubs[s.userClubId]!;
+    next.clubs[s.userClubId] = { ...club, playerIds: club.playerIds.filter((id) => id !== p.id) };
+    if (r.player) next.players[p.id] = r.player;
+    else delete next.players[p.id];
+    if (r.freeReleasesLeft > 0) next.freeReleasesLeft = r.freeReleasesLeft;
+    else delete next.freeReleasesLeft;
+    dropFromMarket(next, new Set([p.id]));
+    if (r.ledger) {
+      post(next, s.userClubId, { kind: 'RELEASE_PENALTY', amount: r.ledger.amount, memo: `${p.name} 방출 위약금` });
+      // 강등 시즌이면 연봉 전용 계정에서 먼저 (경제 5.3)
+      const f = next.finances[s.userClubId]!;
+      const cover = Math.min(f.parachute ?? 0, r.penalty);
+      if (cover > 0) {
+        next.finances[s.userClubId] = { ...f, parachute: f.parachute! - cover };
+        post(next, s.userClubId, { kind: 'PARACHUTE', amount: cover, memo: '강등 연봉 전용 계정 (방출 위약금)' });
+      }
+    }
+    mailContract(next, [r.event]);
+    fillHumanSquads(next);
+    this.commit(next);
   }
 
   // ── 받은 편지함 (2.2.0) ─────────────────────────────────────────
@@ -878,8 +1016,12 @@ class LocalGameService implements GameService {
     const tier = clubTierMap(s).get(id) ?? s.settings.tier;
     const econ = TIER_ECONOMY[tier];
     const total = salaryTotal(s, id);
-    const daysLeft = Math.max(0, 28 - s.time.day);
-    const B = spendable(f.balance, total, daysLeft);
+    // 2.2.1: B = 경제 7.2(창이 열린 정규 오프시즌은 B_off) − 입찰 예약액
+    const m = s.transferMarket;
+    const reserved = m ? reservedTotal(m.window, id, m.bids, listingRecord(m)) : 0;
+    const club = marketClubs(s).get(id);
+    const projected = spendable(f.balance, total, Math.max(0, 28 - s.time.day));
+    const B = (club?.budget ?? projected) - reserved;
     const season = f.ledger.filter((e) => e.season === s.time.season);
     const income = season.filter((e) => e.amount > 0).reduce((a, e) => a + e.amount, 0);
     const expense = season.filter((e) => e.amount < 0).reduce((a, e) => a - e.amount, 0);
@@ -889,12 +1031,13 @@ class LocalGameService implements GameService {
       balance: f.balance,
       transferOnlyBudget: f.transferOnlyBudget,
       spendable: B,
+      reserved,
       salaryTotal: total,
       salaryCap: econ.salaryCap,
       capUsage: econ.salaryCap > 0 ? total / econ.salaryCap : 0,
       seasonIncome: income,
       seasonExpense: expense,
-      projectedCarry: carryOver({ ...f, balance: B }, econ),
+      projectedCarry: carryOver({ ...f, balance: projected }, econ),
       recent: f.ledger.slice(-12).reverse(),
     };
   }

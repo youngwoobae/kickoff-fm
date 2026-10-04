@@ -3,7 +3,7 @@
  * 협상 난수 없음: 같은 입력이면 같은 결과. 게임 상태 연결은 M4.4.
  * 모든 함수는 입력을 바꾸지 않는다. 금액은 KC 정수, 1,000 KC 반올림.
  */
-import type { ClubId, Contract, Day, Kc, LedgerEntry, Player, PlayerId, RenewalQuote, ReleaseQuote, SeasonNo, Tier, TransferLedgerKind } from '../../types';
+import type { ClubId, Contract, Day, Kc, LedgerEntry, PendingRenewal, Player, PlayerId, RenewalQuote, ReleaseQuote, SeasonNo, Tier } from '../../types';
 import { DomainError } from '../errors';
 import { SEASON_DAYS, TIER_ECONOMY, baseSalary } from '../economy/economy';
 import { TIER_REFERENCE_OVR } from '../squad/generator';
@@ -25,21 +25,16 @@ export const CONTRACT = {
   ai: { keepRank: 18, keepMaxAge: 31, vetRank: 11, vetMinAge: 32, capUseMax: 0.97, maxSeasons: 3 },
 } as const;
 
-/** 원장 항목 (TransferLedgerKind 는 아직 LedgerKind 에 없다 — M4.6 이 라벨을 넣은 뒤 M4.4 가 합친다) */
-export type ContractLedgerEntry = Omit<LedgerEntry, 'kind'> & { kind: TransferLedgerKind };
+/** @deprecated 2.2.1 (M4.4): TransferLedgerKind 가 LedgerKind 에 합쳐져 LedgerEntry 와 같다 */
+export type ContractLedgerEntry = LedgerEntry;
 
 export interface RenewalOffer {
   salary: Kc;
   seasons: number;
 }
 
-/** 재계약 성립분. 시즌 경계(contractBoundary)에서 새 계약으로 바뀐다 */
-export interface PendingRenewal {
-  playerId: PlayerId;
-  salary: Kc;
-  seasons: number;
-  bonusPerSeason: Kc;
-}
+/** 재계약 성립분. 시즌 경계(contractBoundary)에서 새 계약으로 바뀐다 (2.2.1: 타입은 types/transfer.ts) */
+export type { PendingRenewal };
 
 export type ContractEvent =
   | { kind: 'RENEWAL_OPEN'; clubId: ClubId; playerIds: PlayerId[] }
@@ -53,13 +48,19 @@ const r1000 = (v: number): Kc => Math.round(v / 1000) * 1000;
 
 // ── 5.1 ──
 
+/** 캡 산입액 계산에 필요한 최소 형태 (이적 도메인도 이 함수를 쓴다 — 2.2.1 에서 transfer/value 의 capChargeOf 를 합침) */
+export interface CapChargeInput {
+  ovr: number;
+  contract: Pick<Contract, 'salary'> & Partial<Contract>;
+}
+
 /** 캡 산입액 = max(연봉, 0.8 × S(ovr)) + 시즌당 보너스 */
-export function capCharge(p: Pick<Player, 'ovr' | 'contract'>): Kc {
+export function capCharge(p: CapChargeInput): Kc {
   return Math.max(p.contract.salary, r1000(CONTRACT.capChargeFloorRate * baseSalary(p.ovr))) + (p.contract.bonusPerSeason ?? 0);
 }
 
 /** 구단 캡 사용 = Σ 캡 산입액 (임시 계약 포함) */
-export function capUsage(squad: readonly Pick<Player, 'ovr' | 'contract'>[]): Kc {
+export function capUsage(squad: readonly CapChargeInput[]): Kc {
   return squad.reduce((s, p) => s + capCharge(p), 0);
 }
 
@@ -79,12 +80,14 @@ export function salaryFloor(ovr: number): Kc {
   return Math.max(CONTRACT.minSalary, r1000(CONTRACT.salaryFloorRate * baseSalary(ovr)));
 }
 
-/** 허용 계약 기간 (계약 시점 나이) */
+/** 허용 계약 기간 (계약 시점 나이): ≤23: 1~3 / 24~29: 1~4 / 30~32: 1~2 / ≥33: 1 */
 export function seasonsRange(age: number): [number, number] {
-  if (age <= 23) return [1, 3];
-  if (age <= 29) return [1, 4];
-  if (age <= 32) return [1, 2];
-  return [1, 1];
+  return [1, maxContractSeasons(age)];
+}
+
+/** 허용 계약 기간의 최대 시즌 수 (2.2.1: transfer/value 에서 옮김) */
+export function maxContractSeasons(age: number): number {
+  return age <= 23 ? 3 : age <= 29 ? 4 : age <= 32 ? 2 : 1;
 }
 
 // ── 5.2 재계약 ──

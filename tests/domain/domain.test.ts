@@ -433,10 +433,10 @@ describe('advanceDay 상태 머신', () => {
     expect(JSON.stringify(s2)).toBe(JSON.stringify(s));
   });
 
-  it('시즌 1회 전체 진행 후 직렬화 크기 < 2MB', () => {
+  it('시즌 1회 전체 진행 후 직렬화 크기 < 2.25MB (M4.4: SEASON_OVER 에는 정규 이적 창 매물·입찰·NPC·재계약 ~90KB 가 열려 있다)', () => {
     let s = freshState();
     while (s.phase !== 'SEASON_OVER') s = advanceDayState(s, 'now').state;
-    expect(JSON.stringify(s).length).toBeLessThan(2 * 1024 * 1024);
+    expect(JSON.stringify(s).length).toBeLessThan(2.25 * 1024 * 1024);
   });
 
   it('제안은 대상 경기 마감(advanceDay) 시 OPEN → EXPIRED', () => {
