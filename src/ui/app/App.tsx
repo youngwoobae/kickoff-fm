@@ -20,7 +20,9 @@ import { MatchCenterScreen } from '../screens/MatchCenterScreen';
 import { PlanScreen } from '../screens/PlanScreen';
 import { SquadScreen } from '../screens/SquadScreen';
 import { TacticsScreen } from '../screens/TacticsScreen';
+import { SettingsButton } from '../screens/SettingsSheet';
 import { TitleScreen } from '../screens/TitleScreen';
+import { Tour } from '../tutorial/Tour';
 import { ErrorBoundary, ServiceUnavailable } from './Fallbacks';
 import { INITIAL_NAV, NavCtx, useNav, type NavState, type TabId } from './nav';
 
@@ -148,6 +150,7 @@ function Shell() {
             </button>
           ))}
         </nav>
+        <Tour />
       </div>
     </NavCtx.Provider>
   );
@@ -246,7 +249,7 @@ function TopBar() {
       >
         {actor?.seat === 'OWNER' ? '👑 구단주' : '🧢 코치'}
       </button>
-      <ThemeToggle />
+      <SettingsButton inGame />
       <TitleButton />
     </header>
   );
@@ -286,36 +289,5 @@ function SaveBanner() {
         다시 저장
       </button>
     </div>
-  );
-}
-
-type Theme = 'system' | 'light' | 'dark';
-const THEME_KEY = 'kickoff-fm/ui/theme';
-
-function ThemeToggle() {
-  const [theme, setTheme] = useState<Theme>(() => {
-    try {
-      return (globalThis.localStorage?.getItem(THEME_KEY) as Theme | null) ?? 'system';
-    } catch {
-      return 'system';
-    }
-  });
-  useEffect(() => {
-    const root = document.documentElement;
-    if (theme === 'system') delete root.dataset.theme;
-    else root.dataset.theme = theme;
-    try {
-      globalThis.localStorage?.setItem(THEME_KEY, theme);
-    } catch {
-      /* noop */
-    }
-  }, [theme]);
-  const next: Record<Theme, Theme> = { system: 'light', light: 'dark', dark: 'system' };
-  const icon: Record<Theme, string> = { system: '◐', light: '☀', dark: '☾' };
-  const label: Record<Theme, string> = { system: '시스템', light: '라이트', dark: '다크' };
-  return (
-    <button type="button" className="btn btn-ghost btn-icon" aria-label={`테마: ${label[theme]} (눌러서 변경)`} onClick={() => setTheme(next[theme])}>
-      {icon[theme]}
-    </button>
   );
 }

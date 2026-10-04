@@ -112,6 +112,7 @@ export function PlanActions() {
       <button
         type="button"
         className="btn btn-primary"
+        data-tour="plan.submit"
         onClick={() => {
           if (run((s) => s.submitPlan(plan), '확정 제출 완료 · 넘기기 전까지 수정 가능')) markSaved();
         }}

@@ -6,6 +6,7 @@ import { PromotionBanner } from './LeagueScreen';
 import { ADJ_LABEL, BOT_STYLE_LABEL, PLAN_SOURCE_LABEL, formatKc, LEDGER_LABEL } from '../format';
 import { useNav } from '../app/nav';
 import { usePlanEditor } from '../plan/PlanEditor';
+import { getPrefs } from '../prefs';
 import { PlanStatusLine } from '../plan/PlanActions';
 import { useAction, useActor, useGame, useQuery, useService } from '../service/ServiceContext';
 
@@ -18,7 +19,9 @@ export function HomeScreen() {
   const preview = useQuery((s) => s.previewResolvedPlan()).data ?? null;
   const next = useQuery((s) => s.getNextMatch()).data ?? null;
 
+  const planState = useQuery((s) => s.getPlanState()).data;
   const advance = () => {
+    if (getPrefs().confirmUnsubmitted && next && planState?.matchId && !planState.confirmed && !confirm('오늘 플랜을 확정 제출하지 않았어요. 기본 플랜으로 경기할까요?')) return;
     const r = run((s) => s.advanceDay());
     if (r) setDayResult(r);
   };
@@ -66,7 +69,7 @@ export function HomeScreen() {
               추천대로 제출
             </button>
           )}
-          <button type="button" className="btn btn-primary" onClick={advance}>
+          <button type="button" className="btn btn-primary" data-tour="home.advance" onClick={advance}>
             다음 날로 넘기기 ▶
           </button>
         </StickyActions>
@@ -90,7 +93,7 @@ function NextMatchCard({ fixture }: { fixture: Fixture }) {
   const [open, setOpen] = useState(false);
   const today = fixture.day === snap.time.day;
   return (
-    <Card title="다음 경기" extra={<Badge tone={today ? 'accent' : 'neutral'}>{today ? '오늘' : `Day ${fixture.day}`}</Badge>}>
+    <Card tour="home.nextMatch" title="다음 경기" extra={<Badge tone={today ? 'accent' : 'neutral'}>{today ? '오늘' : `Day ${fixture.day}`}</Badge>}>
       <div className="match-line">
         <span className="big">
           {isHome ? '홈' : '원정'} vs {opp?.name ?? oppId}
@@ -307,6 +310,7 @@ function DayResultSheet({ result, onClose }: { result: DayResult | null; onClose
             <button
               type="button"
               className="btn btn-secondary"
+              data-tour="dayResult.replay"
               onClick={() => {
                 onClose();
                 go({ tab: 'match', matchId: userSum.matchId, matchView: 'replay' });

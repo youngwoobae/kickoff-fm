@@ -5,6 +5,9 @@ import type { GamePhase, SaveSlotId, SaveSlotMeta, Tier } from '../../types';
 import { Badge, Card, Segmented } from '../components/kit';
 import { TIER_NAME, downloadText } from '../format';
 import { useAsyncAction, useService, useServiceCtx } from '../service/ServiceContext';
+import { DEV_TOOLS } from '../service/serviceHost';
+import { tourHint } from '../tutorial/Tour';
+import { SettingsButton } from './SettingsSheet';
 
 /**
  * 게임 안에서 열린 슬롯을 지우면 deleteSlot 이 게임을 먼저 닫아(통지) 타이틀이 삭제 전 목록을 읽는다.
@@ -110,6 +113,9 @@ export function TitleScreen() {
   return (
     <div className="app-shell">
       <main className="app-main onboarding">
+        <div className="title-settings">
+          <SettingsButton inGame={false} />
+        </div>
         <h1 className="hero">킥오프 FM</h1>
         <p className="muted">
           매일 경기 플랜을 제출하고 하루씩 진행하는 축구 구단 운영 게임입니다. 진행은 매일 자동 저장돼요.
@@ -190,8 +196,9 @@ function NewGameForm({ slotId, overwrite, onCancel, run }: { slotId: SaveSlotId;
   const start = () => {
     if (overwrite && !confirm(`슬롯 ${slotId} 의 기존 세이브를 지우고 새 게임을 시작할까요?`)) return;
     const n = Number(seed);
+    tourHint.newGame = true;
     void run('새 게임을 만드는 중…', () =>
-      act((s) => s.newGame({ clubName: clubName.trim() || undefined, seed: seed && Number.isFinite(n) ? n : undefined, devMode: true, slotId, startTier }), '새 시즌을 시작합니다!'),
+      act((s) => s.newGame({ clubName: clubName.trim() || undefined, seed: seed && Number.isFinite(n) ? n : undefined, devMode: DEV_TOOLS, slotId, startTier }), '새 시즌을 시작합니다!'),
     );
   };
 

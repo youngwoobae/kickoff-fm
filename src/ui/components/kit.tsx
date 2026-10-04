@@ -3,9 +3,10 @@ import { useEffect, useId, useRef, type ReactNode } from 'react';
 import type { FitLevel, Step } from '../../types';
 import { FIT_LABEL, FIT_SYMBOL, conditionTone, starsText, stepText } from '../format';
 
-export function Card({ title, extra, children, className = '' }: { title?: ReactNode; extra?: ReactNode; children: ReactNode; className?: string }) {
+/** tour: 튜토리얼 코치마크가 찾는 data-tour 표식 */
+export function Card({ title, extra, children, className = '', tour }: { title?: ReactNode; extra?: ReactNode; children: ReactNode; className?: string; tour?: string }) {
   return (
-    <section className={`card ${className}`}>
+    <section className={`card ${className}`} data-tour={tour}>
       {(title || extra) && (
         <header className="card-head">
           {title && <h2 className="card-title">{title}</h2>}

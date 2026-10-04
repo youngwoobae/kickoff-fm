@@ -4,6 +4,7 @@ import type { FormationDef, MatchPlan, Player, PlayerId } from '../../types';
 import { Badge, Card, ConditionBar, Empty, FitMark, Segmented, Stars, Toggle } from '../components/kit';
 import { POS_LABEL, fitOf, isAvailable, pitchRows, roleFit } from '../format';
 import { PlanActions } from '../plan/PlanActions';
+import { getPrefs } from '../prefs';
 import { usePlanEditor } from '../plan/PlanEditor';
 import { useGame, useQuery } from '../service/ServiceContext';
 import { PlayerSheet } from './SquadScreen';
@@ -43,7 +44,7 @@ export function LineupScreen() {
   const squad = useQuery((s) => s.getSquad()).data ?? [];
   const catalog = useQuery((s) => s.getCatalog()).data;
   const [pick, setPick] = useState<Pick | null>(null);
-  const [view, setView] = useState<'pitch' | 'list'>('pitch');
+  const [view, setView] = useState<'pitch' | 'list'>(() => (getPrefs().fontScale === 1.25 ? 'list' : 'pitch'));
   const [detail, setDetail] = useState<PlayerId | null>(null);
 
   const byId = useMemo(() => new Map(squad.map((p) => [p.id, p])), [squad]);
@@ -122,7 +123,7 @@ export function LineupScreen() {
       </div>
 
       {view === 'pitch' && formation ? (
-        <div className="pitch" aria-label="피치 (위가 상대 골대)">
+        <div className="pitch" data-tour="lineup.pitch" aria-label="피치 (위가 상대 골대)">
           <span className="pitch-goal-label">상대 골대 ↑</span>
           {pitchRows(formation).map((row, ri) => (
             <div key={ri} className="pitch-row">
@@ -155,7 +156,7 @@ export function LineupScreen() {
           ))}
         </div>
       ) : (
-        <ul className="slot-list" aria-label="선발 리스트">
+        <ul className="slot-list" data-tour="lineup.pitch" aria-label="선발 리스트">
           {plan.lineup.starters.map((id, i) => {
             const fs = formation?.slots[i];
             const p = byId.get(id);
@@ -196,7 +197,7 @@ export function LineupScreen() {
         ))}
       </div>
 
-      <Card className="card-compact">
+      <Card className="card-compact" tour="lineup.autoRotation">
         <Toggle label="자동 로테이션" hint="경기 전 컨디션 70 미만 선발을 자동 대체" checked={plan.autoRotation} onChange={(v) => update((p) => ({ ...p, autoRotation: v }))} />
       </Card>
 

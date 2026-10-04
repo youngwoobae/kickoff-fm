@@ -6,6 +6,7 @@ import { downloadText, signed } from '../format';
 import { useNav } from '../app/nav';
 import { useAction, useAsyncAction, useGame, useQuery, useServiceCtx } from '../service/ServiceContext';
 import { reloadInFakeMode, reloadInRealMode } from '../service/serviceHost';
+import { getPrefs } from '../prefs';
 import { lastUserFixture } from './HomeScreen';
 import { trackSlotOp } from './TitleScreen';
 
@@ -29,8 +30,15 @@ export function DevPanel() {
   const [seed, setSeed] = useState('');
   const [importText, setImportText] = useState('');
 
+  /** 설정 '여러 날 진행 전 확인': 건너뛸 내 경기 수를 먼저 알린다 */
+  const okMulti = (label: string, untilDay: number) => {
+    if (!getPrefs().confirmMultiDay) return true;
+    const games = snap.fixtures.filter((f) => !f.played && f.season === snap.time.season && f.day < untilDay && (f.homeId === snap.userClubId || f.awayId === snap.userClubId)).length;
+    return confirm(`${label} 넘기면 내 경기 ${games}경기를 플랜 확정 없이 치러요. 진행할까요?`);
+  };
   const advanceN = () => {
     const n = Math.max(1, Math.min(60, Number(days) || 1));
+    if (!okMulti(`${n}일을`, snap.time.day + n)) return;
     run((s) => s.advanceDays(n), (r) => `${r.length}일 진행했어요`);
   };
 
@@ -56,7 +64,7 @@ export function DevPanel() {
           </button>
         </div>
         <div className="btn-row">
-          <button type="button" className="btn btn-secondary" disabled={snap.phase === 'SEASON_OVER'} onClick={() => run((s) => s.advanceToSeasonEnd(), '시즌 끝까지 진행했어요')}>
+          <button type="button" className="btn btn-secondary" disabled={snap.phase === 'SEASON_OVER'} onClick={() => okMulti('시즌 끝까지', Infinity) && run((s) => s.advanceToSeasonEnd(), '시즌 끝까지 진행했어요')}>
             시즌 끝까지
           </button>
           <button type="button" className="btn btn-secondary" disabled={snap.phase !== 'SEASON_OVER'} onClick={() => run((s) => s.startNewSeason(), '새 시즌 시작')}>

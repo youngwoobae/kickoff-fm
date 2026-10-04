@@ -204,7 +204,7 @@ export function PlanScreen() {
         </Card>
       )}
 
-      <Card title="추천·기본 플랜">
+      <Card tour="plan.default" title="추천·기본 플랜">
         <div className="btn-row">
           <button type="button" className="btn btn-secondary" onClick={() => { const r = run((s) => s.recommendPlan()); if (r) replace(r); }}>
             추천 플랜 불러오기

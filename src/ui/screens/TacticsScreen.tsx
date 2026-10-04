@@ -240,7 +240,7 @@ function StylePicker({
     // 목 서비스 호환: styles 가 없으면 기존 프리셋 칩
     const cur = fallbackPresets.find((p) => same(p.instructions, instructions));
     return (
-      <Card title="프리셋" extra={<span className="small muted">{cur ? cur.label : '사용자 지정'}</span>}>
+      <Card tour="tactics.styles" title="프리셋" extra={<span className="small muted">{cur ? cur.label : '사용자 지정'}</span>}>
         <div className="chips">
           {fallbackPresets.map((p) => (
             <button key={p.id} type="button" className={`chip ${cur?.id === p.id ? 'is-active' : ''}`} aria-pressed={cur?.id === p.id} onClick={() => onPreset(p.id)}>
@@ -252,7 +252,7 @@ function StylePicker({
     );
   }
   return (
-    <Card title="전술 스타일" extra={<span className="small muted">탭하면 상세·적용</span>}>
+    <Card tour="tactics.styles" title="전술 스타일" extra={<span className="small muted">탭하면 상세·적용</span>}>
       <div className="style-grid">
         {styles.map((st) => {
           const active = same(st.instructions, instructions);

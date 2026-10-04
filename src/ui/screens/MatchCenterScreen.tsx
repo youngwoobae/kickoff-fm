@@ -5,6 +5,7 @@ import { Badge, Card, Empty, Segmented, Stat } from '../components/kit';
 import { INSTR_LABEL, minuteText, pct, signed, stepText } from '../format';
 import { useNav } from '../app/nav';
 import { ProposeSheet } from '../plan/PlanActions';
+import { getPrefs, useReducedMotion } from '../prefs';
 import { useAction, useGame, useIsOwner, useQuery, useService } from '../service/ServiceContext';
 
 /**
@@ -80,10 +81,10 @@ function ReplayView({ matchId }: { matchId: string }) {
   const replay: MatchReplay | undefined = q.data;
   const [shown, setShown] = useState(0);
   const [playing, setPlaying] = useState(true);
-  const [speed, setSpeed] = useState<Speed>('2');
+  const [speed, setSpeed] = useState<Speed>(() => getPrefs().replaySpeed);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const total = replay?.lines.length ?? 0;
-  const reduceMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
     try {
@@ -263,7 +264,7 @@ function ReportView({ matchId }: { matchId: string }) {
         </p>
       </Card>
 
-      <Card title="승부 요인 Top 3">
+      <Card tour="report.keyFactors" title="승부 요인 Top 3">
         {r.keyFactors.length === 0 ? (
           <Empty>뚜렷한 전술 요인이 없었어요</Empty>
         ) : (
@@ -334,7 +335,7 @@ function ReportView({ matchId }: { matchId: string }) {
       </Card>
 
       {r.suggestions.length > 0 && (
-        <Card title="다음 경기 제안">
+        <Card tour="report.suggestions" title="다음 경기 제안">
           <ul className="list">
             {r.suggestions.map((sg, i) => (
               <li key={i} className="suggestion">
