@@ -6,6 +6,7 @@ import type { ClubId, Day, GameTime, GameTimestamp, MatchId, PlayerId, ProposalI
 import type { Membership, Proposal } from './coach';
 import type { EngineTeamInput } from './engine';
 import type { Finance, LedgerEntry } from './economy';
+import type { InboxMessage } from './inbox';
 import type { Club, Fixture, LeagueState, MatchSummary, SeasonOutcome, Tier } from './league';
 import type { PlanRecord, ResolvedPlan } from './plan';
 import type { Player } from './player';
@@ -129,6 +130,11 @@ export interface GameState {
    * 같은 경계를 다시 돌리면 건너뛴다(노화 두 번 방지). 없으면 아직 한 번도 넘지 않음
    */
   boundarySeason?: number;
+  /**
+   * 2.2.0 (M4.1): 사용자 구단 받은 편지함(오래된 것 → 최신). 없으면 []. 생성·보관(D27) 규칙은 M4.2,
+   * 서비스 연결은 M4.4. 스키마 버전은 올리지 않았다(선택 필드라 3 그대로 읽힌다)
+   */
+  inbox?: InboxMessage[];
   actionLog: ActionLogEntry[];
 }
 
@@ -162,7 +168,16 @@ export type GameErrorCode =
   | 'PROPOSAL_NOT_OPEN'
   | 'PROPOSAL_INVALID'
   | 'SAVE_INCOMPATIBLE'
-  | 'STORAGE_FULL';
+  | 'STORAGE_FULL'
+  /** 2.2.0 (M4.1, 경제 14장): 이적·계약 */
+  | 'WINDOW_CLOSED'
+  | 'BID_OUT_OF_RANGE'
+  | 'INSUFFICIENT_FUNDS'
+  | 'CAP_EXCEEDED'
+  | 'SQUAD_FULL'
+  | 'SIGNING_LIMIT'
+  | 'RENEWAL_NOT_OPEN'
+  | 'NEGATIVE_BALANCE_LOCK';
 
 export interface PlanValidationIssue {
   severity: 'ERROR' | 'WARNING';

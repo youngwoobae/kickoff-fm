@@ -34,6 +34,21 @@ export type LedgerKind =
 /** @deprecated 2.1.1 에서 LedgerKind 에 합쳤다. 기존 코드 컴파일용 별칭 */
 export type PromotionLedgerKind = 'PROMOTION_BONUS' | 'PARACHUTE';
 
+/**
+ * 2.2.0 (M4.1, 경제 설계 14장): 이적·계약 원장 항목. UI 의 `Record<LedgerKind | PromotionLedgerKind, string>` 를
+ * 깨지 않도록 아직 LedgerKind 에 넣지 않은 별도 유니온(M3.1 의 PromotionLedgerKind 와 같은 방식).
+ * UI 라벨이 생기는 때(M4.6) LedgerKind 에 합친다. 그 전에는 원장(LedgerEntry.kind)에 쓸 수 없다.
+ * 부호: 지출 −, 수입 +. TRANSFER_TAX·FORCED_SALE 는 판매 구단 기준 기록(세금 −, 강제 매각 수입 +).
+ */
+export type TransferLedgerKind =
+  | 'TRANSFER_FEE_PAID'
+  | 'TRANSFER_FEE_RECEIVED'
+  | 'TRANSFER_TAX'
+  | 'SIGNING_BONUS'
+  | 'RENEWAL_BONUS'
+  | 'RELEASE_PENALTY'
+  | 'FORCED_SALE';
+
 export interface LedgerEntry {
   season: SeasonNo;
   day: Day;
@@ -55,6 +70,12 @@ export interface Finance {
    * 새 캡을 넘는 연봉분만 일할로 대신 내고 Day 28 소멸. 이월 계산 제외. 없으면 0
    */
   parachute?: Kc;
+  /** 2.2.0 (M4.1): 미정산 입찰 예약액 합계(경제 6.3). B 에서 뺀다. 없으면 0 (M4.3 이 채움) */
+  reserved?: Kc;
+  /** 2.2.0: 레거시 포인트(LP) 누계. 없으면 0 */
+  legacyPoints?: number;
+  /** 2.2.0: 잔액 < 0 이 처음 된 날(D18 유예 시작). 잔액 ≥ 0 이면 없음 */
+  negativeSinceDay?: Day;
 }
 
 export interface CarryOverResult {
@@ -83,4 +104,6 @@ export interface FinanceSummary {
   /** 지금 시즌이 끝나면 예상되는 이월 판정 */
   projectedCarry: CarryOverResult;
   recent: LedgerEntry[];
+  /** 2.2.0 (M4.1): 미정산 입찰 예약액(경제 6.6 표시값). spendable 은 이미 뺀 값. 없으면 0 */
+  reserved?: Kc;
 }

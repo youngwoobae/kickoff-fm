@@ -37,6 +37,10 @@ export interface Contract {
   seasonsLeft: number;
   /** 연봉 = 시즌(28일)당 급여. 매일 salary/28 차감 */
   salary: Kc;
+  /** 2.2.0 (M4.1, 경제 5.1): 계약금·갱신 보너스 ÷ 계약 시즌 수. 캡 산입에 더한다. 없으면 0 */
+  bonusPerSeason?: Kc;
+  /** 2.2.0: 캡 산입액 = max(salary, 0.8 × S(ovr)) + bonusPerSeason. 시즌 경계 재계산 값(표시용, M4.2) */
+  capCharge?: Kc;
 }
 
 export interface Availability {

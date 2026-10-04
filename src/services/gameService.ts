@@ -11,7 +11,10 @@ import type {
   ActionLogEntry,
   ActionLogKind,
   ApproveResult,
+  Bid,
+  BidInput,
   CareerRecord,
+  InboxMessage,
   LeagueId,
   Pyramid,
   AttrDef,
@@ -46,6 +49,9 @@ import type {
   SaveStatus,
   ProposalInput,
   ProposalStatus,
+  ReleaseQuote,
+  RenewalQuote,
+  RenewalResult,
   ResolvedPlan,
   SeasonNo,
   SeasonOutcome,
@@ -57,6 +63,9 @@ import type {
   TacticSlot,
   TacticCap,
   TeamInstructions,
+  TransferListing,
+  TransferListingFilter,
+  TransferWindow,
   UiLogKind,
 } from '../types';
 import {
@@ -289,6 +298,7 @@ class LocalGameService implements GameService {
   private state: GameState | null = null;
   private standingsCache: { state: GameState; rows: Map<LeagueId, StandingRow[]> } | null = null;
   private pyramidCache: { state: GameState; pyramid: Pyramid } | null = null;
+  private inboxCache: { state: GameState; unread: boolean; list: InboxMessage[] } | null = null;
   private readonly replayCache = new Map<string, MatchReplay>();
 
   constructor(deps: GameServiceDeps) {
@@ -746,6 +756,108 @@ class LocalGameService implements GameService {
     const outcomes = s.pendingOutcome ? [...s.seasonHistory, s.pendingOutcome] : s.seasonHistory;
     const startTier = s.settings.startTier ?? outcomes[0]?.tier ?? s.settings.tier;
     return buildCareer(s.userClubId, outcomes, startTier, s.settings.tier);
+  }
+
+  // ── 이적·계약 (2.2.0 기본 구현: 창이 열리지 않는다. 도메인 M4.2·M4.3, 연결 M4.4) ──
+
+  /** 이적·계약 변경은 OWNER 전용 (v1: 코치 제안 없음) */
+  private ownerOnly(s: GameState): void {
+    if (this.membership(s).seat !== 'OWNER') throw new GameError('PERMISSION_DENIED', '이적·계약은 구단주만 할 수 있습니다', ['OWNER_ONLY']);
+  }
+
+  private ownPlayer(s: GameState, playerId: PlayerId): Player {
+    const p = s.players[playerId];
+    if (!p || p.clubId !== s.userClubId) throw new GameError('NOT_FOUND', `내 선수가 아닙니다: ${playerId}`);
+    return p;
+  }
+
+  private windowClosed(): never {
+    throw new GameError('WINDOW_CLOSED', '이적 창이 닫혀 있습니다');
+  }
+
+  getTransferWindow(): TransferWindow | null {
+    this.require();
+    return null;
+  }
+
+  listTransferListings(_filter?: TransferListingFilter): TransferListing[] {
+    this.require();
+    return [];
+  }
+
+  placeBid(_bid: BidInput): Bid {
+    this.ownerOnly(this.require());
+    return this.windowClosed();
+  }
+
+  withdrawBid(_listingId: string): void {
+    this.ownerOnly(this.require());
+    this.windowClosed();
+  }
+
+  listBids(): Bid[] {
+    this.require();
+    return [];
+  }
+
+  listForSale(playerId: PlayerId, _minPrice: number): TransferListing {
+    const s = this.require();
+    this.ownerOnly(s);
+    this.ownPlayer(s, playerId);
+    return this.windowClosed();
+  }
+
+  withdrawListing(_listingId: string): void {
+    this.ownerOnly(this.require());
+    this.windowClosed();
+  }
+
+  getRenewalQuote(playerId: PlayerId): RenewalQuote {
+    this.ownPlayer(this.require(), playerId);
+    throw new GameError('RENEWAL_NOT_OPEN', '재계약 기간이 아닙니다');
+  }
+
+  offerRenewal(playerId: PlayerId, _salary: number, _seasons: number): RenewalResult {
+    const s = this.require();
+    this.ownerOnly(s);
+    this.ownPlayer(s, playerId);
+    throw new GameError('RENEWAL_NOT_OPEN', '재계약 기간이 아닙니다');
+  }
+
+  getReleaseQuote(playerId: PlayerId): ReleaseQuote {
+    this.ownPlayer(this.require(), playerId);
+    throw new GameError('INVALID_PHASE', '방출은 아직 지원하지 않습니다');
+  }
+
+  releasePlayer(playerId: PlayerId): void {
+    const s = this.require();
+    this.ownerOnly(s);
+    this.ownPlayer(s, playerId);
+    throw new GameError('INVALID_PHASE', '방출은 아직 지원하지 않습니다');
+  }
+
+  // ── 받은 편지함 (2.2.0) ─────────────────────────────────────────
+
+  getInbox(filter: { unreadOnly?: boolean } = {}): InboxMessage[] {
+    const s = this.require();
+    const unread = filter.unreadOnly === true;
+    const c = this.inboxCache;
+    if (c && c.state === s && c.unread === unread) return c.list;
+    const list = (s.inbox ?? []).filter((m) => !unread || !m.read).reverse();
+    this.inboxCache = { state: s, unread, list };
+    return list;
+  }
+
+  markRead(ids?: readonly string[]): void {
+    const s = this.require();
+    const want = ids ? new Set(ids) : null;
+    let changed = false;
+    const inbox = (s.inbox ?? []).map((m) => {
+      if (m.read || (want && !want.has(m.id))) return m;
+      changed = true;
+      return { ...m, read: true };
+    });
+    if (changed) this.commit({ ...s, inbox }); // 읽음은 게임 사건이 아니라 seq·행동 로그를 건드리지 않는다
   }
 
   getNextMatch(): Fixture | null {

@@ -11,3 +11,5 @@ export type * from './calibration';
 export type * from './catalog';
 export type * from './game';
 export type * from './save';
+export type * from './transfer';
+export type * from './inbox';

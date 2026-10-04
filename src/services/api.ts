@@ -9,7 +9,10 @@
  */
 import type {
   ApproveResult,
+  BidInput,
+  Bid,
   CareerRecord,
+  InboxMessage,
   LeagueId,
   Pyramid,
   CalibrationOptions,
@@ -35,6 +38,12 @@ import type {
   Player,
   PlayerId,
   Proposal,
+  ReleaseQuote,
+  RenewalQuote,
+  RenewalResult,
+  TransferListing,
+  TransferListingFilter,
+  TransferWindow,
   ProposalId,
   SaveSlotId,
   SaveSlotMeta,
@@ -85,7 +94,14 @@ import type {
  * Finance.parachute?, Player.dev?·retiring?·faSince?·academyClubId?, GameState.boundarySeason?, FA 풀 = players 의 clubId null.
  * 실제 승강·수명주기·K4 정산, 세이브 스키마 3(leagues 필수, 2 → 3 자동 변환). 아키텍처 16장.
  */
-export const CONTRACT_VERSION = '2.1.1';
+/**
+ * 2.2.0 (M4.1, 추가만): 이적·계약·받은 편지함 계약. types/transfer.ts(TransferWindow·TransferListing·Bid·RenewalQuote·ReleaseQuote),
+ * types/inbox.ts(InboxMessage), TransferLedgerKind(아직 LedgerKind 미포함), Finance.reserved?·legacyPoints?·negativeSinceDay?,
+ * FinanceSummary.reserved?, Contract.bonusPerSeason?·capCharge?, GameState.inbox?, GameErrorCode 8종.
+ * 선택 메서드 getTransferWindow … releasePlayer, getInbox / markRead. 변경 메서드는 모두 OWNER 전용(코치 PERMISSION_DENIED).
+ * 실제 도메인은 M4.2·M4.3, 연결은 M4.4 — 그 전 로컬 서비스는 창 없음(null·[]·WINDOW_CLOSED), 재계약 RENEWAL_NOT_OPEN, 방출 INVALID_PHASE, 편지함은 GameState.inbox 그대로. 세이브 스키마 3 유지. 아키텍처 16장.
+ */
+export const CONTRACT_VERSION = '2.2.0';
 
 /** 슬롯 번호 목록 (D28: 3개) */
 export const SAVE_SLOT_IDS: readonly SaveSlotId[] = [1, 2, 3];
@@ -221,6 +237,44 @@ export interface GameService {
   getPyramid?(): Pyramid;
   /** 사용자 구단 커리어: 판정 끝난 시즌별 티어·순위·라벨·트로피. 진행 중 시즌은 빠진다 */
   getCareer?(): CareerRecord;
+
+  // ── 이적·계약 (2.2.0, 선택 메서드, 경제 설계 5·6·14장) ─────────────
+  // 조회는 모든 좌석, 변경(입찰·등록·재계약·방출)은 OWNER 전용 — COACH 는 PERMISSION_DENIED(v1 은 코치 제안 없음).
+  // 잔액 < 0 상태(D18)의 입찰·FA·재계약 인상 = NEGATIVE_BALANCE_LOCK.
+  /** 지금 열린 이적 창. 닫혀 있으면 null */
+  getTransferWindow?(): TransferWindow | null;
+  /** 열린 창의 매물(NPC·FA·CLUB). 창이 닫혀 있으면 []. 정렬: value 내림차순, id */
+  listTransferListings?(filter?: TransferListingFilter): TransferListing[];
+  /**
+   * 입찰 등록·수정(같은 매물 = 덮어쓰기). 금액을 예약(B 차감). 실패: WINDOW_CLOSED, NOT_FOUND(매물),
+   * BID_OUT_OF_RANGE(이적료 min~max·FA 계약금·연봉 하한·기간), INSUFFICIENT_FUNDS, NEGATIVE_BALANCE_LOCK
+   */
+  placeBid?(bid: BidInput): Bid;
+  /** 입찰 철회(예약 해제). WINDOW_CLOSED, 내 입찰 없으면 NOT_FOUND */
+  withdrawBid?(listingId: string): void;
+  /** 사용자 구단의 미정산 입찰. 창 밖이면 [] */
+  listBids?(): Bid[];
+  /**
+   * 내 선수를 구단 이적 명단에 등록(최저가 0.7V~1.3V). WINDOW_CLOSED, NOT_FOUND(내 선수 아님),
+   * BID_OUT_OF_RANGE(최저가 범위 밖·정규 창에 계약 잔여 1시즌)
+   */
+  listForSale?(playerId: PlayerId, minPrice: number): TransferListing;
+  /** 내 명단 철회. WINDOW_CLOSED, NOT_FOUND */
+  withdrawListing?(listingId: string): void;
+  /** 재계약 견적(경제 5.2). 대상 아님·기간 밖(Day 20~27, seasonsLeft 1) = RENEWAL_NOT_OPEN, 내 선수 아님 = NOT_FOUND */
+  getRenewalQuote?(playerId: PlayerId): RenewalQuote;
+  /** 재계약 제안. 수락 = 연봉 ≥ ask·기간 허용. RENEWAL_NOT_OPEN, CAP_EXCEEDED, NEGATIVE_BALANCE_LOCK */
+  offerRenewal?(playerId: PlayerId, salary: number, seasons: number): RenewalResult;
+  /** 방출 견적(경제 5.3). 내 선수 아님 = NOT_FOUND */
+  getReleaseQuote?(playerId: PlayerId): ReleaseQuote;
+  /** 방출(위약금 즉시 지급, FA 풀로). 내 선수 아님 = NOT_FOUND. 18명 미만이 되면 임시 계약 선수가 채운다 */
+  releasePlayer?(playerId: PlayerId): void;
+
+  // ── 받은 편지함 (2.2.0, 선택 메서드) ─────────────────────────────
+  /** 사용자 구단 편지함, 최신 먼저. unreadOnly 면 안 읽은 것만. 같은 상태면 같은 내용 */
+  getInbox?(filter?: { unreadOnly?: boolean }): InboxMessage[];
+  /** 읽음 표시. ids 생략 = 모두. 없는 id 는 무시. 바뀐 게 없으면 저장·통지 없음. 모든 좌석 허용 */
+  markRead?(ids?: readonly string[]): void;
 
   // ── 전술·플랜 (OWNER 전용, COACH 는 PERMISSION_DENIED) ──────────
   updateTacticSlot(slot: SlotKey, next: TacticSlotInput): TacticUpdateResult;
