@@ -6,6 +6,7 @@ import { Badge, Card, Segmented } from '../components/kit';
 import { TIER_NAME, downloadText } from '../format';
 import { useAsyncAction, useService, useServiceCtx } from '../service/ServiceContext';
 import { DEV_TOOLS } from '../service/serviceHost';
+import { IosInstallHint } from '../pwa/UpdateBanner';
 import { tourHint } from '../tutorial/Tour';
 import { SettingsButton } from './SettingsSheet';
 
@@ -121,6 +122,7 @@ export function TitleScreen() {
           매일 경기 플랜을 제출하고 하루씩 진행하는 축구 구단 운영 게임입니다. 진행은 매일 자동 저장돼요.
           {mode === 'fake' && ' (가짜 서비스 모드)'}
         </p>
+        <IosInstallHint />
         {SAVE_SLOT_IDS.map((id) => {
           const meta = metas.find((m) => m.slotId === id);
           const bad = corrupt[id];

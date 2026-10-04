@@ -23,6 +23,7 @@ import { TacticsScreen } from '../screens/TacticsScreen';
 import { SettingsButton } from '../screens/SettingsSheet';
 import { TitleScreen } from '../screens/TitleScreen';
 import { Tour } from '../tutorial/Tour';
+import { UpdateBanner } from '../pwa/UpdateBanner';
 import { ErrorBoundary, ServiceUnavailable } from './Fallbacks';
 import { INITIAL_NAV, NavCtx, useNav, type NavState, type TabId } from './nav';
 
@@ -62,6 +63,7 @@ export function App() {
         <ErrorBoundary mode={mode}>
           <GameRoot />
         </ErrorBoundary>
+        <UpdateBanner />
       </ServiceProvider>
     </ToastProvider>
   );

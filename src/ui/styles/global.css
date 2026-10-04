@@ -2078,3 +2078,24 @@ button.fx-row {
   justify-content: flex-end;
   margin-bottom: -8px;
 }
+
+/* PWA 새 버전 안내 (하단 탭 위에 고정) */
+.update-banner {
+  position: fixed;
+  left: var(--gutter);
+  right: var(--gutter);
+  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 8px);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px var(--gutter);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  box-shadow: var(--shadow);
+  font-weight: 700;
+}
+.update-banner > span {
+  flex: 1;
+}
