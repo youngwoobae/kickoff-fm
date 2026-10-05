@@ -34,6 +34,16 @@ import type {
   MatchReport,
   MatchupPreview,
   Membership,
+  ClubMember,
+  DealApproveResult,
+  DealProposal,
+  DealProposalInput,
+  DealPayload,
+  ProposalKind,
+  ProposalReaction,
+  MemberPatch,
+  RoleLabel,
+  PermissionResult,
   OpponentScout,
   PlanChangePatch,
   PlanRecord,
@@ -96,6 +106,7 @@ import {
   COACH_ID,
   DEFAULT_START_TIER,
   OWNER_ID,
+  SYSTEM_ACTOR,
   SCHEMA_VERSION,
   TIER_ECONOMY,
   advanceDayState,
@@ -112,6 +123,20 @@ import {
   buildReport,
   carryOver,
   checkAction,
+  checkProposeKind,
+  toClubMember,
+  cleanName,
+  cleanEmoji,
+  checkRoles,
+  nextMemberId,
+  hashPin,
+  PIN_RE,
+  MAX_COACHES,
+  MAX_NAME_LENGTH,
+  ROLE_LABELS,
+  MEMBER_EMOJIS,
+  MAX_REASON_LENGTH,
+  MAX_OPEN_PER_COACH,
   computeLeagueAverages,
   computeStandings,
   createInitialState,
@@ -380,7 +405,54 @@ function saveProblem(x: unknown): string | null {
   if (career) return career;
   const ms = x.memberships as unknown[];
   if (!ms.some((m) => isObj(m) && m.userId === x.actorUserId && m.clubId === x.userClubId)) return '현재 사용자 멤버십이 없습니다';
+  return membersProblem(x, ms);
+}
+
+const SEATS: readonly unknown[] = ['OWNER', 'COACH', 'COACH_SPECTATOR'];
+const isRole = (r: unknown) => ROLE_LABELS.includes(r as RoleLabel);
+
+/** 2.5.0 로컬 프로필: 멤버 형식·인원(구단주 1 + 코치 ≤ 5), 이적·재계약 제안, 구단주 PIN 해시 */
+function membersProblem(x: Record<string, unknown>, ms: unknown[]): string | null {
+  const ids = new Set<unknown>();
+  let owners = 0;
+  let coaches = 0;
+  for (const m of ms) {
+    if (!isObj(m) || typeof m.userId !== 'string' || ids.has(m.userId) || typeof m.clubId !== 'string' || !SEATS.includes(m.seat)) return '멤버 형식 오류';
+    ids.add(m.userId);
+    if (m.roleLabel !== undefined && !isRole(m.roleLabel)) return '멤버 역할 오류';
+    if (m.subRole !== undefined && (!isRole(m.subRole) || m.subRole === m.roleLabel)) return '멤버 보조 역할 오류';
+    if (m.name !== undefined && (typeof m.name !== 'string' || m.name.trim().length < 1 || [...m.name].length > MAX_NAME_LENGTH)) return '멤버 이름 오류';
+    if (m.emoji !== undefined && (typeof m.emoji !== 'string' || m.emoji.length < 1 || m.emoji.length > 8)) return '멤버 이모지 오류';
+    if (m.clubId !== x.userClubId) continue;
+    if (m.seat === 'OWNER') owners++;
+    else coaches++;
+  }
+  if (owners !== 1 || coaches > MAX_COACHES) return `구단 멤버 인원 오류 (구단주 ${owners}, 코치 ${coaches})`;
+  const pin = x.ownerPin;
+  if (pin !== undefined && (!isObj(pin) || typeof pin.salt !== 'string' || !/^[0-9a-f]{16}$/.test(pin.hash as string))) return '구단주 PIN 형식 오류';
+  const dp = x.dealProposals;
+  if (dp !== undefined) {
+    if (!isObj(dp)) return '이적·재계약 제안 형식 오류';
+    for (const [id, d] of Object.entries(dp)) {
+      if (!isObj(d) || d.id !== id || typeof d.authorId !== 'string' || typeof d.status !== 'string' || !isObj(d.payload) || !isObj(d.expiresAt) || !Array.isArray(d.reactions)) return '이적·재계약 제안 형식 오류';
+      const pl = d.payload;
+      if (!(pl.kind === 'TRANSFER_BID' && isObj(pl.bid) && typeof pl.bid.listingId === 'string') && !(pl.kind === 'RENEWAL' && typeof pl.playerId === 'string' && isInt(pl.salary, 1) && isInt(pl.seasons, 1, 4))) return '이적·재계약 제안 내용 오류';
+    }
+  }
   return null;
+}
+
+/** PIN 솔트 (재현성 불필요 — 게임 시드와 무관) */
+function randomSalt(): string {
+  const b = new Uint32Array(2);
+  if (globalThis.crypto?.getRandomValues) globalThis.crypto.getRandomValues(b);
+  else for (let i = 0; i < 2; i++) b[i] = Math.floor(Math.random() * 2 ** 32);
+  return Array.from(b, (n) => n.toString(16).padStart(8, '0')).join('');
+}
+
+/** 이적·재계약 제안의 대상 (중복 판정) */
+function dealTarget(p: DealPayload): string {
+  return p.kind === 'TRANSFER_BID' ? `bid:${p.bid.listingId}` : `renew:${p.playerId}`;
 }
 
 interface PendingWrite {
@@ -578,7 +650,9 @@ class LocalGameService implements GameService {
   }
 
   private entry(s: GameState, kind: ActionLogKind, data?: Record<string, unknown>, actor?: string): ActionLogEntry {
-    return { at: this.clock.nowIso(), gameTime: { ...s.time }, actor: actor ?? s.actorUserId, kind, ...(data ? { data } : {}) };
+    const who = actor ?? s.actorUserId;
+    const m = s.memberships.find((x) => x.userId === who);
+    return { at: this.clock.nowIso(), gameTime: { ...s.time }, actor: who, ...(m ? { actorName: toClubMember(m).name } : {}), kind, ...(data ? { data } : {}) };
   }
 
   private withLog(s: GameState, kind: ActionLogKind, data?: Record<string, unknown>): GameState {
@@ -591,8 +665,20 @@ class LocalGameService implements GameService {
     return m;
   }
 
+  /** 표시 필드를 채운 멤버 (기본 이모지는 멤버 목록 순서) */
+  private member(s: GameState, m: Membership = this.membership(s)): ClubMember {
+    return toClubMember(m, Math.max(0, s.memberships.indexOf(m) - 1));
+  }
+
+  private clubMembers(s: GameState): Membership[] {
+    return s.memberships.filter((m) => m.clubId === s.userClubId);
+  }
+
   private guard(s: GameState, action: ActionKind): void {
-    const r = checkAction(this.membership(s), action, { now: s.time, pastDeadline: false, clubId: s.userClubId });
+    this.deny(checkAction(this.membership(s), action, { now: s.time, pastDeadline: false, clubId: s.userClubId }));
+  }
+
+  private deny(r: PermissionResult): void {
     if (!r.ok) throw new GameError('PERMISSION_DENIED', r.message, [r.code]);
   }
 
@@ -796,18 +882,125 @@ class LocalGameService implements GameService {
 
   // ── 역할 ───────────────────────────────────────────────────────
 
-  getActor(): Membership {
-    return this.membership(this.require());
+  /** 2.5.0: 표시 필드(name·emoji)가 채워진 현재 멤버 */
+  getActor(): ClubMember {
+    return this.member(this.require());
   }
 
+  /** 1.x 호환: 그 좌석의 첫 멤버로 전환. 구단주 PIN 이 있으면 구단주 전환은 switchMember(id, pin) 로만 */
   switchRole(seat: 'OWNER' | 'COACH'): Membership {
     const s = this.require();
-    const m = s.memberships.find((x) => x.seat === seat && x.clubId === s.userClubId);
+    const m = this.clubMembers(s).find((x) => x.seat === seat);
     if (!m) throw new GameError('NOT_FOUND', `${seat} 멤버십이 없습니다`);
-    if (m.userId === s.actorUserId) return m;
-    const next = this.withLog({ ...s, actorUserId: m.userId }, 'ROLE_SWITCHED', { seat, userId: m.userId });
-    this.commit(next);
-    return m;
+    return this.switchMember(m.userId);
+  }
+
+  // ── 로컬 프로필 (2.5.0, 한 기기 핫시트) ─────────────────────────
+
+  listMembers(): ClubMember[] {
+    const s = this.require();
+    return this.clubMembers(s).map((m) => this.member(s, m));
+  }
+
+  hasOwnerPin(): boolean {
+    return !!this.require().ownerPin;
+  }
+
+  switchMember(memberId: string, pin?: string): ClubMember {
+    const s = this.require();
+    const m = this.clubMembers(s).find((x) => x.userId === memberId);
+    if (!m) throw new GameError('NOT_FOUND', `멤버 없음: ${memberId}`);
+    if (m.userId === s.actorUserId) return this.member(s, m);
+    if (m.seat === 'OWNER' && s.ownerPin) {
+      if (pin === undefined) throw new GameError('PERMISSION_DENIED', '구단주로 바꾸려면 PIN 4자리를 입력하세요', ['PIN_REQUIRED']);
+      if (hashPin(pin, s.ownerPin.salt) !== s.ownerPin.hash) throw new GameError('PERMISSION_DENIED', 'PIN 이 맞지 않아요', ['PIN_WRONG']);
+    }
+    this.commit(this.withLog({ ...s, actorUserId: m.userId }, 'ROLE_SWITCHED', { seat: m.seat, userId: m.userId }));
+    return this.member(this.require(), m);
+  }
+
+  private ownerManage(s: GameState): void {
+    if (this.membership(s).seat !== 'OWNER') throw new GameError('PERMISSION_DENIED', '멤버 관리는 구단주만 할 수 있어요', ['NOT_OWNER']);
+  }
+
+  addMember(name: string, role: RoleLabel, extra: { subRole?: RoleLabel; emoji?: string } = {}): ClubMember {
+    const s = this.require();
+    this.ownerManage(s);
+    if (this.clubMembers(s).filter((m) => m.seat !== 'OWNER').length >= MAX_COACHES) throw new GameError('INVALID_MEMBER', `코치는 최대 ${MAX_COACHES}명이에요`);
+    const m: Membership = this.run(() => {
+      checkRoles(role, extra.subRole);
+      const used = new Set(this.clubMembers(s).map((x) => this.member(s, x).emoji));
+      return {
+        clubId: s.userClubId,
+        userId: nextMemberId(s.memberships),
+        seat: 'COACH',
+        roleLabel: role,
+        ...(extra.subRole ? { subRole: extra.subRole } : {}),
+        joinedAt: this.ts(s),
+        hasOwnClub: false,
+        name: cleanName(name),
+        emoji: extra.emoji !== undefined ? cleanEmoji(extra.emoji) : (MEMBER_EMOJIS.find((e) => !used.has(e)) ?? MEMBER_EMOJIS[0]),
+      };
+    });
+    this.commit(this.withLog({ ...s, memberships: [...s.memberships, m] }, 'MEMBER_ADDED', { memberId: m.userId, name: m.name, role }));
+    return this.member(this.require(), m);
+  }
+
+  updateMember(memberId: string, patch: MemberPatch): ClubMember {
+    const s = this.require();
+    this.ownerManage(s);
+    const i = s.memberships.findIndex((x) => x.userId === memberId && x.clubId === s.userClubId);
+    if (i < 0) throw new GameError('NOT_FOUND', `멤버 없음: ${memberId}`);
+    const cur = s.memberships[i]!;
+    const m: Membership = this.run(() => {
+      const next: Membership = { ...cur };
+      if (patch.name !== undefined) next.name = cleanName(patch.name);
+      if (patch.emoji !== undefined) next.emoji = cleanEmoji(patch.emoji);
+      if (cur.seat !== 'OWNER') {
+        if (patch.role !== undefined) next.roleLabel = patch.role;
+        if (patch.subRole === null) delete next.subRole;
+        else if (patch.subRole !== undefined) next.subRole = patch.subRole;
+        if (next.subRole === next.roleLabel) delete next.subRole; // 보조 역할을 주 역할로 올린 경우
+        checkRoles(next.roleLabel, next.subRole);
+      }
+      return next;
+    });
+    const memberships = s.memberships.map((x, k) => (k === i ? m : x));
+    this.commit(this.withLog({ ...s, memberships }, 'MEMBER_UPDATED', { memberId, ...patch }));
+    return this.member(this.require(), m);
+  }
+
+  /** 코치 제거. 그 코치의 미결 제안은 EXPIRED (5.0.3 탈퇴: 미결 카드 폐기) */
+  removeMember(memberId: string): void {
+    const s = this.require();
+    this.ownerManage(s);
+    const m = this.clubMembers(s).find((x) => x.userId === memberId);
+    if (!m) throw new GameError('NOT_FOUND', `멤버 없음: ${memberId}`);
+    if (m.seat === 'OWNER') throw new GameError('INVALID_MEMBER', '구단주는 제거할 수 없어요');
+    const at = this.ts(s);
+    const close = <T extends Proposal | DealProposal>(rec: Record<string, T>): Record<string, T> =>
+      Object.fromEntries(Object.entries(rec).map(([id, p]) => [id, p.authorId === memberId && p.status === 'OPEN' ? { ...p, status: 'EXPIRED', resolvedAt: at, resolutionNote: '작성자가 구단을 떠났어요' } : p]));
+    const next: GameState = {
+      ...s,
+      memberships: s.memberships.filter((x) => x !== m),
+      proposals: close(s.proposals),
+      ...(s.dealProposals ? { dealProposals: close(s.dealProposals) } : {}),
+    };
+    this.commit(this.withLog(next, 'MEMBER_REMOVED', { memberId, name: this.member(s, m).name }));
+  }
+
+  /** 구단주 PIN 설정(숫자 4자리)·해제(null). 구단주만. 솔트 해시만 저장한다 */
+  setOwnerPin(pin: string | null): void {
+    const s = this.require();
+    this.ownerManage(s);
+    const next: GameState = { ...s };
+    if (pin === null) delete next.ownerPin;
+    else {
+      if (!PIN_RE.test(pin)) throw new GameError('INVALID_MEMBER', 'PIN 은 숫자 4자리예요');
+      const salt = randomSalt();
+      next.ownerPin = { salt, hash: hashPin(pin, salt) };
+    }
+    this.commit(this.withLog(next, 'OWNER_PIN_SET', { enabled: pin !== null }));
   }
 
   // ── 조회 ───────────────────────────────────────────────────────
@@ -924,6 +1117,13 @@ class LocalGameService implements GameService {
   placeBid(input: BidInput): Bid {
     const s = this.require();
     this.ownerOnly(s);
+    const { m, bid } = this.bidFor(s, input);
+    this.commitMarket(s, { ...m, bids: upsertBid(m.bids, bid) }, 'BID_PLACED', { ...bid });
+    return bid;
+  }
+
+  /** 입찰 검증 (placeBid·이적 제안 공용) */
+  private bidFor(s: GameState, input: BidInput): { m: TransferMarketState; bid: Bid } {
     const m = this.market(s);
     const listings = listingRecord(m);
     const listing = listings[input.listingId];
@@ -944,8 +1144,7 @@ class LocalGameService implements GameService {
         releasedIds: new Set(s.releasedThisSeason?.[s.userClubId] ?? []),
       }),
     );
-    this.commitMarket(s, { ...m, bids: upsertBid(m.bids, bid) }, 'BID_PLACED', { ...bid });
-    return bid;
+    return { m, bid };
   }
 
   withdrawBid(listingId: string): void {
@@ -1349,7 +1548,22 @@ class LocalGameService implements GameService {
       ...out.state,
       actionLog: [...out.state.actionLog, this.entry(out.state, 'DAY_ADVANCED', { from: out.result.from, to: out.result.to, userMatchId: out.result.userMatchId ?? null })],
     };
+    this.expireDeals(state);
     return { state, result: out.result };
+  }
+
+  /** 2.5.0: 이적·재계약 제안 24시간 만료 (expiresAt 날 처리가 끝나면) */
+  private expireDeals(state: GameState): void {
+    if (!state.dealProposals) return;
+    const t = state.time;
+    let deals: Record<ProposalId, DealProposal> | null = null;
+    for (const d of Object.values(state.dealProposals)) {
+      if (d.status !== 'OPEN' || d.expiresAt.season > t.season || (d.expiresAt.season === t.season && d.expiresAt.day > t.day && state.phase !== 'SEASON_OVER')) continue;
+      deals ??= { ...state.dealProposals };
+      deals[d.id] = { ...d, status: 'EXPIRED', resolvedAt: { season: t.season, day: t.day, seq: state.seq } };
+      state.actionLog = [...state.actionLog, this.entry(state, 'PROPOSAL_EXPIRED', { proposalId: d.id }, SYSTEM_ACTOR)];
+    }
+    if (deals) state.dealProposals = deals;
   }
 
   advanceDay(): DayResult {
@@ -1444,12 +1658,20 @@ class LocalGameService implements GameService {
     return { plan: pickBasePlan(s.plans[club.id], fallback), tactics: club.tactics };
   }
 
+  /** PROPOSE 권한 + 역할 영역 + 코치 1인당 미결 5장(플랜·이적·재계약 합산, 5.0.2) */
+  private proposer(s: GameState, kind: ProposalKind): ClubMember {
+    const author = this.member(s);
+    this.deny(checkProposeKind(author, kind, { now: s.time, pastDeadline: false, clubId: s.userClubId }));
+    const open = [...Object.values(s.proposals), ...Object.values(s.dealProposals ?? {})].filter((p) => p.status === 'OPEN' && p.authorId === author.userId);
+    if (open.length >= MAX_OPEN_PER_COACH) throw new GameError('PROPOSAL_LIMIT', `미결 제안은 코치 1인당 ${MAX_OPEN_PER_COACH}장까지예요`);
+    return author;
+  }
+
   propose(input: ProposalInput): Proposal {
     const s = this.require();
-    this.guard(s, 'PROPOSE');
+    const author = this.proposer(s, 'PLAN_CHANGE');
     const f = this.nextFixture(s);
     if (!f || input.payload.matchId !== f.id) throw new GameError('PROPOSAL_INVALID', '다음 경기에 대한 제안만 할 수 있습니다');
-    const author = this.membership(s);
     const id = `pr-s${s.time.season}-${s.seq + 1}`;
     const proposal = this.run(() => createProposal(input, author, Object.values(s.proposals), this.bundle(s), this.ts(s), id, (pid) => s.players[pid]?.name ?? pid));
     this.commit(this.withLog({ ...s, proposals: { ...s.proposals, [id]: proposal } }, 'PROPOSAL_CREATED', { proposalId: id, paths: proposal.diff.map((d) => d.path) }));
@@ -1467,8 +1689,7 @@ class LocalGameService implements GameService {
     const s = this.require();
     this.guard(s, 'REACT');
     const p = this.openProposal(s, proposalId);
-    const reactions = [...p.reactions.filter((r) => r.userId !== s.actorUserId), { userId: s.actorUserId, choice, ...(reason ? { reason: reason.slice(0, 80) } : {}) }];
-    const next: Proposal = { ...p, reactions };
+    const next: Proposal = { ...p, reactions: this.reactions(s, p.reactions, choice, reason) };
     this.commit(this.withLog({ ...s, proposals: { ...s.proposals, [p.id]: next } }, 'PROPOSAL_REACTED', { proposalId: p.id, choice }));
     return next;
   }
@@ -1537,6 +1758,130 @@ class LocalGameService implements GameService {
     const next: Proposal = { ...p, status: 'REJECTED', resolvedBy: s.actorUserId, resolvedAt: this.ts(s), ...(note ? { resolutionNote: note.slice(0, 80) } : {}) };
     this.commit(this.withLog({ ...s, proposals: { ...s.proposals, [p.id]: next } }, 'PROPOSAL_REJECTED', { proposalId: p.id }));
     return next;
+  }
+
+  private reactions(s: GameState, cur: readonly ProposalReaction[], choice: 'FOR' | 'AGAINST', reason?: string): ProposalReaction[] {
+    return [...cur.filter((r) => r.userId !== s.actorUserId), { userId: s.actorUserId, choice, ...(reason ? { reason: reason.slice(0, 80) } : {}), name: this.member(s).name }];
+  }
+
+  // ── 이적·재계약 제안 (2.5.0) ───────────────────────────────────
+
+  /** 재계약 제안·실행 전 공통 검사 (offerRenewal 과 같은 순서) */
+  private renewalTarget(s: GameState, playerId: PlayerId): Player {
+    const p = this.ownPlayer(s, playerId);
+    if (!renewalOpen(p, s.time.day)) this.renewalNotOpen();
+    if (s.pendingRenewals?.some((r) => r.playerId === playerId)) throw new GameError('RENEWAL_NOT_OPEN', '이미 재계약이 성립한 선수예요', ['ALREADY_RENEWED']);
+    return p;
+  }
+
+  /** 코치가 이적 입찰·재계약을 제안한다. 역할 영역: TRANSFER_BID = SCT·FIN, RENEWAL = SQD·FIN. 만료 = 다음 날 처리(24시간) */
+  proposeDeal(input: DealProposalInput): DealProposal {
+    const s = this.require();
+    const pl = input?.payload;
+    if (!pl || (pl.kind !== 'TRANSFER_BID' && pl.kind !== 'RENEWAL')) throw new GameError('PROPOSAL_INVALID', '알 수 없는 제안 종류예요');
+    const author = this.proposer(s, pl.kind);
+    const reason = typeof input.reason === 'string' ? input.reason.trim() : '';
+    if (reason.length < 1 || reason.length > MAX_REASON_LENGTH) throw new GameError('PROPOSAL_INVALID', `제안 사유는 1~${MAX_REASON_LENGTH}자여야 해요`);
+    let payload: DealPayload;
+    let summary: string;
+    if (pl.kind === 'TRANSFER_BID') {
+      const { bid } = this.bidFor(s, pl.bid); // 지금 기준으로 유효한 입찰만 (승인 때 다시 검증)
+      const listing = listingRecord(this.market(s))[bid.listingId]!;
+      const name = marketPlayer(s, listing.playerId)?.name ?? listing.playerId;
+      payload = { kind: 'TRANSFER_BID', bid: { listingId: bid.listingId, ...(bid.fee !== undefined ? { fee: bid.fee } : {}), ...(bid.bonus !== undefined ? { bonus: bid.bonus } : {}), ...(bid.salary !== undefined ? { salary: bid.salary } : {}), ...(bid.seasons !== undefined ? { seasons: bid.seasons } : {}) } };
+      summary = bid.fee !== undefined ? `${name} 영입 입찰 · 이적료 ${bid.fee.toLocaleString('ko-KR')} KC` : `${name} FA 영입 · 연봉 ${(bid.salary ?? 0).toLocaleString('ko-KR')} KC × ${bid.seasons ?? 1}시즌`;
+    } else {
+      if (!Number.isInteger(pl.salary) || pl.salary < 1 || !Number.isInteger(pl.seasons) || pl.seasons < 1 || pl.seasons > 4) throw new GameError('PROPOSAL_INVALID', '연봉·계약 시즌이 올바르지 않아요');
+      const p = this.renewalTarget(s, pl.playerId);
+      payload = { kind: 'RENEWAL', playerId: p.id, salary: pl.salary, seasons: pl.seasons };
+      summary = `${p.name} 재계약 · 연봉 ${pl.salary.toLocaleString('ko-KR')} KC × ${pl.seasons}시즌`;
+    }
+    const dup = Object.values(s.dealProposals ?? {}).find((d) => d.status === 'OPEN' && d.authorId === author.userId && d.kind === pl.kind && dealTarget(d.payload) === dealTarget(payload));
+    if (dup) throw new GameError('PROPOSAL_DUPLICATE', '같은 대상의 미결 제안이 이미 있어요', [dup.id]);
+    const id = `dp-s${s.time.season}-${s.seq + 1}`;
+    const at = this.ts(s);
+    const deal: DealProposal = {
+      id,
+      clubId: s.userClubId,
+      authorId: author.userId,
+      ...(author.roleLabel ? { authorRole: author.roleLabel } : {}),
+      authorName: author.name,
+      authorEmoji: author.emoji,
+      kind: pl.kind,
+      payload,
+      summary,
+      reason,
+      reactions: [],
+      createdAt: at,
+      expiresAt: { season: s.time.season, day: s.time.day + 1 },
+      status: 'OPEN',
+    };
+    this.commit(this.withLog({ ...s, dealProposals: { ...s.dealProposals, [id]: deal } }, 'PROPOSAL_CREATED', { proposalId: id, kind: pl.kind }));
+    return deal;
+  }
+
+  private openDeal(s: GameState, id: ProposalId): DealProposal {
+    const d = s.dealProposals?.[id];
+    if (!d) throw new GameError('NOT_FOUND', `제안 없음: ${id}`);
+    if (d.status !== 'OPEN') throw new GameError('PROPOSAL_NOT_OPEN', `이미 처리된 제안입니다 (${d.status})`);
+    return d;
+  }
+
+  private putDeal(s: GameState, d: DealProposal, kind: ActionLogKind, data: Record<string, unknown>): void {
+    this.commit(this.withLog({ ...s, dealProposals: { ...s.dealProposals, [d.id]: d } }, kind, { proposalId: d.id, ...data }));
+  }
+
+  reactDeal(proposalId: ProposalId, choice: 'FOR' | 'AGAINST', reason?: string): DealProposal {
+    const s = this.require();
+    this.guard(s, 'REACT');
+    const d = this.openDeal(s, proposalId);
+    const next: DealProposal = { ...d, reactions: this.reactions(s, d.reactions, choice, reason) };
+    this.putDeal(s, next, 'PROPOSAL_REACTED', { choice });
+    return next;
+  }
+
+  /** OWNER 전용. 구단주 명의로 placeBid / offerRenewal 실행. 실패(창 닫힘·잔액·선수가 거절)면 STALE */
+  approveDeal(proposalId: ProposalId): DealApproveResult {
+    const s = this.require();
+    this.guard(s, 'APPROVE');
+    const d = this.openDeal(s, proposalId);
+    const details: string[] = [];
+    try {
+      if (d.payload.kind === 'TRANSFER_BID') this.placeBid(d.payload.bid);
+      else {
+        this.renewalTarget(s, d.payload.playerId);
+        const r = this.offerRenewal(d.payload.playerId, d.payload.salary, d.payload.seasons);
+        if (!r.accepted) details.push(`선수가 연봉 ${r.ask.toLocaleString('ko-KR')} KC 이상을 원해요`);
+      }
+    } catch (e) {
+      details.push(e instanceof Error ? e.message : String(e));
+    }
+    const s2 = this.require(); // 실행이 커밋했으면 그 상태 위에 기록
+    const base = { resolvedBy: s.actorUserId, resolvedAt: this.ts(s2) };
+    if (details.length > 0) {
+      const stale: DealProposal = { ...d, ...base, status: 'STALE', resolutionNote: details.join(' / ').slice(0, 200) };
+      this.putDeal(s2, stale, 'PROPOSAL_APPROVED', { result: 'STALE', details });
+      return { ok: false, proposal: stale, reason: 'STALE', details };
+    }
+    const approved: DealProposal = { ...d, ...base, status: 'APPROVED' };
+    this.putDeal(s2, approved, 'PROPOSAL_APPROVED', { kind: d.kind });
+    return { ok: true, proposal: approved };
+  }
+
+  rejectDeal(proposalId: ProposalId, note?: string): DealProposal {
+    const s = this.require();
+    this.guard(s, 'REJECT');
+    const d = this.openDeal(s, proposalId);
+    const next: DealProposal = { ...d, status: 'REJECTED', resolvedBy: s.actorUserId, resolvedAt: this.ts(s), ...(note ? { resolutionNote: note.slice(0, 80) } : {}) };
+    this.putDeal(s, next, 'PROPOSAL_REJECTED', {});
+    return next;
+  }
+
+  listDealProposals(filter: { status?: ProposalStatus } = {}): DealProposal[] {
+    const s = this.require();
+    return Object.values(s.dealProposals ?? {})
+      .filter((p) => filter.status === undefined || p.status === filter.status)
+      .sort((a, b) => b.createdAt.season - a.createdAt.season || b.createdAt.seq - a.createdAt.seq);
   }
 
   listProposals(filter: { status?: ProposalStatus } = {}): Proposal[] {

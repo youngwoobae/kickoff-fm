@@ -41,7 +41,8 @@ export { applyDailyRecovery, applyMatchLine, applyMoraleResult, staminaRecoveryB
 export { resolvePlan, validatePlan, remapLineup, pickCandidate, stripOpponentOrders, type ResolvePlanContext } from './plan/resolvePlan';
 export { toEngineTeamInput, toEnginePlayer } from './plan/engineInput';
 export { TIER_ECONOMY, SEASON_DAYS, S_REF, TIER_GAP, PROMOTION_BONUS_RATE, PARACHUTE_RATE, promotionBonus, parachuteOf, baseSalary, startingBalance, dailySalary, matchBonus, prizeFor, prizeRate, carryOver, spendable, postLedger } from './economy/economy';
-export { checkAction, isNewCoach, type PermissionContext } from './coach/permissions';
+export { checkAction, isNewCoach, checkProposeKind, proposalAreas, PROPOSAL_AREAS, type PermissionContext } from './coach/permissions';
+export { toClubMember, cleanName, cleanEmoji, checkRoles, nextMemberId, hashPin, PIN_RE, MAX_COACHES, MAX_NAME_LENGTH, ROLE_LABELS, ROLE_NAMES, MEMBER_EMOJIS } from './coach/members';
 export {
   createProposal,
   applyPatch,

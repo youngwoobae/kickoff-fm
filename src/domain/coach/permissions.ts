@@ -1,7 +1,7 @@
 /**
  * 5.0.4 권한 체크 단일 함수. services 의 모든 변경 메서드가 가장 먼저 호출한다. 소유: A.
  */
-import type { ActionKind, GameTime, Membership, PermissionResult } from '../../types';
+import type { ActionKind, GameTime, Membership, PermissionResult, ProposalKind, RoleLabel } from '../../types';
 
 export interface PermissionContext {
   now: GameTime;
@@ -43,4 +43,30 @@ export function checkAction(m: Membership, action: ActionKind, ctx: PermissionCo
       if (m.seat === 'COACH_SPECTATOR') return deny('SPECTATOR', '관전 전용 코치는 제안할 수 없어요');
       return deny('NOT_COACH', '제안·반응은 코치만 할 수 있어요 (구단주는 직접 편집)');
   }
+}
+
+/**
+ * 2.5.0: 코치 역할별 제안 영역 (5.4 매트릭스에서 그 역할이 E 이거나 담당인 영역만).
+ * 보조 역할의 영역도 더한다. 역할 없는 코치(이전 세이브)는 플랜 변경만.
+ */
+export const PROPOSAL_AREAS: Record<RoleLabel, readonly ProposalKind[]> = {
+  TAC: ['PLAN_CHANGE'],
+  ANL: ['PLAN_CHANGE'],
+  SQD: ['PLAN_CHANGE', 'RENEWAL'],
+  SCT: ['TRANSFER_BID'],
+  FIN: ['TRANSFER_BID', 'RENEWAL'],
+};
+
+export function proposalAreas(m: Membership): ProposalKind[] {
+  if (!m.roleLabel) return ['PLAN_CHANGE'];
+  return [...new Set([...PROPOSAL_AREAS[m.roleLabel], ...(m.subRole ? PROPOSAL_AREAS[m.subRole] : [])])];
+}
+
+const KIND_NAMES: Partial<Record<ProposalKind, string>> = { PLAN_CHANGE: '플랜·전술', TRANSFER_BID: '이적 입찰', RENEWAL: '재계약' };
+
+/** PROPOSE 권한 + 역할 영역. 구단주·관전 코치는 checkAction 결과 그대로 */
+export function checkProposeKind(m: Membership, kind: ProposalKind, ctx: PermissionContext): PermissionResult {
+  const r = checkAction(m, 'PROPOSE', ctx);
+  if (!r.ok) return r;
+  return proposalAreas(m).includes(kind) ? OK : deny('ROLE_AREA', `${KIND_NAMES[kind] ?? kind} 제안은 담당 역할이 아니에요`);
 }

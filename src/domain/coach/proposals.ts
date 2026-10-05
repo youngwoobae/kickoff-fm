@@ -77,6 +77,8 @@ export function createProposal(
     clubId: author.clubId,
     authorId: author.userId,
     ...(author.roleLabel ? { authorRole: author.roleLabel } : {}),
+    ...(author.name ? { authorName: author.name } : {}),
+    ...(author.emoji ? { authorEmoji: author.emoji } : {}),
     kind: 'PLAN_CHANGE',
     payload: { kind: 'PLAN_CHANGE', matchId: input.payload.matchId, patch: structuredCloneSafe(input.payload.patch) },
     reason,

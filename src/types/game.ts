@@ -3,7 +3,7 @@
  * GameState 는 services 가 소유한다. UI 는 GameSnapshot(읽기 전용)만 받는다.
  */
 import type { ClubId, Day, GameTime, GameTimestamp, MatchId, PlayerId, ProposalId, UserId } from './common';
-import type { Membership, Proposal } from './coach';
+import type { DealProposal, Membership, Proposal } from './coach';
 import type { EngineTeamInput } from './engine';
 import type { Finance, LedgerEntry } from './economy';
 import type { InboxMessage } from './inbox';
@@ -83,7 +83,12 @@ export type ActionLogKind =
   | 'LISTING_CREATED'
   | 'LISTING_WITHDRAWN'
   | 'RENEWAL_OFFERED'
-  | 'PLAYER_RELEASED';
+  | 'PLAYER_RELEASED'
+  /** 2.5.0 로컬 프로필 (data: memberId·name 등). 멤버 전환은 ROLE_SWITCHED 를 그대로 쓴다 */
+  | 'MEMBER_ADDED'
+  | 'MEMBER_UPDATED'
+  | 'MEMBER_REMOVED'
+  | 'OWNER_PIN_SET';
 
 /** UI 가 logEvent() 로 직접 남길 수 있는 종류 (나머지는 services 가 자동 기록) */
 export type UiLogKind = 'SESSION_START' | 'SESSION_END' | 'REPORT_VIEWED' | 'REPLAY_VIEWED' | 'SCOUT_VIEWED';
@@ -93,6 +98,8 @@ export interface ActionLogEntry {
   at: string;
   gameTime: GameTime;
   actor: UserId;
+  /** 2.5.0: 기록 시점 멤버 이름 (system·이전 로그는 없음) */
+  actorName?: string;
   kind: ActionLogKind;
   data?: Record<string, unknown>;
 }
@@ -131,8 +138,13 @@ export interface GameState {
   /** 다음 경기 기준 구단별 초안·확정본. 경기 처리 후 비운다 */
   plans: Record<ClubId, ClubPlanState>;
   finances: Record<ClubId, Finance>;
+  /** 2.5.0: 사용자 구단 멤버 = 구단주 1 + 코치 최대 5 (로컬 프로필). 이전 세이브는 기본 구단주·코치 그대로 */
   memberships: Membership[];
   proposals: Record<ProposalId, Proposal>;
+  /** 2.5.0: 이적·재계약 제안. 없으면 {} */
+  dealProposals?: Record<ProposalId, DealProposal>;
+  /** 2.5.0: 구단주 PIN (4자리) 솔트 해시. 평문은 저장하지 않는다. 없으면 PIN 없음 */
+  ownerPin?: { salt: string; hash: string };
   seasonHistory: SeasonOutcome[];
   /** Day 26 판정 후 설정, startNewSeason 에서 seasonHistory 로 이동 */
   pendingOutcome?: SeasonOutcome;
@@ -205,7 +217,9 @@ export type GameErrorCode =
   | 'SQUAD_FULL'
   | 'SIGNING_LIMIT'
   | 'RENEWAL_NOT_OPEN'
-  | 'NEGATIVE_BALANCE_LOCK';
+  | 'NEGATIVE_BALANCE_LOCK'
+  /** 2.5.0: 멤버 이름·역할·인원 규칙 위반 */
+  | 'INVALID_MEMBER';
 
 export interface PlanValidationIssue {
   severity: 'ERROR' | 'WARNING';

@@ -31,6 +31,13 @@ import type {
   MatchReport,
   MatchupPreview,
   Membership,
+  ClubMember,
+  MemberPatch,
+  RoleLabel,
+  UserId,
+  DealProposal,
+  DealProposalInput,
+  DealApproveResult,
   OpponentScout,
   PlanChangePatch,
   PlanRecord,
@@ -125,7 +132,18 @@ import type {
  * offerRenewal 재제안 = RENEWAL_NOT_OPEN(details ALREADY_RENEWED), placeBid 방출 선수 FA = BID_OUT_OF_RANGE(details RELEASED),
  * 가져오기 검증 강화(SAVE_INCOMPATIBLE 이 더 자주). 세이브 스키마 3 유지. 아키텍처 16장.
  */
-export const CONTRACT_VERSION = '2.4.1';
+/**
+ * 2.5.0 (로컬 프로필 — 한 기기 핫시트, 추가만): Membership.name?·emoji?·subRole?, ClubMember·MemberPatch,
+ * 선택 메서드 listMembers / addMember / updateMember / removeMember / switchMember / hasOwnerPin / setOwnerPin (관리는 OWNER 전용),
+ * getActor() 가 name·emoji 를 채운 멤버를 돌려준다(반환 타입 Membership 그대로, 실제 값은 ClubMember).
+ * 코치 역할별 제안 영역(PermissionDenyCode ROLE_AREA): PLAN_CHANGE = TAC·ANL·SQD, TRANSFER_BID = SCT·FIN, RENEWAL = SQD·FIN (보조 역할 영역 포함).
+ * 이적·재계약 제안 DealProposal(별도 저장 GameState.dealProposals?) + 선택 메서드 proposeDeal / reactDeal / approveDeal / rejectDeal / listDealProposals.
+ * Proposal.authorName?·authorEmoji?, ProposalReaction.name?, ActionLogEntry.actorName?, ProposalKind 'RENEWAL',
+ * ActionLogKind MEMBER_ADDED·MEMBER_UPDATED·MEMBER_REMOVED·OWNER_PIN_SET, GameErrorCode INVALID_MEMBER.
+ * 구단주 PIN: GameState.ownerPin?(솔트 해시만), PIN 이 있으면 switchRole('OWNER')·switchMember(owner) 는 PIN 필요(PERMISSION_DENIED details PIN_REQUIRED·PIN_WRONG).
+ * 세이브 스키마 3 유지. 아키텍처 16장.
+ */
+export const CONTRACT_VERSION = '2.5.0';
 
 /** 2.4.0: 정보 화면용 빌드 정보 (온보딩_UX 2.3) */
 export interface BuildInfo {
@@ -245,8 +263,25 @@ export interface GameService {
   getSaveStatus?(): SaveStatus;
 
   // ── 역할 전환 (Phase 0 로컬 코치 시연) ──────────────────────────
+  /** 2.5.0: 실제 값은 name·emoji 가 채워진 ClubMember */
   getActor(): Membership;
+  /** 호환: 그 좌석의 첫 멤버로 전환. 구단주 PIN 이 있으면 OWNER 전환은 PERMISSION_DENIED(PIN_REQUIRED) — switchMember 를 쓴다 */
   switchRole(seat: 'OWNER' | 'COACH'): Membership;
+
+  // ── 로컬 프로필 (2.5.0, 기기 전용: 한 기기 핫시트) ─────────────────
+  /** 사용자 구단 멤버 (구단주 먼저, 추가 순) */
+  listMembers?(): ClubMember[];
+  /** OWNER 전용. 코치 추가 (최대 5명). emoji 생략 = 안 쓰는 색 이모지 자동. 위반 = INVALID_MEMBER */
+  addMember?(name: string, role: RoleLabel, extra?: { subRole?: RoleLabel; emoji?: string }): ClubMember;
+  /** OWNER 전용. 구단주 자신은 name·emoji 만 바뀐다 */
+  updateMember?(memberId: UserId, patch: MemberPatch): ClubMember;
+  /** OWNER 전용. 코치 제거, 그 코치의 미결 제안은 EXPIRED. 구단주 제거 = INVALID_MEMBER */
+  removeMember?(memberId: UserId): void;
+  /** 현재 활동 멤버 전환(기기 넘기기). 대상이 구단주이고 PIN 이 있으면 pin 필요: 없음 = PIN_REQUIRED, 틀림 = PIN_WRONG */
+  switchMember?(memberId: UserId, pin?: string): ClubMember;
+  hasOwnerPin?(): boolean;
+  /** OWNER 전용. 숫자 4자리 또는 null(해제). 솔트 해시만 저장. 잊으면 세이브 내보내기 JSON 에서 ownerPin 을 지우고 가져오기 */
+  setOwnerPin?(pin: string | null): void;
 
   // ── 조회 ─────────────────────────────────────────────────────────
   getCatalog(): Catalog;
@@ -387,6 +422,13 @@ export interface GameService {
   approve(proposalId: ProposalId, edits?: PlanChangePatch): ApproveResult;
   reject(proposalId: ProposalId, note?: string): Proposal;
   listProposals(filter?: { status?: ProposalStatus }): Proposal[];
+  /** 2.5.0: 이적 입찰·재계약 제안 (코치 역할 영역 검사, 미결 5장은 플랜 제안과 합산). 만료 = 다음 날 처리 */
+  proposeDeal?(input: DealProposalInput): DealProposal;
+  reactDeal?(proposalId: ProposalId, choice: 'FOR' | 'AGAINST', reason?: string): DealProposal;
+  /** OWNER 전용. 구단주 명의로 placeBid / offerRenewal 실행. 실패·선수 거절이면 STALE */
+  approveDeal?(proposalId: ProposalId): DealApproveResult;
+  rejectDeal?(proposalId: ProposalId, note?: string): DealProposal;
+  listDealProposals?(filter?: { status?: ProposalStatus }): DealProposal[];
 
   // ── 로그 ─────────────────────────────────────────────────────────
   /** 로그만 추가·저장한다. 스냅샷 교체·구독자 알림 없음 (1.1.0 명시) */
