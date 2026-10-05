@@ -12,7 +12,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --exclude tests/engine/perf.test.ts && vitest run tests/engine/perf.test.ts",
     "test:watch": "vitest",
     "sim:batch": "tsx scripts/sim-batch.ts",
     "sim:career": "tsx scripts/sim-career.ts"
