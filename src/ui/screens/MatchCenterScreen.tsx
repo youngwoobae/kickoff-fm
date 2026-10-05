@@ -189,7 +189,14 @@ function ReplayView({ matchId }: { matchId: string }) {
           label="재생 속도"
           size="sm"
           value={speed}
-          onChange={setSpeed}
+          onChange={(v) => {
+            // '즉시'(모션 줄이기 기본값)에서 배속을 고르면 처음부터 다시 재생
+            if (speed === 'instant' && v !== 'instant') {
+              setShown(1);
+              setPlaying(true);
+            }
+            setSpeed(v);
+          }}
           options={[
             { value: '1', label: '1×' },
             { value: '2', label: '2×' },

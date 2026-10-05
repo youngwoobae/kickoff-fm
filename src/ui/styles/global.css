@@ -1477,8 +1477,15 @@ h3 {
   gap: 8px;
   align-items: center;
 }
+.replay-controls > .btn-ghost {
+  grid-column: 2 / -1;
+}
 .replay-controls > .segmented {
-  grid-column: 1 / -1;
+  grid-column: 1 / 3;
+  grid-row: 2;
+}
+.replay-controls > .pitch-switch {
+  grid-column: 3;
   grid-row: 2;
 }
 /* 2D 중계 (M6.5). 노드·스타일만 — filter·그라데이션 애니메이션 없음 */
@@ -1524,14 +1531,15 @@ h3 {
 .dot circle {
   stroke-width: 0.5;
 }
+/* 우리 = 채운 원, 상대 = 테두리 원 (모양 + 색 병기, 잔디 대비 3:1 이상) */
 .dot.is-us circle {
-  fill: var(--accent);
-  stroke: #fff;
+  fill: #fff;
+  stroke: #052e1f;
 }
 .dot.is-them circle {
   fill: none;
-  stroke: #f8fafc;
-  stroke-width: 0.6;
+  stroke: #fecaca;
+  stroke-width: 0.7;
 }
 .dot .dot-ring {
   fill: none;

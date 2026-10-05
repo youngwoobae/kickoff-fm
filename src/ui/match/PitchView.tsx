@@ -230,7 +230,7 @@ export default function PitchView(props: PitchViewProps) {
   const drawn = useRef<P[] | null>(null);
   const last = useRef(-1);
   const raf = useRef(0);
-  const perf = useRef({ sum: 0, n: 0, js: 0, step: false, done: false });
+  const perf = useRef({ t0: 0, sum: 0, n: 0, js: 0, step: false, done: false });
 
   useLayoutEffect(() => {
     if (!frame) return;
@@ -258,20 +258,22 @@ export default function PitchView(props: PitchViewProps) {
     const tick = (now: number) => {
       const t0 = performance.now();
       const pf = perf.current;
-      if (!pf.done && prev && now - prev < 250) {
-        pf.sum += now - prev;
+      if (!pf.t0) pf.t0 = now;
+      // 1초 넘는 간격은 탭 숨김 복귀로 보고 버림. 아주 느린 기기도 판정되게 100ms 로 자른다
+      if (!pf.done && prev && now - prev < 1000) {
+        pf.sum += Math.min(100, now - prev);
         pf.n++;
-        if (pf.sum >= 2000) {
-          // 처음 2초 평균 프레임 간격 > 24ms → 그 경기 동안 스텝 모드 (조용히)
-          pf.done = true;
-          const avg = pf.sum / pf.n;
-          pf.step = avg > 24;
-          const ds = svg.current?.dataset;
-          if (ds) {
-            ds.frameMs = avg.toFixed(1);
-            ds.jsMs = (pf.js / pf.n).toFixed(3);
-            ds.mode = pf.step ? 'step' : 'smooth';
-          }
+      }
+      if (!pf.done && pf.n > 0 && now - pf.t0 >= 2000) {
+        // 재생 처음 2초 평균 프레임 간격 > 24ms → 그 경기 동안 스텝 모드 (조용히). data-* 는 측정 확인용
+        pf.done = true;
+        const avg = pf.sum / pf.n;
+        pf.step = avg > 24;
+        const ds = svg.current?.dataset;
+        if (ds) {
+          ds.frameMs = avg.toFixed(1);
+          ds.jsMs = (pf.js / pf.n).toFixed(3);
+          ds.mode = pf.step ? 'step' : 'smooth';
         }
       }
       prev = now;
