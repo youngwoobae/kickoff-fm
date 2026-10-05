@@ -51,13 +51,18 @@ const full = (id: SaveSlotId) => (e: unknown) => {
  */
 export async function packBody(json: string): Promise<string | Uint8Array> {
   if (typeof CompressionStream === 'undefined') return json;
-  return new Uint8Array(await new Response(new Blob([json]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
+  try {
+    return new Uint8Array(await new Response(new Blob([json]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
+  } catch {
+    return json; // 압축이 실패해도 저장은 한다 (읽기는 문자열도 받는다). 실패를 그대로 두면 모든 자동 저장이 막힌다
+  }
 }
 
-/** 깨진 압축 본문은 '' → 서비스가 SAVE_INCOMPATIBLE 로 알린다 */
+/** 깨진 압축 본문·풀 수 없는 바이트는 '' → 서비스가 SAVE_INCOMPATIBLE 로 알린다 (null = 빈 슬롯으로 보이면 새 게임으로 덮어쓰게 된다) */
 export async function unpackBody(v: unknown): Promise<string | null> {
   if (typeof v === 'string') return v;
-  if (!ArrayBuffer.isView(v) || typeof DecompressionStream === 'undefined') return null;
+  if (!ArrayBuffer.isView(v)) return null;
+  if (typeof DecompressionStream === 'undefined') return '';
   try {
     return await new Response(new Blob([v as Uint8Array<ArrayBuffer>]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
   } catch {

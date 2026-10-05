@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { SAVE_SLOT_IDS, isGameError } from '../../services';
 import type { GamePhase, SaveSlotId, SaveSlotMeta, Tier } from '../../types';
 import { Badge, Card, Segmented } from '../components/kit';
+import { useToast } from '../components/Toast';
 import { TIER_NAME, downloadText } from '../format';
 import { useAsyncAction, useService, useServiceCtx } from '../service/ServiceContext';
 import { DEV_TOOLS } from '../service/serviceHost';
@@ -20,6 +21,8 @@ export function trackSlotOp<T>(p: Promise<T>): Promise<T> {
   return p;
 }
 
+const MAX_IMPORT_BYTES = 32e6;
+
 const PHASE_LABEL: Record<GamePhase, string> = { MATCHDAY: '시즌 중', OFFSEASON: '오프시즌', SEASON_OVER: '시즌 종료' };
 
 function lastPlayed(iso: string): string {
@@ -31,6 +34,7 @@ export function TitleScreen() {
   const service = useService();
   const { mode, reportFatal } = useServiceCtx();
   const act = useAsyncAction();
+  const toast = useToast();
   const [metas, setMetas] = useState<SaveSlotMeta[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [corrupt, setCorrupt] = useState<Partial<Record<SaveSlotId, string>>>({});
@@ -90,6 +94,8 @@ export function TitleScreen() {
     const id = importSlot.current;
     if (fileRef.current) fileRef.current.value = '';
     if (!file || id === null) return;
+    // 10시즌 세이브 JSON ≈ 4MB. 엉뚱한 큰 파일을 통째로 읽어 탭이 멈추지 않게 (최종 리뷰 F-m)
+    if (file.size > MAX_IMPORT_BYTES) return toast.show(`세이브 파일이 아니에요 (${Math.round(file.size / 1e6)}MB, 최대 ${MAX_IMPORT_BYTES / 1e6}MB)`, 'error');
     const filled = metas?.some((m) => m.slotId === id) || corrupt[id];
     if (filled && !confirm(`슬롯 ${id} 세이브를 가져온 파일로 덮어쓸까요?`)) return;
     const json = await file.text();

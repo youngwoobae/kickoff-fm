@@ -4,7 +4,8 @@
  */
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { GameService } from '../../services';
-import { ToastProvider } from '../components/Toast';
+import { ToastProvider, useToast } from '../components/Toast';
+import { guardSlotOwner } from './slotGuard';
 import { Segmented } from '../components/kit';
 import { formatKc } from '../format';
 import { PlanEditorProvider } from '../plan/PlanEditor';
@@ -79,12 +80,23 @@ export function App() {
 function GameRoot() {
   const snap = useSnapshot();
   useSessionLog();
+  useSlotGuard();
   if (!snap) return <TitleScreen />;
   return (
     <PlanEditorProvider>
       <Shell />
     </PlanEditorProvider>
   );
+}
+
+/** 같은 슬롯을 다른 창에서 열면 이 창은 저장 후 닫는다 (slotGuard) */
+function useSlotGuard() {
+  const service = useService();
+  const toast = useToast();
+  useEffect(() => {
+    if (typeof BroadcastChannel === 'undefined') return;
+    return guardSlotOwner(service, new BroadcastChannel('kickoff-fm/slot-owner'), (id) => toast.show(`다른 창에서 슬롯 ${id} 세이브를 열어 이 창은 저장하고 닫았어요`));
+  }, [service, toast]);
 }
 
 function useSessionLog() {

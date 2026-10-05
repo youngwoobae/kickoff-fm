@@ -14,7 +14,7 @@ const setWaiting = (w: ServiceWorker | null) => {
 
 if (import.meta.env.PROD && typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
   globalThis.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').then((reg) => {
+    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).then((reg) => {
       // 컨트롤러가 있을 때만 "새 버전" (첫 설치는 안내 없음)
       const check = () => reg.waiting && navigator.serviceWorker.controller && setWaiting(reg.waiting);
       check();

@@ -14,7 +14,7 @@ function serviceWorker(): Plugin {
     apply: 'build',
     enforce: 'post',
     generateBundle(_opts, bundle) {
-      const pub = readdirSync('public');
+      const pub = readdirSync('public', { withFileTypes: true }).filter((d) => d.isFile()).map((d) => d.name); // 하위 폴더는 프리캐시하지 않는다(읽으면 EISDIR 로 빌드 실패)
       const files = [...new Set(['index.html', ...Object.keys(bundle), ...pub])].filter((f) => !f.endsWith('.map') && f !== 'sw.js').sort();
       const body = readFileSync('src/ui/pwa/sw.js', 'utf8');
       const h = createHash('sha256').update(body);

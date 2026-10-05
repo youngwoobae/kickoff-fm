@@ -418,6 +418,8 @@ function membersProblem(x: Record<string, unknown>, ms: unknown[]): string | nul
   let coaches = 0;
   for (const m of ms) {
     if (!isObj(m) || typeof m.userId !== 'string' || ids.has(m.userId) || typeof m.clubId !== 'string' || !SEATS.includes(m.seat)) return '멤버 형식 오류';
+    // 권한 검사(isNewCoach)가 joinedAt 을 읽는다: 없으면 코치 화면마다 TypeError
+    if (!isObj(m.joinedAt) || !isInt(m.joinedAt.season, 0) || !isInt(m.joinedAt.day, 0)) return '멤버 합류 시점 오류';
     ids.add(m.userId);
     if (m.roleLabel !== undefined && !isRole(m.roleLabel)) return '멤버 역할 오류';
     if (m.subRole !== undefined && (!isRole(m.subRole) || m.subRole === m.roleLabel)) return '멤버 보조 역할 오류';
@@ -430,16 +432,27 @@ function membersProblem(x: Record<string, unknown>, ms: unknown[]): string | nul
   if (owners !== 1 || coaches > MAX_COACHES) return `구단 멤버 인원 오류 (구단주 ${owners}, 코치 ${coaches})`;
   const pin = x.ownerPin;
   if (pin !== undefined && (!isObj(pin) || typeof pin.salt !== 'string' || !/^[0-9a-f]{16}$/.test(pin.hash as string))) return '구단주 PIN 형식 오류';
+  for (const [id, p] of Object.entries(x.proposals as Record<string, unknown>)) {
+    if (cardProblem(id, p) || !Array.isArray((p as Record<string, unknown>).diff)) return '제안 카드 형식 오류';
+  }
   const dp = x.dealProposals;
   if (dp !== undefined) {
     if (!isObj(dp)) return '이적·재계약 제안 형식 오류';
     for (const [id, d] of Object.entries(dp)) {
-      if (!isObj(d) || d.id !== id || typeof d.authorId !== 'string' || typeof d.status !== 'string' || !isObj(d.payload) || !isObj(d.expiresAt) || !Array.isArray(d.reactions)) return '이적·재계약 제안 형식 오류';
-      const pl = d.payload;
+      if (cardProblem(id, d) || typeof (d as Record<string, unknown>).summary !== 'string') return '이적·재계약 제안 형식 오류';
+      const pl = (d as Record<string, unknown>).payload as Record<string, unknown>;
       if (!(pl.kind === 'TRANSFER_BID' && isObj(pl.bid) && typeof pl.bid.listingId === 'string') && !(pl.kind === 'RENEWAL' && typeof pl.playerId === 'string' && isInt(pl.salary, 1) && isInt(pl.seasons, 1, 4))) return '이적·재계약 제안 내용 오류';
     }
   }
   return null;
+}
+
+/** 플랜·이적·재계약 제안 카드 공통 형태. 화면이 사유·반응을 그대로 그리고 만료·중복 판정이 시점을 읽는다 */
+function cardProblem(id: string, d: unknown): boolean {
+  if (!isObj(d) || d.id !== id || typeof d.authorId !== 'string' || typeof d.status !== 'string' || typeof d.reason !== 'string' || !isObj(d.payload) || !Array.isArray(d.reactions)) return true;
+  const e = d.expiresAt;
+  if (!isObj(e) || !isInt(e.season, 1) || !isInt(e.day, 1)) return true;
+  return !d.reactions.every((r: unknown) => isObj(r) && typeof r.userId === 'string' && (r.choice === 'FOR' || r.choice === 'AGAINST') && (r.reason === undefined || typeof r.reason === 'string'));
 }
 
 /** PIN 솔트 (재현성 불필요 — 게임 시드와 무관) */
@@ -869,6 +882,7 @@ class LocalGameService implements GameService {
     if (mem) return JSON.stringify(mem);
     const raw = await this.readSlot(slotId);
     if (raw === null) throw new GameError('NOT_FOUND', `슬롯 ${slotId} 이 비어 있습니다`);
+    if (raw === '') throw new GameError('SAVE_INCOMPATIBLE', `슬롯 ${slotId} 세이브를 읽을 수 없어 내보낼 수 없어요 (압축 본문 손상)`);
     return raw;
   }
 
