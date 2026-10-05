@@ -152,7 +152,7 @@ export function ProfileSheet({ onClose }: { onClose: () => void }) {
               const me = m.userId === actor?.userId;
               return (
                 <li key={m.userId}>
-                  <button type="button" className={`member-row ${me ? 'is-current' : ''}`} aria-current={me ? 'true' : undefined} onClick={() => pick(m)}>
+                  <button type="button" className={`member-row ${me ? 'is-current' : ''}`} aria-current={me ? 'true' : undefined} aria-label={`${memberText(m)}${me ? ', 지금 사용자' : m.seat === 'OWNER' && hasPin ? ', PIN 필요' : ''}`} onClick={() => pick(m)}>
                     <span className="member-emoji" aria-hidden="true">
                       {m.emoji ?? (m.seat === 'OWNER' ? '👑' : '🧢')}
                     </span>

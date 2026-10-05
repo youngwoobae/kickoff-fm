@@ -3,6 +3,7 @@ import { useState } from 'react';
 import type { ActionLogEntry, DealProposal, Membership, PlanChangePatch, Proposal, ProposalReaction, ProposalStatus, SlotKey, Step, TeamInstructions } from '../../types';
 import { Badge, Card, Empty, Segmented, Sheet, StepSlider } from '../components/kit';
 import { INSTR_LABEL, PROPOSAL_STATUS_LABEL, ROLE_NAME, SLIDERS, canPropose, memberText, proposeAreaText, seatLabel, type SliderKey } from '../format';
+import { josa } from '../josa';
 import { MembersCard } from './MembersCard';
 import { ProfileSheet } from './ProfileSheet';
 import { ProposeSheet } from '../plan/PlanActions';
@@ -10,6 +11,7 @@ import { useToast } from '../components/Toast';
 import { useAction, useActor, useGame, useQuery } from '../service/ServiceContext';
 
 const REJECT_REASONS = ['이번 경기엔 안 맞음', '다른 제안과 겹침', '선수 컨디션 고려', '기타'];
+const DEAL_REJECT_REASONS = ['예산이 빠듯해요', '다른 선수가 먼저예요', '조건이 맞지 않아요', '기타'];
 
 export function CoachScreen() {
   const snap = useGame();
@@ -98,7 +100,7 @@ function DealCard({ d, seat }: { d: DealProposal; seat: string }) {
       <p>
         <strong>{d.summary}</strong>
       </p>
-      <p className="small muted">Day {d.expiresAt.day}로 넘어가면 만료 · 승인하면 구단주 이름으로 바로 실행해요</p>
+      {isOpen && <p className="small muted">{josa(`Day ${d.expiresAt.day}`, '으로/로')} 넘어가면 만료돼요 · 승인하면 구단주 이름으로 바로 실행해요</p>}
       <p className="reason">이유: “{d.reason}”</p>
       {d.reactions.length > 0 && <p className="small muted">반응: {reactionsText(d.reactions, snap.memberships)}</p>}
       {d.resolutionNote && <p className="small muted">처리 메모: {d.resolutionNote}</p>}
@@ -122,16 +124,16 @@ function DealCard({ d, seat }: { d: DealProposal; seat: string }) {
           </button>
         </div>
       )}
-      <RejectSheet open={rejectOpen} onClose={() => setRejectOpen(false)} onPick={(r) => run((s) => s.rejectDeal?.(d.id, r), '제안을 거절했어요')} />
+      <RejectSheet open={rejectOpen} reasons={DEAL_REJECT_REASONS} onClose={() => setRejectOpen(false)} onPick={(r) => run((s) => s.rejectDeal?.(d.id, r), '제안을 거절했어요')} />
     </Card>
   );
 }
 
-function RejectSheet({ open, onClose, onPick }: { open: boolean; onClose: () => void; onPick: (reason: string) => void }) {
+function RejectSheet({ open, onClose, onPick, reasons = REJECT_REASONS }: { open: boolean; onClose: () => void; onPick: (reason: string) => void; reasons?: readonly string[] }) {
   return (
     <Sheet open={open} title="거절 사유" onClose={onClose}>
       <div className="chips">
-        {REJECT_REASONS.map((r) => (
+        {reasons.map((r) => (
           <button
             key={r}
             type="button"
@@ -315,7 +317,7 @@ const LOG_LABEL: Record<string, string> = {
   PLAN_RECOMMENDED_SUBMITTED: '추천 플랜 제출',
   DEFAULT_PLAN_SET: '기본 플랜 지정',
   TACTIC_CHANGED: '팀 전술 변경',
-  ROLE_SWITCHED: '역할 전환',
+  ROLE_SWITCHED: '사용자 전환',
   PROPOSAL_CREATED: '제안 작성',
   PROPOSAL_REACTED: '제안 반응',
   PROPOSAL_APPROVED: '제안 승인',
