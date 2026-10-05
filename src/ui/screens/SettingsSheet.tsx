@@ -12,6 +12,7 @@ import { useNav } from '../app/nav';
 import { prefsPersistable, resetPrefs, setPrefs, usePrefs, type FontScale, type MotionPref, type ReplaySpeed, type ThemePref } from '../prefs';
 import { useAsyncAction, useService } from '../service/ServiceContext';
 import { restartTour } from '../tutorial/Tour';
+import { DEV_TOOLS } from '../service/serviceHost';
 
 const APP_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '–';
 
@@ -99,12 +100,15 @@ export function SettingsSheet({ open, onClose, inGame }: { open: boolean; onClos
 
       {inGame && (
         <Card title="진행">
-          <Toggle
-            label="여러 날 진행 전 확인"
-            hint="여러 날을 한 번에 넘길 때 건너뛸 경기 수를 먼저 알려 줘요"
-            checked={prefs.confirmMultiDay}
-            onChange={(confirmMultiDay) => setPrefs({ confirmMultiDay })}
-          />
+          {/* 여러 날 진행은 개발자 패널에만 있다 */}
+          {DEV_TOOLS && (
+            <Toggle
+              label="여러 날 진행 전 확인"
+              hint="여러 날을 한 번에 넘길 때 건너뛸 경기 수를 먼저 알려 줘요"
+              checked={prefs.confirmMultiDay}
+              onChange={(confirmMultiDay) => setPrefs({ confirmMultiDay })}
+            />
+          )}
           <Toggle
             label="플랜 미확정으로 넘길 때 확인"
             hint="끄면 확정하지 않은 날은 기본 플랜으로 경기해요(권장)"

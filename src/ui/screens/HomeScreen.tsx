@@ -4,7 +4,7 @@ import type { DayResult, Fixture, MatchSummary } from '../../types';
 import { Badge, Card, Empty, Meter, Sheet, StickyActions } from '../components/kit';
 import { PromotionBanner } from './LeagueScreen';
 import { useUnreadCount } from './InboxScreen';
-import { ADJ_LABEL, BOT_STYLE_LABEL, PLAN_SOURCE_LABEL, formatKc, LEDGER_LABEL, memberText } from '../format';
+import { ADJ_LABEL, BOT_STYLE_LABEL, PLAN_SOURCE_LABEL, formatKc, LEDGER_LABEL, MEMO_KINDS, memberText } from '../format';
 import { useNav } from '../app/nav';
 import { usePlanEditor } from '../plan/PlanEditor';
 import { getPrefs } from '../prefs';
@@ -22,10 +22,21 @@ export function HomeScreen() {
 
   const planState = useQuery((s) => s.getPlanState()).data;
   const lock = usePlanLock();
+  const [advancing, setAdvancing] = useState(false);
   const advance = () => {
+    if (advancing) return;
     if (getPrefs().confirmUnsubmitted && next && planState?.matchId && !planState.confirmed && !confirm('오늘 플랜을 확정 제출하지 않았어요. 기본 플랜으로 경기할까요?')) return;
-    const r = run((s) => s.advanceDay());
-    if (r) setDayResult(r);
+    setAdvancing(true);
+    // '진행 중'을 먼저 그린 뒤 계산한다: rAF 는 페인트 직전, 그 안의 setTimeout 은 페인트 뒤 태스크.
+    // ponytail: advanceDay 는 여전히 메인 스레드 동기 계산(4× 스로틀 약 350ms)이라 그동안 화면이 멈춘다.
+    // 개선 경로: advanceDay 를 Web Worker 로(성능 프로파일 권장안 8)
+    requestAnimationFrame(() =>
+      setTimeout(() => {
+        const r = run((s) => s.advanceDay());
+        setAdvancing(false);
+        if (r) setDayResult(r);
+      }, 0),
+    );
   };
   const recommendAndSubmit = () =>
     run((s) => {
@@ -77,8 +88,8 @@ export function HomeScreen() {
               추천대로 제출
             </button>
           )}
-          <button type="button" className="btn btn-primary" data-tour="home.advance" onClick={advance}>
-            다음 날로 넘기기 ▶
+          <button type="button" className="btn btn-primary" data-tour="home.advance" disabled={advancing} aria-busy={advancing} onClick={advance}>
+            {advancing ? '진행 중…' : '다음 날로 넘기기 ▶'}
           </button>
         </StickyActions>
       )}
@@ -380,7 +391,11 @@ function DayResultSheet({ result, onClose }: { result: DayResult | null; onClose
           <ul className="list compact">
             {result.ledger.map((l, i) => (
               <li key={i} className="list-row">
-                <span>{LEDGER_LABEL[l.kind]}</span>
+                <span>
+                  {LEDGER_LABEL[l.kind]}
+                  {/* 재정 화면과 같은 규칙: 한정 예산으로 낸 이적료는 금액 0(잔액 변화)이라 메모의 사용분이 있어야 읽힌다 */}
+                  {l.memo && MEMO_KINDS.has(l.kind) && <span className="small muted"> · {l.memo}</span>}
+                </span>
                 <strong className={l.amount >= 0 ? 'pos' : 'neg'}>{formatKc(l.amount, true)}</strong>
               </li>
             ))}

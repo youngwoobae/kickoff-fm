@@ -277,8 +277,10 @@ function TopBar() {
       <div className="hdr-main">
         <span className="app-title">{club?.name ?? '킥오프 FM'}</span>
         <span className="hdr-sub">
-          S{snap.time.season} · {phaseLabel}
-          {fin && <> · 잔액 {formatKc(fin.balance)}</>}
+          <span>
+            S{snap.time.season} · {phaseLabel}
+          </span>
+          {fin && <> <span>· 잔액 {formatKc(fin.balance)}</span></>}
           {mode === 'fake' && <span className="badge badge-warn hdr-fake">FAKE</span>}
         </span>
       </div>

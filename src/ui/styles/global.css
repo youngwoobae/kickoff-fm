@@ -187,10 +187,12 @@ h3 {
 }
 .hdr-sub {
   font-size: 0.75rem;
+  line-height: 1.25;
   color: var(--muted);
+}
+/* 좁은 폭: 시즌·날짜와 잔액을 덩어리째 줄바꿈해 잘리지 않게 */
+.hdr-sub > span {
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .hdr-fake {
   margin-left: 6px;
@@ -216,6 +218,15 @@ h3 {
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: pointer;
+}
+/* 375 폭: 칩은 이모지만(이름은 aria-label·홈 카드에 있음) → 구단명·시즌·잔액에 자리를 준다 */
+@media (max-width: 400px) {
+  .role-chip {
+    padding: 0 10px;
+  }
+  .role-chip .chip-name {
+    display: none;
+  }
 }
 .member-list {
   list-style: none;

@@ -43,6 +43,7 @@ export function PlanStatusLine() {
 export function ProposeSheet({ open, onClose, patch, title = '코치 제안 보내기' }: { open: boolean; onClose: () => void; patch: PlanChangePatch; title?: string }) {
   const run = useAction();
   const { planState } = usePlanEditor();
+  const lock = usePlanLock();
   const [reason, setReason] = useState('');
   const submit = () => {
     if (!planState?.matchId) return;
@@ -58,11 +59,12 @@ export function ProposeSheet({ open, onClose, patch, title = '코치 제안 보�
       title={title}
       onClose={onClose}
       footer={
-        <button type="button" className="btn btn-primary btn-block" disabled={reason.trim().length === 0} onClick={submit}>
+        <button type="button" className="btn btn-primary btn-block" disabled={!planState?.matchId || reason.trim().length === 0} onClick={submit}>
           제안 보내기
         </button>
       }
     >
+      {!planState?.matchId && <p className="warn-line">{lock ?? '다음 경기가 없어 제안할 수 없어요'}</p>}
       <p className="muted">바꾼 항목: {Object.keys(patch).map((k) => PATCH_LABEL[k] ?? k).join(', ') || '없음'}</p>
       <label className="field">
         <span>이유 (필수, 최대 80자)</span>

@@ -132,6 +132,9 @@ export const LEDGER_LABEL: Record<LedgerKind | PromotionLedgerKind | TransferLed
   RELEASE_PENALTY: '방출 위약금',
   FORCED_SALE: '강제 매각 수입',
 };
+/** 원장 메모를 함께 보여 줄 종류(선수 이름·이적 한정 예산 사용분 등) */
+export const MEMO_KINDS = new Set<string>(['TRANSFER_FEE_PAID', 'TRANSFER_FEE_RECEIVED', 'TRANSFER_TAX', 'SIGNING_BONUS', 'RENEWAL_BONUS', 'RELEASE_PENALTY', 'FORCED_SALE', 'PARACHUTE']);
+
 
 /** 2.2.0 이적·편지함 표시 라벨 */
 export const WINDOW_KIND_LABEL: Record<WindowKind, string> = { MID: '시즌 중간 이적 창', REGULAR: '정규 이적 창' };

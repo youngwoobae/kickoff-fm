@@ -192,7 +192,8 @@ export function Sheet({ open, title, onClose, children, footer }: { open: boolea
   useEffect(() => {
     if (!open) return;
     const prev = document.activeElement as HTMLElement | null;
-    ref.current?.focus();
+    // 다음 프레임에 포커스: 커밋 직후 focus() 는 강제 레이아웃을 일으킨다(성능 프로파일 권장안 2)
+    const raf = requestAnimationFrame(() => ref.current?.focus());
     const onKey = (e: globalThis.KeyboardEvent) => {
       const el = ref.current;
       // 겹친 시트(편지함 → 선수 시트 등)는 가장 위 시트만 반응
@@ -216,6 +217,7 @@ export function Sheet({ open, title, onClose, children, footer }: { open: boolea
     };
     window.addEventListener('keydown', onKey);
     return () => {
+      cancelAnimationFrame(raf);
       window.removeEventListener('keydown', onKey);
       if (prev?.isConnected) prev.focus();
     };

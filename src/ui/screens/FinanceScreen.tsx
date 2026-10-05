@@ -1,10 +1,9 @@
 /** C04 재정 (소유: B) */
 import { Card, Empty, Meter, Stat } from '../components/kit';
-import { LEDGER_LABEL, formatKc, pct } from '../format';
+import { LEDGER_LABEL, MEMO_KINDS, formatKc, pct } from '../format';
 import { useQuery } from '../service/ServiceContext';
 
 /** 메모가 정보가 되는 항목만(선수 이름·한정 예산 사용분). 연봉·수당 메모는 내부 id 가 섞여 숨긴다 */
-const MEMO_KINDS = new Set<string>(['TRANSFER_FEE_PAID', 'TRANSFER_FEE_RECEIVED', 'TRANSFER_TAX', 'SIGNING_BONUS', 'RENEWAL_BONUS', 'RELEASE_PENALTY', 'FORCED_SALE', 'PARACHUTE']);
 
 export function FinanceScreen() {
   const q = useQuery((s) => s.getFinance());
