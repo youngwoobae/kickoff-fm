@@ -45,6 +45,8 @@ export type ContractEvent =
   | { kind: 'FORCED_SALE'; playerId: PlayerId; clubId: ClubId; amount: Kc };
 
 const r1000 = (v: number): Kc => Math.round(v / 1000) * 1000;
+/** 결정 경로 ID 정렬: 코드 포인트 순(localeCompare 는 런타임 ICU 로캘에 따라 달라질 수 있다, 리뷰 m8) */
+export const cmpId = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 // ── 5.1 ──
 
@@ -176,7 +178,7 @@ export function offerRenewal(p: Player, offer: RenewalOffer, ctx: RenewalContext
  */
 export function aiRenewals(squad: readonly Player[], ctx: AskContext & { capLimit: Kc }): PendingRenewal[] {
   const A = CONTRACT.ai;
-  const ranked = [...squad].filter((p) => !p.isTemporary).sort((a, b) => b.ovr - a.ovr || a.id.localeCompare(b.id));
+  const ranked = [...squad].filter((p) => !p.isTemporary).sort((a, b) => b.ovr - a.ovr || cmpId(a.id, b.id));
   const picks: PendingRenewal[] = [];
   ranked.forEach((p, i) => {
     if (p.contract.seasonsLeft !== 1) return;
@@ -192,7 +194,7 @@ export function aiRenewals(squad: readonly Player[], ctx: AskContext & { capLimi
     const p = byId.get(id)!;
     return p.ovr + (A.youngPriority.find(([age]) => p.age <= age)?.[1] ?? 0);
   };
-  picks.sort((a, b) => prio(b.playerId) - prio(a.playerId) || a.playerId.localeCompare(b.playerId));
+  picks.sort((a, b) => prio(b.playerId) - prio(a.playerId) || cmpId(a.playerId, b.playerId));
   const limit = Math.max(ctx.capLimit * A.capUseMax, capUsage(squad));
   let used = capUsage(squad.filter((p) => p.contract.seasonsLeft > 1 || p.isTemporary));
   return picks.filter((r) => {

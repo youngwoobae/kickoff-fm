@@ -59,15 +59,6 @@ export function windowOf(season: SeasonNo, kind: WindowKind): TransferWindow {
   return { kind, season, openDay: w.openDay, settleDay: w.settleDay, settleSeason: kind === 'REGULAR' ? season + 1 : season };
 }
 
-/** 지금 열려 있는 창 (정산일 포함). 시즌 1 Day 1~2 는 직전 정규 창이 없다 */
-export function windowAt(t: GameTime): TransferWindow | null {
-  const mid = TRANSFER.window.MID;
-  if (t.day >= mid.openDay && t.day <= mid.settleDay) return windowOf(t.season, 'MID');
-  if (t.day >= TRANSFER.window.REGULAR.openDay) return windowOf(t.season, 'REGULAR');
-  if (t.day <= TRANSFER.window.REGULAR.settleDay && t.season > 1) return windowOf(t.season - 1, 'REGULAR');
-  return null;
-}
-
 export function isSettleDay(t: GameTime, w: TransferWindow): boolean {
   return t.season === w.settleSeason && t.day === w.settleDay;
 }

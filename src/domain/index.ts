@@ -136,7 +136,7 @@ export {
   type ReleaseExemption,
 } from './contract/contract';
 export { INBOX, lifecycleDraft, contractDraft, inboxId, pruneInbox, appendInbox, type InboxDraft, type InboxContext } from './inbox/inbox';
-export { TRANSFER, h as transferHash, round1k, fmtM, windowOf, windowAt, isSettleDay, daysAfterSettle, potentialEstimate, ageCoef, potentialCoef, contractCoef, valueOf, playerValue, budgetB, type ValueInput } from './transfer/value';
+export { TRANSFER, h as transferHash, round1k, fmtM, windowOf, isSettleDay, daysAfterSettle, potentialEstimate, ageCoef, potentialCoef, contractCoef, valueOf, playerValue, budgetB, type ValueInput } from './transfer/value';
 export {
   listingId,
   generateNpcListings,
@@ -181,6 +181,7 @@ export {
   boundaryContracts,
   fillHumanSquads,
   fillLegacyRenewals,
+  benchIdsOf,
   transferDaily,
   autoManageDay,
   payAiRenewalBonuses,

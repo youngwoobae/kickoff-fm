@@ -895,9 +895,9 @@ class LocalGameService implements GameService {
     return s.transferMarket;
   }
 
-  /** 시장 변경 커밋 (게임 사건: seq +1) */
-  private commitMarket(s: GameState, m: TransferMarketState): void {
-    this.commit({ ...s, seq: s.seq + 1, transferMarket: m });
+  /** 시장 변경 커밋 (게임 사건: seq +1, 행동 로그 m5) */
+  private commitMarket(s: GameState, m: TransferMarketState, kind: ActionLogKind, data: Record<string, unknown>): void {
+    this.commit(this.withLog({ ...s, transferMarket: m }, kind, data));
   }
 
   getTransferWindow(): TransferWindow | null {
@@ -944,7 +944,7 @@ class LocalGameService implements GameService {
         releasedIds: new Set(s.releasedThisSeason?.[s.userClubId] ?? []),
       }),
     );
-    this.commitMarket(s, { ...m, bids: upsertBid(m.bids, bid) });
+    this.commitMarket(s, { ...m, bids: upsertBid(m.bids, bid) }, 'BID_PLACED', { ...bid });
     return bid;
   }
 
@@ -954,7 +954,7 @@ class LocalGameService implements GameService {
     const m = this.market(s);
     const mine = (b: Bid) => b.listingId === listingId && b.clubId === s.userClubId;
     if (!m.bids.some(mine)) throw new GameError('NOT_FOUND', `이 매물에 낸 입찰이 없어요: ${listingId}`);
-    this.commitMarket(s, { ...m, bids: m.bids.filter((b) => !mine(b)) });
+    this.commitMarket(s, { ...m, bids: m.bids.filter((b) => !mine(b)) }, 'BID_WITHDRAWN', { listingId });
   }
 
   listBids(): Bid[] {
@@ -970,7 +970,7 @@ class LocalGameService implements GameService {
     const listing = this.run(() => clubListing(m.window, withPendingRenewal(s, p), minPrice)); // 성립 재계약은 새 계약으로 (M4.8)
     // 같은 선수 재등록 = 최저가 수정. 새 최저가보다 낮아진 입찰은 무효라 뺀다
     const bids = m.bids.filter((b) => b.listingId !== listing.id || (b.fee ?? 0) >= listing.minPrice);
-    this.commitMarket(s, { ...m, listings: [...m.listings.filter((l) => l.id !== listing.id), listing], bids });
+    this.commitMarket(s, { ...m, listings: [...m.listings.filter((l) => l.id !== listing.id), listing], bids }, 'LISTING_CREATED', { listingId: listing.id, playerId, minPrice });
     return listing;
   }
 
@@ -979,7 +979,7 @@ class LocalGameService implements GameService {
     this.ownerOnly(s);
     const m = this.market(s);
     if (!m.listings.some((l) => l.id === listingId && l.sellerClubId === s.userClubId)) throw new GameError('NOT_FOUND', `우리 구단 매물이 아니에요: ${listingId}`);
-    this.commitMarket(s, { ...m, listings: m.listings.filter((l) => l.id !== listingId), bids: m.bids.filter((b) => b.listingId !== listingId) });
+    this.commitMarket(s, { ...m, listings: m.listings.filter((l) => l.id !== listingId), bids: m.bids.filter((b) => b.listingId !== listingId) }, 'LISTING_WITHDRAWN', { listingId });
   }
 
   getPlayerValue(playerId: PlayerId): { value: number; minPrice: number; maxPrice: number } {
@@ -1037,7 +1037,7 @@ class LocalGameService implements GameService {
     }
     const d = this.run(() => offerRenewalDomain(p, { salary, seasons }, this.renewalContext(s, p)));
     if (!d.accepted) return { accepted: false, ask: d.ask };
-    const next: GameState = { ...s, seq: s.seq + 1, finances: { ...s.finances } };
+    const next: GameState = { ...this.withLog(s, 'RENEWAL_OFFERED', { playerId, salary, seasons, bonus: -(d.ledger?.amount ?? 0) }), finances: { ...s.finances } };
     upsertRenewal(next, d.pending!);
     if (d.ledger) post(next, s.userClubId, { kind: d.ledger.kind, amount: d.ledger.amount, memo: `${p.name} 갱신 보너스 (${seasons}시즌)` });
     this.commit(next);
@@ -1055,7 +1055,7 @@ class LocalGameService implements GameService {
     this.ownerOnly(s);
     const p = this.ownPlayer(s, playerId);
     const r = this.run(() => releasePlayerDomain(p, { season: s.time.season, day: s.time.day, freeReleasesLeft: s.freeReleasesLeft ?? 0 }));
-    const next: GameState = { ...s, seq: s.seq + 1, players: { ...s.players }, clubs: { ...s.clubs }, finances: { ...s.finances } };
+    const next: GameState = { ...this.withLog(s, 'PLAYER_RELEASED', { playerId, penalty: r.penalty }), players: { ...s.players }, clubs: { ...s.clubs }, finances: { ...s.finances } };
     const club = next.clubs[s.userClubId]!;
     next.clubs[s.userClubId] = { ...club, playerIds: club.playerIds.filter((id) => id !== p.id) };
     if (r.player) {

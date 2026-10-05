@@ -9,7 +9,7 @@ import { startNewSeasonState } from '../career/seasonTransition';
 import { autoManageDay } from '../transfer/flow';
 import { TIERS, leagueTable, leaguesOf } from '../league/pyramid';
 import { TIER_ECONOMY, baseSalary, startingBalance } from '../economy/economy';
-import { capUsage } from '../contract/contract';
+import { CONTRACT, capUsage } from '../contract/contract';
 import { TIER_REFERENCE_OVR } from '../squad/generator';
 import { LIFECYCLE, squadStrength } from '../squad/lifecycle';
 
@@ -67,6 +67,8 @@ export interface SeedRun {
   negClubDays: number;
   clubDays: number;
   negStreaks: number;
+  /** 2.4.1: 강제 매각 하한(등록 18명)에 막혀 이어진 음수 구간 (C4 에서 빼고 C4F 로 보고) */
+  negFloorStreaks: number;
   /** 사람 구단 유스 후보 중 유망주(pot ≥ ref + 4) 가 있던 경계 수 / 경계 수 */
   youthProspect: [number, number];
   /** E5: 이적료 거래(NPC·CLUB) 낙찰가 / V */
@@ -130,7 +132,7 @@ function measureEnd(s: GameState): SeasonEnd {
 }
 
 export function runCareerSeed(seed: number, seasons: number, startTier: Tier, onSeason?: (season: number) => void): SeedRun {
-  const run: SeedRun = { seed, starts: [], ends: [], negClubDays: 0, clubDays: 0, negStreaks: 0, youthProspect: [0, 0], feeRatios: [], sinkClubs: [], lpShare: { T1: [], T2: [], T3: [], T4: [], T5: [] } };
+  const run: SeedRun = { seed, starts: [], ends: [], negClubDays: 0, clubDays: 0, negStreaks: 0, negFloorStreaks: 0, youthProspect: [0, 0], feeRatios: [], sinkClubs: [], lpShare: { T1: [], T2: [], T3: [], T4: [], T5: [] } };
   const streak = new Map<string, number>();
   try {
     let s = createInitialState(seed, { clubName: 'AUTO', tier: startTier, devMode: false }, '2026-10-04T00:00:00.000Z');
@@ -174,7 +176,11 @@ export function runCareerSeed(seed: number, seasons: number, startTier: Tier, on
           run.clubDays++;
           const n = f.balance < 0 ? (streak.get(id) ?? 0) + 1 : 0;
           if (n > 0) run.negClubDays++;
-          if (n === 4) run.negStreaks++; // 3일 넘게(4일째) 이어진 구간 1건
+          // 3일 넘게(4일째) 이어진 구간 1건. 등록 18명(강제 매각 하한, 리뷰 C1·M5)이라 팔 선수가 없던 구간은 따로 센다
+          if (n === 4) {
+            if (clubPlayers(s, id).filter((p) => !p.isTemporary).length <= CONTRACT.emergency.minRegistered) run.negFloorStreaks++;
+            else run.negStreaks++;
+          }
           streak.set(id, n);
         }
       }
@@ -232,7 +238,9 @@ export function judgeCareer(runs: readonly SeedRun[], seasons: number): CareerGa
   g('C2', 'ECON', 'HARD', '구단 구성 70·티어별 14', `ok=${struct.filter((x) => x.structureOk).length}/${struct.length}`, '100%', struct.every((x) => x.structureOk));
   g('C3', 'ECON', 'HARD', '선수단 18~25명', `ok=${struct.filter((x) => x.allSizesOk).length}/${struct.length}`, '100%', struct.every((x) => x.allSizesOk));
   const streaks = runs.reduce((a, r) => a + r.negStreaks, 0);
-  g('C4', 'ECON', 'HARD', '음수 잔액 3일 초과 지속', `cases=${streaks}`, '0', streaks === 0);
+  g('C4', 'ECON', 'HARD', '음수 잔액 3일 초과 지속 (팔 선수가 있는데)', `cases=${streaks}`, '0', streaks === 0);
+  const floorStreaks = runs.reduce((a, r) => a + r.negFloorStreaks, 0);
+  g('C4F', 'ECON', 'WARN', '음수 잔액 3일 초과 — 강제 매각 하한(18명)에 막힘', `cases=${floorStreaks}`, '0', floorStreaks === 0);
   const negRate = runs.reduce((a, r) => a + r.negClubDays, 0) / Math.max(1, runs.reduce((a, r) => a + r.clubDays, 0));
   g('C5', 'ECON', 'HARD', '음수 잔액 구단-일 비율', `neg_rate=${pct(negRate)}`, '<= 0.5%', negRate <= 0.005);
 

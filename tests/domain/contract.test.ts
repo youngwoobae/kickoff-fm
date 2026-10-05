@@ -165,3 +165,10 @@ describe('시즌 경계·AI 재계약', () => {
     expect(one.map((p) => p.playerId)).toEqual(['kid']);
   });
 });
+
+describe('리뷰 m8: 결정 경로 ID 정렬은 코드 포인트 순', () => {
+  it('OVR·나이 같은 대소문자 ID: aiRenewals 결과 순서가 로캘과 무관 (B1 < a1)', () => {
+    const squad = [mk({ ovr: 60, age: 26 }, 'a1'), mk({ ovr: 60, age: 26 }, 'B1')];
+    expect(aiRenewals(squad, { tier: 'T3', clubMatches: 0, capLimit: 1000 * M }).map((r) => r.playerId)).toEqual(['B1', 'a1']);
+  });
+});

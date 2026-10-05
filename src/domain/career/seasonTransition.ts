@@ -14,7 +14,7 @@ import { parseMatchId } from '../league/schedule';
 import { applyMovements, clubTierMap, leagueIdOf, leagueTable, leaguesOf, seasonMovements, userLeagueOf } from '../league/pyramid';
 import { quickSimScore, teamStrength } from '../league/quickSim';
 import { ageOneSeason, aiSquadMaintenance, cleanFreeAgents, lifeRng } from '../squad/lifecycle';
-import { CONTRACT, type ContractEvent } from '../contract/contract';
+import { CONTRACT, cmpId, type ContractEvent } from '../contract/contract';
 import { aiReleasePenalties, boundaryContracts, fillHumanSquads, mailContract, pruneMarket } from '../transfer/flow';
 import { clubPlayers, createInitialState, dayOneProcessing, emptyFinance, post, rollTrainingFocus, seasonFixtures } from '../day/advanceDay';
 import { offerYouthIntake } from './youth';
@@ -49,7 +49,7 @@ function lifecycleBoundary(state: GameState, ending: number, relegated: Readonly
   // ②' 계약 −1, 만료 → 재계약(pendingRenewals: 사람 + Day 20 AI) 또는 FA (M4.4, 나이·OVR 변화 뒤·AI 선수단 관리 전)
   const contractEvents = boundaryContracts(state, ending);
   // ③ FA 풀 정리
-  const fa = cleanFreeAgents(Object.values(players).filter((p) => p.clubId === null).sort((a, b) => a.id.localeCompare(b.id)), ending);
+  const fa = cleanFreeAgents(Object.values(players).filter((p) => p.clubId === null).sort((a, b) => cmpId(a.id, b.id)), ending);
   removeFromClubs(new Set(fa.events.map((e) => e.playerId)));
   for (const p of fa.keep) players[p.id] = p;
   // ④ AI 구단 선수단 관리 (승강 반영된 다음 시즌 티어)
@@ -128,7 +128,7 @@ export function startNewSeasonState(input: GameState, nowIso: string): GameState
   rollTrainingFocus(state); // 8.3: 주 시작 Day 1
   delete state.youthIntake;
   // 긴급 FA 는 만료·은퇴가 끝난 뒤 새 시즌 Day 1 인원으로 판정한다(편지도 새 시즌 날짜, M4.8)
-  if (fresh) fillHumanSquads(state);
+  if (fresh) fillHumanSquads(state, { boundary: true });
   // K4: 강등 연봉 전용 계정은 Day 1 연봉부터 쓰이므로 배정금 처리 전에 연다
   for (const m of movements.filter((x) => x.kind === 'RELEGATED')) {
     const amount = parachuteOf(m.from, m.to);

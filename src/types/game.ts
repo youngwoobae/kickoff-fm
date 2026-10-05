@@ -76,7 +76,14 @@ export type ActionLogKind =
   | 'SEASON_STARTED'
   /** 2.3.0 */
   | 'TRAINING_FOCUS_SET'
-  | 'YOUTH_DECIDED';
+  | 'YOUTH_DECIDED'
+  /** 2.4.1 (리뷰 m5): 돈이 걸린 이적·계약 행동 (data: listingId·playerId·금액) */
+  | 'BID_PLACED'
+  | 'BID_WITHDRAWN'
+  | 'LISTING_CREATED'
+  | 'LISTING_WITHDRAWN'
+  | 'RENEWAL_OFFERED'
+  | 'PLAYER_RELEASED';
 
 /** UI 가 logEvent() 로 직접 남길 수 있는 종류 (나머지는 services 가 자동 기록) */
 export type UiLogKind = 'SESSION_START' | 'SESSION_END' | 'REPORT_VIEWED' | 'REPLAY_VIEWED' | 'SCOUT_VIEWED';

@@ -10,7 +10,6 @@ import {
   isSettleDay,
   potentialEstimate,
   valueOf,
-  windowAt,
   windowOf,
 } from '../../src/domain/transfer/value';
 import {
@@ -54,15 +53,8 @@ const asMap = <T extends { id: string }>(xs: readonly T[]) => Object.fromEntries
 
 describe('창 일정 (D16)', () => {
   it('중간 창 Day 11~15, 정규 창 Day 25 ~ 다음 시즌 Day 2', () => {
-    expect(windowAt({ season: 3, day: 10 })).toBeNull();
-    expect(windowAt({ season: 3, day: 11 })).toEqual({ kind: 'MID', season: 3, openDay: 11, settleDay: 15, settleSeason: 3 });
-    expect(windowAt({ season: 3, day: 15 })?.kind).toBe('MID');
-    expect(windowAt({ season: 3, day: 16 })).toBeNull();
-    expect(windowAt({ season: 3, day: 24 })).toBeNull();
-    expect(windowAt({ season: 3, day: 25 })).toEqual({ kind: 'REGULAR', season: 3, openDay: 25, settleDay: 2, settleSeason: 4 });
-    expect(windowAt({ season: 4, day: 2 })).toEqual(windowOf(3, 'REGULAR'));
-    expect(windowAt({ season: 4, day: 3 })).toBeNull();
-    expect(windowAt({ season: 1, day: 1 })).toBeNull();
+    expect(windowOf(3, 'MID')).toEqual({ kind: 'MID', season: 3, openDay: 11, settleDay: 15, settleSeason: 3 });
+    expect(windowOf(3, 'REGULAR')).toEqual({ kind: 'REGULAR', season: 3, openDay: 25, settleDay: 2, settleSeason: 4 });
     expect(isSettleDay({ season: 4, day: 2 }, windowOf(3, 'REGULAR'))).toBe(true);
     expect(isSettleDay({ season: 3, day: 2 }, windowOf(3, 'REGULAR'))).toBe(false);
   });
@@ -286,13 +278,53 @@ describe('잔액 부족 (D18)', () => {
     expect(negativeBalanceStatus(5, 5, 7)).toEqual({ locked: false, forceSale: false });
   });
 
+  const filler = (n: number) => Array.from({ length: n }, (_, i) => mk(`f${i}`, 'A', 50, 25, { contract: { seasonsLeft: 3, salary: 0.3 * M } }));
+
   it('연봉 높은 비주전부터 0.5V, 잔액 ≥ 0 이 되면 멈춤', () => {
     const starters = Array.from({ length: 11 }, (_, i) => mk(`st${i}`, 'A', 70));
     const bench = [mk('b1', 'A', 60, 25, { contract: { seasonsLeft: 3, salary: 5 * M } }), mk('b2', 'A', 60, 25, { contract: { seasonsLeft: 3, salary: 4 * M } }), mk('b3', 'A', 60, 25, { contract: { seasonsLeft: 3, salary: 3 * M } })];
-    const r = forcedSales({ clubId: 'A', balance: -10 * M, players: [...starters, ...bench] });
+    const r = forcedSales({ clubId: 'A', balance: -10 * M, players: [...starters, ...bench, ...filler(7)] });
     expect(r.sold).toEqual(['b1', 'b2']); // 0.5 × 15M = 7.5M 씩
     expect(r.balance).toBe(5 * M);
     expect(r.money.every((m) => m.kind === 'FORCED_SALE' && m.amount === 7.5 * M)).toBe(true);
+  });
+});
+
+describe('잔액 부족 회귀 (리뷰 C1·M5·m1)', () => {
+  const M2 = 1_000_000;
+  const squad = (n: number) => Array.from({ length: n }, (_, i) => mk(`p${String(i).padStart(2, '0')}`, 'A', 70 - i, 25, { contract: { seasonsLeft: 3, salary: (5 - i * 0.1) * M2 } }));
+
+  it('M5: 하한 — 등록 18명 아래로는 팔지 않는다(잔액이 아무리 낮아도)', () => {
+    const r = forcedSales({ clubId: 'A', balance: -500 * M2, players: squad(25) });
+    expect(r.sold).toHaveLength(7);
+    expect(r.balance).toBeLessThan(0);
+    expect(forcedSales({ clubId: 'A', balance: -500 * M2, players: squad(18) }).sold).toEqual([]);
+  });
+
+  it('M5: 출전 가능 16명 아래로 내리지 않는다(부상 선수는 팔 수 있음)', () => {
+    const ps = squad(22).map((p, i) => (i < 5 ? { ...p, availability: { ...p.availability, injuryDays: 10 } } : p)); // 가용 17
+    const r = forcedSales({ clubId: 'A', balance: -500 * M2, players: ps });
+    const avail = ps.filter((p) => !r.sold.includes(p.id) && p.availability.injuryDays === 0).length;
+    expect(avail).toBeGreaterThanOrEqual(16);
+    expect(22 - r.sold.length).toBeGreaterThanOrEqual(18);
+  });
+
+  it('M5: benchIds 를 주면 그 선수만, C1: exclude(긴급 FA)는 팔지 않는다', () => {
+    const ps = squad(24);
+    const r = forcedSales({ clubId: 'A', balance: -500 * M2, players: ps, benchIds: new Set(['p00', 'p01', 'p20']), exclude: new Set(['p01']) });
+    expect(r.sold).toEqual(['p00', 'p20']);
+  });
+
+  it('m1: 음수가 28일 넘게 이어져도 매일 강제 매각 단계가 유지된다', () => {
+    let since: number | undefined;
+    const stops: number[] = [];
+    for (let t = 0; t < 70; t++) {
+      const day = (t % 28) + 1;
+      const st = negativeBalanceStatus(-1, since, day);
+      since = st.negativeSinceDay;
+      if (t >= 2 && !st.forceSale) stops.push(t);
+    }
+    expect(stops).toEqual([]);
   });
 });
 

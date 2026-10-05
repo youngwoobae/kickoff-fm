@@ -119,7 +119,13 @@ import type {
  * 2.4.0 (M6.2, 추가만): 2D 중계용 CommentaryLine.event?·pitch?(PitchCue), MatchReplay.formations?·starters?·ballTrack? (엔진 결정 로그·이벤트 복사, 엔진 수치 불변),
  * 선택 메서드 getBuildInfo?, StyleDef.realModel 선택 필드화(값은 가상 표현). 세이브 스키마 3 유지. 아키텍처 16장.
  */
-export const CONTRACT_VERSION = '2.4.0';
+/**
+ * 2.4.1 (리뷰 M4·M5 결함 수정, 추가만·시그니처 불변): GameState.releasedThisSeason?·emergencySignedThisSeason?(선택),
+ * ActionLogKind BID_PLACED·BID_WITHDRAWN·LISTING_CREATED·LISTING_WITHDRAWN·RENEWAL_OFFERED·PLAYER_RELEASED,
+ * offerRenewal 재제안 = RENEWAL_NOT_OPEN(details ALREADY_RENEWED), placeBid 방출 선수 FA = BID_OUT_OF_RANGE(details RELEASED),
+ * 가져오기 검증 강화(SAVE_INCOMPATIBLE 이 더 자주). 세이브 스키마 3 유지. 아키텍처 16장.
+ */
+export const CONTRACT_VERSION = '2.4.1';
 
 /** 2.4.0: 정보 화면용 빌드 정보 (온보딩_UX 2.3) */
 export interface BuildInfo {

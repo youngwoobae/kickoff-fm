@@ -12,6 +12,6 @@ describe('CAREER_SIM 축약', () => {
     expect(gate('L-C6').pass).not.toBeNull();
     expect(r.runs.every((x) => x.starts.length === 3 && x.ends.length === 3)).toBe(true);
     expect(r.gates.filter((g) => g.group === 'ECON' && g.kind === 'HARD')).toHaveLength(16);
-    expect(r.gates.filter((g) => g.group === 'ECON' && g.kind === 'WARN')).toHaveLength(8);
+    expect(r.gates.filter((g) => g.group === 'ECON' && g.kind === 'WARN')).toHaveLength(9); // 2.4.1: C4F
   }, 60_000);
 });

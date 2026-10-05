@@ -18,7 +18,7 @@ function errCode(fn: () => unknown): string {
 
 describe('피라미드·커리어 (2.1.0)', () => {
   it('계약 버전', () => {
-    expect(CONTRACT_VERSION).toBe('2.4.0');
+    expect(CONTRACT_VERSION).toBe('2.4.1');
   });
 
   it('피라미드: 5리그 × 14구단(70, 겹침 없음), 기본 시작 T5, 같은 상태면 같은 참조 (M3.2)', () => {
