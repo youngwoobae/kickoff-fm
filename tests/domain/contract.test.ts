@@ -119,6 +119,9 @@ describe('5.4 긴급 FA', () => {
     expect(emergencyFaAllowed({ windowOpen: false, registered: 18, available: 16, signedThisSeason: 0 })).toBe(false);
     expect(emergencyFaAllowed({ windowOpen: false, registered: 20, available: 15, signedThisSeason: 2 })).toBe(false);
     expect(emergencyFaAllowed({ windowOpen: true, registered: 10, available: 10, signedThisSeason: 0 })).toBe(false);
+    // GK 하한(AI 와 공유, 2명) 미만이면 등록 인원이 충분해도 허용
+    expect(emergencyFaAllowed({ windowOpen: false, registered: 22, available: 22, signedThisSeason: 0, gk: 1 })).toBe(true);
+    expect(emergencyFaAllowed({ windowOpen: false, registered: 22, available: 22, signedThisSeason: 0, gk: 2 })).toBe(false);
     const p = emergencyFaSign(mk({ ovr: 60, clubId: null }), 'c9', 'T3');
     expect(p).toMatchObject({ clubId: 'c9', contract: { seasonsLeft: 1, salary: 3 * M, bonusPerSeason: 0 } });
   });

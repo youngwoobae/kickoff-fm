@@ -8,6 +8,8 @@ import type { ClubId, GameState, Kc, LedgerEntry, LifecycleEvent, PendingRenewal
 import { TIER_ECONOMY, SEASON_DAYS, promotionBonus } from '../economy/economy';
 import { clubTierMap } from '../league/pyramid';
 import { TIER_REFERENCE_OVR } from '../squad/generator';
+import { LIFECYCLE } from '../squad/lifecycle';
+import { EngineConstants } from '../../engine';
 import { CONTRACT, aiRenewals, capLimit, contractBoundary, emergencyFaAllowed, emergencyFaSign, releaseQuote, renewalBonus, type ContractEvent } from '../contract/contract';
 import { appendInbox, contractDraft, lifecycleDraft, type InboxContext, type InboxDraft } from '../inbox/inbox';
 import { clubPlayers, post } from '../day/advanceDay';
@@ -244,7 +246,7 @@ function postMoney(state: GameState, money: readonly TransferMoney[], sink?: Led
   for (const x of money) {
     const to = x.fromTransferOnly ?? 0;
     const name = marketPlayer(state, x.playerId)?.name ?? x.playerId;
-    post(state, x.clubId, { kind: x.kind, amount: x.amount + to, memo: `${name}${to ? ` (이적 한정 예산 ${fmtM(to)} 사용)` : ''}` }, sink);
+    post(state, x.clubId, { kind: x.kind, amount: x.amount + to, memo: `${name}${to ? ` (이적료 ${fmtM(Math.abs(x.amount))} 중 이적 한정 예산 ${fmtM(to)} 사용)` : ''}` }, sink);
     if (to) {
       const f = state.finances[x.clubId]!;
       state.finances[x.clubId] = { ...f, transferOnlyBudget: f.transferOnlyBudget - to };
@@ -487,26 +489,29 @@ export function aiReleasePenalties(before: Readonly<Record<PlayerId, Player>>, r
  * 상한 없이 18명까지 채운다(M4.8 동작 유지, 그 계약도 시즌 수에 들어가 시즌 중 상한을 쓴다). 강제 매각은 18명 아래로 팔지 않으므로 둘이 서로를 부르지 않는다. 계약한 선수는 emergencySignedThisSeason 에 남아 강제 매각에서 빠진다.
  * 후보 제외(M4.8·M6): 이번 시즌 그 구단이 방출한 선수(releasedThisSeason 상태), 그 구단이 지금 입찰 중인 선수.
  * 창 열림 조건은 보지 않는다: 정규 창은 경계를 넘어 Day 2 까지 열려 있어, 경계 만료 결원을 새 시즌 Day 1 에 채우려면 창 중에도 돌아야 한다(M4.8).
+ * GK 가 하한(LIFECYCLE.ai.minGk, AI 와 공유) 미만이면 18명 이상이어도 같은 상한 안에서 GK 를 보충하고, 보충 뒤에도 부족하면 편지로 경고한다.
  * ponytail: 캡 검사 없음(안전망 — 강등·성장으로 캡을 넘은 구단이 14명에 묶이지 않게, CAREER_SIM C3), 포지션은 GK 2명만 보장, 나머지는 OVR 순
  */
 export function fillHumanSquads(state: GameState, opts: { boundary?: boolean } = {}): void {
+  const minGk = LIFECYCLE.ai.minGk;
   const tiers = clubTierMap(state);
   const canPlay = (p: Player) => p.availability.injuryDays === 0 && p.availability.suspendedMatches === 0;
   for (const id of sortedIds(state).filter((x) => isHuman(state, x))) {
     const squad = () => clubPlayers(state, id).filter((p) => !p.isTemporary);
     const signedIds = () => state.emergencySignedThisSeason?.[id] ?? [];
+    const gkCount = () => squad().filter((p) => p.primary === 'GK').length;
     const allowed = () => {
       const sq = squad();
-      return sq.length < CONTRACT.emergency.minRegistered && (opts.boundary || emergencyFaAllowed({ windowOpen: false, registered: sq.length, available: sq.filter(canPlay).length, signedThisSeason: signedIds().length }));
+      // GK 하한(AI 와 공유)만 모자라면 등록 상한 안에서만 보충
+      return (sq.length < CONTRACT.emergency.minRegistered || (gkCount() < minGk && sq.length < TRANSFER.maxSquad)) && (opts.boundary || emergencyFaAllowed({ windowOpen: false, registered: sq.length, available: sq.filter(canPlay).length, signedThisSeason: signedIds().length, gk: gkCount() }));
     };
-    if (!allowed()) continue;
     const tier = tiers.get(id) ?? state.settings.tier;
     const ref = TIER_REFERENCE_OVR[tier];
     const released = new Set(state.releasedThisSeason?.[id] ?? []);
     const bidOn = new Set((state.transferMarket?.bids ?? []).filter((b) => b.clubId === id).map((b) => state.transferMarket!.listings.find((l) => l.id === b.listingId)?.playerId));
     const signed: string[] = [];
     while (allowed()) {
-      const needGk = squad().filter((p) => p.primary === 'GK').length < 2;
+      const needGk = gkCount() < minGk;
       const x = Object.values(state.players)
         .filter((q) => q.clubId === null && q.ovr <= ref + 6 && (!needGk || q.primary === 'GK') && !released.has(q.id) && !bidOn.has(q.id))
         .sort((a, b) => b.ovr - a.ovr || (a.id < b.id ? -1 : 1))[0];
@@ -519,7 +524,14 @@ export function fillHumanSquads(state: GameState, opts: { boundary?: boolean } =
       signed.push(p.name);
     }
     if (signed.length && id === state.userClubId) {
-      mail(state, [{ kind: 'GENERAL', title: '긴급 FA 계약', body: `선수단이 ${CONTRACT.emergency.minRegistered}명 아래로 줄어 FA ${signed.length}명(${signed.join(', ')})과 1시즌 계약했어요.`, clubId: id }]);
+      mail(state, [{ kind: 'GENERAL', title: '긴급 FA 계약', body: `선수단이 ${CONTRACT.emergency.minRegistered}명 또는 골키퍼가 ${minGk}명 아래로 줄어 FA ${signed.length}명(${signed.join(', ')})과 1시즌 계약했어요.`, clubId: id }]);
+    }
+    // GK 부족 경고: 보충 뒤에도 등록 GK 가 하한 미만이거나 뛸 만한(컨디션 ≥ 자동 로테이션 기준) GK 가 없으면
+    // ponytail: 같은 제목 편지가 최근 7일 안에 있으면 다시 보내지 않는다(상태 필드 없이 중복 억제)
+    const fit = squad().filter((p) => p.primary === 'GK' && canPlay(p) && p.condition >= EngineConstants.CONDITION.autoRotationBelow).length;
+    const recent = (state.inbox ?? []).some((m) => m.title === '골키퍼 부족' && m.season === state.time.season && state.time.day - m.day < 7);
+    if (id === state.userClubId && (gkCount() < minGk || fit === 0) && !recent) {
+      mail(state, [{ kind: 'GENERAL', title: '골키퍼 부족', body: `등록 골키퍼 ${gkCount()}명, 그중 바로 뛸 만한(컨디션 ${EngineConstants.CONDITION.autoRotationBelow} 이상) 선수 ${fit}명이에요. 골키퍼를 ${minGk}명 이상 두세요.`, clubId: id }]);
     }
   }
 }

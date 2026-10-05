@@ -175,7 +175,7 @@ describe('이적 연결 (M4.4)', () => {
     expect(snap(s).players[p.id]!.clubId).toBeNull();
     expect(s.getFinance().balance).toBe(bal - q.penalty);
     expect(userLedger(s).at(-1)).toMatchObject({ kind: 'RELEASE_PENALTY', amount: -q.penalty });
-    expect(s.getInbox()[0]).toMatchObject({ kind: 'PLAYER_RELEASED', playerId: p.id });
+    expect(s.getInbox().find((m) => m.kind === 'PLAYER_RELEASED')).toMatchObject({ playerId: p.id }); // GK 를 방출하면 '골키퍼 부족' 경고가 맨 앞일 수 있다
     expect(codeOf(() => s.releasePlayer(p.id))).toBe('NOT_FOUND');
     // 18명 아래로 내려도 이번 시즌 우리가 방출한 선수는 긴급 FA 로 다시 데려오지 않는다(M4.8).
     // 시즌 1 은 FA 풀이 방금 방출한 선수뿐이라 채울 후보가 없다

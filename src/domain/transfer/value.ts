@@ -49,8 +49,12 @@ export function h(...keys: readonly (string | number)[]): number {
 
 export const round1k = (x: number): Kc => Math.round(x / 1000) * 1000;
 
-/** 금액 표시 (메시지용): 12.75M */
-export const fmtM = (kc: Kc): string => `${(kc / 1_000_000).toFixed(2)}M`;
+/** 금액 표시 (메시지용): UI formatKc 와 같은 규칙 — 12.75M, 1M 미만은 40K, 음수는 − */
+export const fmtM = (kc: Kc): string => {
+  const a = Math.abs(kc);
+  const s = kc < 0 ? '−' : '';
+  return a >= 1_000_000 ? `${s}${(a / 1_000_000).toFixed(a >= 100_000_000 ? 0 : 2)}M` : a >= 1_000 ? `${s}${(a / 1_000).toFixed(0)}K` : `${s}${a}`;
+};
 
 // ── 창 일정 (D16) ──
 

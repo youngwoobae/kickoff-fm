@@ -3,9 +3,10 @@
  * 사람 구단 것만 넣는다: clubId 가 있는 사건은 여기서 거르고, clubId 없는 사건(경고·정지)은 호출자가 사람 구단 선수만 넘긴다.
  * 이적 결과(BID_WON 등) 문구는 M4.3 이 같은 draft 형식으로 만들어 appendInbox 로 넣는다.
  */
-import type { ClubId, Day, InboxKind, InboxMessage, Kc, LifecycleEvent, PlayerId, SeasonNo } from '../../types';
+import type { ClubId, Day, InboxKind, InboxMessage, LifecycleEvent, PlayerId, SeasonNo } from '../../types';
 import { SEASON_DAYS } from '../economy/economy';
 import type { ContractEvent } from '../contract/contract';
+import { fmtM } from '../transfer/value';
 
 /** D27: 3시즌(84일) 지나면 삭제. 개수 상한 [PH] */
 export const INBOX = { keepDays: 3 * SEASON_DAYS, maxMessages: 300 } as const;
@@ -17,8 +18,6 @@ export interface InboxContext {
   /** 선수 이름 (없으면 id) */
   nameOf: (id: PlayerId) => string | undefined;
 }
-
-const fmtM = (kc: Kc) => `${(kc / 1_000_000).toFixed(2)}M`;
 
 /** 수명주기 사건 → 편지 초안. 편지 대상이 아니면 null (성장·노화·AI 구단 사건 등) */
 export function lifecycleDraft(e: LifecycleEvent, ctx: InboxContext): InboxDraft | null {

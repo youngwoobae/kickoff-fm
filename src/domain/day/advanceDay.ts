@@ -591,7 +591,7 @@ export function advanceDayState(input: GameState, nowIso: string): AdvanceOutcom
       state.pendingOutcome = { ...judgeSeason(state.time.season, state.settings.tier, table, state.clubs), leagueId: user.id, movements: seasonMovements(state, tables) };
       seasonOutcome = state.pendingOutcome;
       const row = table.find((r) => r.clubId === state.userClubId);
-      if (row) notices.push(`최종 순위 ${row.position}위 — ${state.pendingOutcome.labels[state.userClubId] ?? 'STAYED'}`);
+      if (row) notices.push(`최종 순위 ${row.position}위 — ${{ PROMOTED: '승격', RELEGATED: '강등', STAYED: '잔류' }[state.pendingOutcome.labels[state.userClubId] ?? 'STAYED']}`);
     }
   }
 

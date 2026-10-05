@@ -57,6 +57,18 @@ describe('M4.8 도메인 수정', () => {
     expect(registered(s).some((p) => released.has(p.id))).toBe(false);
   }, 60_000);
 
+  it('GK 하한: 사람 구단 GK 가 1명이 되면 골키퍼 부족 편지, 7일 안에는 다시 보내지 않는다', () => {
+    const s = mk();
+    goTo(s, 1, 3);
+    const gks = registered(s).filter((p) => p.primary === 'GK');
+    for (const g of gks.slice(1)) s.releasePlayer(g.id); // 시즌 1 FA 풀엔 방금 방출한 GK 뿐 → 긴급 FA 로 못 채움
+    expect(registered(s).filter((p) => p.primary === 'GK')).toHaveLength(1);
+    const warns = () => s.getInbox().filter((m) => m.title === '골키퍼 부족');
+    expect(warns()).toHaveLength(1);
+    goTo(s, 1, 6);
+    expect(warns()).toHaveLength(1);
+  }, 60_000);
+
   it('만료 예정 FA 매물(Day 28)이 우리 선수면 입찰할 수 없다', () => {
     const s = mk();
     goTo(s, 1, 28);

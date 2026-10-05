@@ -7,6 +7,7 @@ import type { ClubId, Contract, Day, Kc, LedgerEntry, PendingRenewal, Player, Pl
 import { DomainError } from '../errors';
 import { SEASON_DAYS, TIER_ECONOMY, baseSalary } from '../economy/economy';
 import { TIER_REFERENCE_OVR } from '../squad/generator';
+import { LIFECYCLE } from '../squad/lifecycle';
 
 /** 경제 13장 K5~K7, K4 일부 [PH] */
 export const CONTRACT = {
@@ -275,12 +276,14 @@ export interface EmergencyContext {
   available: number;
   /** 이번 시즌 긴급 FA 계약 수 */
   signedThisSeason: number;
+  /** 등록 GK 수: AI 와 같은 하한(LIFECYCLE.ai.minGk) 미만도 긴급 FA 사유. 없으면 보지 않는다 */
+  gk?: number;
 }
 
 /** 창 밖에서 등록 18 미만 또는 출전 가능 16 미만, 시즌당 2명 */
 export function emergencyFaAllowed(c: EmergencyContext): boolean {
   const E = CONTRACT.emergency;
-  return !c.windowOpen && (c.registered < E.minRegistered || c.available < E.minAvailable) && c.signedThisSeason < E.perSeason;
+  return !c.windowOpen && (c.registered < E.minRegistered || c.available < E.minAvailable || (c.gk ?? Infinity) < LIFECYCLE.ai.minGk) && c.signedThisSeason < E.perSeason;
 }
 
 /** 긴급 FA 계약: 연봉 = ask(주전 가산 없음), 계약금 0, 1시즌. 캡 검사는 호출자(fitsCap) */
