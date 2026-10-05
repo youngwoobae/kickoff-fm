@@ -168,9 +168,13 @@ export function spendBank(p: LifePlayer, rng: Rng, attrMult: Partial<Record<Attr
   return { ...next, ovr, scoutRange: scoutRangeOf(next) };
 }
 
-/** 구단 훈련 포커스 (없으면 BALANCED) */
+/** 허용 훈련 포커스 (검사는 이 배열로: `in` 은 toString·constructor 같은 프로토타입 키도 통과시킨다, M4) */
+export const TRAINING_FOCI = Object.keys(LIFECYCLE.focus) as readonly TrainingFocus[];
+
+/** 구단 훈련 포커스 (없거나 모르는 값이면 BALANCED — 이미 오염된 세이브도 매일 실패하지 않게) */
 export function trainingFocusOf(club: { training?: { focus: TrainingFocus } }): TrainingFocus {
-  return club.training?.focus ?? 'BALANCED';
+  const f = club.training?.focus;
+  return f !== undefined && TRAINING_FOCI.includes(f) ? f : 'BALANCED';
 }
 
 // ── 시점별 진입점 ──

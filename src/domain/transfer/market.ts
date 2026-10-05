@@ -22,7 +22,7 @@ import { DomainError } from '../errors';
 import { baseSalary, SEASON_DAYS } from '../economy/economy';
 import { TIER_REFERENCE_OVR, generatePlayer } from '../squad/generator';
 import { LIFECYCLE, scoutRangeOf } from '../squad/lifecycle';
-import { capCharge, capUsage, maxContractSeasons, salaryFloor } from '../contract/contract';
+import { CONTRACT, capCharge, capUsage, maxContractSeasons, salaryFloor } from '../contract/contract';
 import { TRANSFER, daysAfterSettle, fmtM, playerValue, round1k } from './value';
 
 /** 정산·입찰에 필요한 구단 재정 요약 (M4.4 가 GameState 에서 만든다) */
@@ -174,9 +174,12 @@ export function validateBid(args: {
   squad?: readonly Player[];
   /** 매물 선수 (캡 산입 계산용, squad 와 함께) */
   player?: Player;
+  /** 이 구단이 이번 시즌 방출한 선수(GameState.releasedThisSeason). FA 매물이면 입찰 금지 (M6: 방출 → 싼 연봉 재영입 우회) */
+  releasedIds?: ReadonlySet<PlayerId>;
 }): Bid {
   const { window: w, listing: l, input, club } = args;
   if (l.sellerClubId === club.id) throw new DomainError('BID_OUT_OF_RANGE', '우리 구단 매물에는 입찰할 수 없어요', ['OWN_LISTING']);
+  if (l.kind === 'FA' && args.releasedIds?.has(l.playerId)) throw new DomainError('BID_OUT_OF_RANGE', '이번 시즌에 우리가 방출한 선수는 FA 로 다시 데려올 수 없어요', ['RELEASED']);
   if (args.playerClubId === club.id) throw new DomainError('BID_OUT_OF_RANGE', '우리 구단 선수예요. 계약이 끝나기 전에 재계약(Day 20~27)으로 붙잡아 주세요', ['OWN_PLAYER']);
   if (club.balance < 0) throw new DomainError('NEGATIVE_BALANCE_LOCK', '잔액이 0 아래인 동안에는 입찰할 수 없어요');
   let bid: Bid;
@@ -343,31 +346,51 @@ export interface NegativeBalanceStatus {
   forceSale: boolean;
 }
 
-/** 일일 처리 뒤 호출. since = Finance.negativeSinceDay (시즌 경계를 넘으면 28일 순환으로 센다) */
+/**
+ * 일일 처리 뒤 호출(매일). since = Finance.negativeSinceDay (시즌 경계를 넘으면 28일 순환으로 센다).
+ * 강제 매각 단계에 들어가면 돌려주는 negativeSinceDay 를 "오늘 − 2일"로 당긴다(m1): 저장값이 Day 하나뿐이라
+ * 음수가 28일 넘게 이어지면 경과일이 0 으로 돌아가 이틀씩 매각이 멈추던 문제를 막는다. 호출자는 매일 이 값을 저장한다.
+ */
 export function negativeBalanceStatus(balance: Kc, since: Day | undefined, day: Day): NegativeBalanceStatus {
   if (balance >= 0) return { locked: false, forceSale: false };
   const start = since ?? day;
-  const elapsed = (day - start + SEASON_DAYS) % SEASON_DAYS;
-  return { negativeSinceDay: start, locked: true, forceSale: elapsed >= TRANSFER.forcedSaleAfterDays };
+  const after = TRANSFER.forcedSaleAfterDays;
+  const forceSale = (day - start + SEASON_DAYS) % SEASON_DAYS >= after;
+  return { negativeSinceDay: forceSale ? ((day - after - 1 + SEASON_DAYS) % SEASON_DAYS) + 1 : start, locked: true, forceSale };
 }
 
 /**
  * 시스템 강제 매각 0.5V: 연봉 높은 비주전부터 잔액 ≥ 0 이 될 때까지. 매각 선수는 세계에서 사라진다(해외, 풀 세탁 방지).
  * benchIds = "최근 5경기 선발 ≤ 2" 선수 (호출자가 경기 기록으로 계산). 없으면 OVR 상위 11명 밖 선수.
+ * 하한(C1·M5, 경제 5.4): 등록(임시 제외) 18명 아래로는 팔지 않고, 출전 가능 선수는 16명 아래로 내리지 않는다.
+ * exclude = 팔 수 없는 선수(이번 시즌 긴급 FA 로 공짜 영입한 선수 — 무상 영입 → 0.5V 매각 순환 차단).
  */
-export function forcedSales(args: { clubId: ClubId; balance: Kc; players: readonly Player[]; benchIds?: ReadonlySet<PlayerId> }): { sold: PlayerId[]; money: TransferMoney[]; balance: Kc } {
+export function forcedSales(args: {
+  clubId: ClubId;
+  balance: Kc;
+  players: readonly Player[];
+  benchIds?: ReadonlySet<PlayerId>;
+  exclude?: ReadonlySet<PlayerId>;
+}): { sold: PlayerId[]; money: TransferMoney[]; balance: Kc } {
+  const E = CONTRACT.emergency;
   const own = args.players.filter((p) => p.clubId === args.clubId && !p.isTemporary);
   const starters = new Set([...own].sort((a, b) => b.ovr - a.ovr || (a.id < b.id ? -1 : 1)).slice(0, 11).map((p) => p.id));
   const bench = own
-    .filter((p) => (args.benchIds ? args.benchIds.has(p.id) : !starters.has(p.id)))
+    .filter((p) => (args.benchIds ? args.benchIds.has(p.id) : !starters.has(p.id)) && !args.exclude?.has(p.id))
     .sort((a, b) => b.contract.salary - a.contract.salary || (a.id < b.id ? -1 : 1));
+  const canPlay = (p: Player) => p.availability.injuryDays === 0 && p.availability.suspendedMatches === 0;
+  let registered = own.length;
+  let available = own.filter(canPlay).length;
   let balance = args.balance;
   const sold: PlayerId[] = [];
   const money: TransferMoney[] = [];
   for (const p of bench) {
-    if (balance >= 0) break;
+    if (balance >= 0 || registered <= E.minRegistered) break;
+    if (canPlay(p) && available <= E.minAvailable) continue;
     const amount = round1k(TRANSFER.forcedSaleRate * playerValue(p));
     balance += amount;
+    registered--;
+    if (canPlay(p)) available--;
     sold.push(p.id);
     money.push({ clubId: args.clubId, kind: 'FORCED_SALE', amount, playerId: p.id });
   }

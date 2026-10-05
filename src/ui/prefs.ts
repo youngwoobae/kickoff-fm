@@ -16,6 +16,8 @@ export interface UiPrefs {
   fontScale: FontScale;
   motion: MotionPref;
   replaySpeed: ReplaySpeed;
+  /** 2D 경기 화면 (M6.5) */
+  pitch2d: boolean;
   /** 여러 날 진행 전 확인 */
   confirmMultiDay: boolean;
   /** 플랜 미확정으로 넘길 때 확인 */
@@ -32,6 +34,7 @@ export const DEFAULT_PREFS: UiPrefs = {
   fontScale: 1,
   motion: 'system',
   replaySpeed: '2',
+  pitch2d: true,
   confirmMultiDay: true,
   confirmUnsubmitted: false,
   tutorial: { status: 'new', step: 1 },
@@ -50,6 +53,7 @@ export function normalizePrefs(raw: unknown): UiPrefs {
     fontScale: pick(r.fontScale, [1, 1.125, 1.25] as const, DEFAULT_PREFS.fontScale),
     motion: pick(r.motion, ['system', 'reduce', 'full'] as const, DEFAULT_PREFS.motion),
     replaySpeed: pick(r.replaySpeed, ['1', '2', '4', 'instant'] as const, DEFAULT_PREFS.replaySpeed),
+    pitch2d: typeof r.pitch2d === 'boolean' ? r.pitch2d : DEFAULT_PREFS.pitch2d,
     confirmMultiDay: typeof r.confirmMultiDay === 'boolean' ? r.confirmMultiDay : DEFAULT_PREFS.confirmMultiDay,
     confirmUnsubmitted: typeof r.confirmUnsubmitted === 'boolean' ? r.confirmUnsubmitted : DEFAULT_PREFS.confirmUnsubmitted,
     tutorial: { status: pick(t.status, ['new', 'active', 'done', 'skipped'] as const, 'new'), step },

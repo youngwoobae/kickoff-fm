@@ -1473,13 +1473,99 @@ h3 {
 }
 .replay-controls {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr auto;
   gap: 8px;
   align-items: center;
 }
 .replay-controls > .segmented {
   grid-column: 1 / -1;
   grid-row: 2;
+}
+/* 2D 중계 (M6.5). 노드·스타일만 — filter·그라데이션 애니메이션 없음 */
+.pitch {
+  margin: 0;
+  aspect-ratio: 105 / 68;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--pitch);
+}
+.pitch svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+@media (max-height: 599px) {
+  .pitch {
+    aspect-ratio: auto;
+    height: 160px;
+  }
+}
+.pitch-bg {
+  fill: var(--pitch);
+}
+.pitch-lines {
+  fill: none;
+  stroke: var(--pitch-line);
+  stroke-width: 0.4;
+}
+.pitch-goal-flash {
+  fill: #fde047;
+  opacity: 0;
+  animation: goal-flash 0.6s ease-out;
+}
+@keyframes goal-flash {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.dot circle {
+  stroke-width: 0.5;
+}
+.dot.is-us circle {
+  fill: var(--accent);
+  stroke: #fff;
+}
+.dot.is-them circle {
+  fill: none;
+  stroke: #f8fafc;
+  stroke-width: 0.6;
+}
+.dot .dot-ring {
+  fill: none;
+  stroke: #fde047;
+  stroke-width: 0.5;
+}
+.card-yellow {
+  fill: #facc15;
+  stroke: #111827;
+  stroke-width: 0.2;
+}
+.card-red {
+  fill: #dc2626;
+  stroke: #fff;
+  stroke-width: 0.2;
+}
+.ball polygon {
+  fill: #fff;
+  stroke: #111827;
+  stroke-width: 0.35;
+}
+.pitch-switch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 10px;
+  font-weight: 700;
+}
+.pitch-switch input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent);
 }
 .feed {
   list-style: none;

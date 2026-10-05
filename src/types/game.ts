@@ -147,6 +147,13 @@ export interface GameState {
   pendingRenewals?: PendingRenewal[];
   /** 2.2.1: 사용자 구단 강등 시즌 무위약 방출권 남은 장수. 없으면 0 */
   freeReleasesLeft?: number;
+  /**
+   * 2.4.1 (M6 리뷰): 이번 시즌 구단이 방출한 선수. 긴급 FA·FA 입찰에서 그 구단은 다시 데려올 수 없다(방출 → 재영입 우회 차단).
+   * 편지함(300통·84일 보관)이 아니라 상태로 둔다. 시즌 경계에서 비운다. 없으면 {}
+   */
+  releasedThisSeason?: Record<ClubId, PlayerId[]>;
+  /** 2.4.1 (C1 리뷰): 이번 시즌 긴급 FA 로 계약한 선수. 시즌당 상한(5.4)과 강제 매각 제외에 쓴다. 시즌 경계에서 비운다. 없으면 {} */
+  emergencySignedThisSeason?: Record<ClubId, PlayerId[]>;
   /** 2.3.0 (M5.1): 사람 구단 유스 후보 (새 시즌 Day 1 ~ Day 8 00:00). 없으면 결정할 후보 없음 */
   youthIntake?: YouthIntake;
   actionLog: ActionLogEntry[];

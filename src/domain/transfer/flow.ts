@@ -8,7 +8,7 @@ import type { ClubId, GameState, Kc, LedgerEntry, LifecycleEvent, PendingRenewal
 import { TIER_ECONOMY, SEASON_DAYS, promotionBonus } from '../economy/economy';
 import { clubTierMap } from '../league/pyramid';
 import { TIER_REFERENCE_OVR } from '../squad/generator';
-import { CONTRACT, aiRenewals, capLimit, contractBoundary, emergencyFaSign, releaseQuote, renewalBonus, type ContractEvent } from '../contract/contract';
+import { CONTRACT, aiRenewals, capCharge, capLimit, capUsage, contractBoundary, emergencyFaAllowed, emergencyFaSign, fitsCap, releaseQuote, renewalBonus, type ContractEvent } from '../contract/contract';
 import { appendInbox, contractDraft, lifecycleDraft, type InboxContext, type InboxDraft } from '../inbox/inbox';
 import { clubPlayers, post } from '../day/advanceDay';
 import { decideYouthState, pickYouthFor } from '../career/youth';
@@ -329,12 +329,16 @@ export function negativeBalances(state: GameState, sink: LedgerEntry[], notices:
       }
       continue;
     }
-    if (f.negativeSinceDay === undefined) {
-      state.finances[id] = { ...f, negativeSinceDay: st.negativeSinceDay! };
-      if (id === state.userClubId) mailContract(state, [{ kind: 'NEGATIVE_BALANCE', clubId: id, balance: f.balance }]);
-    }
+    if (f.negativeSinceDay !== st.negativeSinceDay) state.finances[id] = { ...f, negativeSinceDay: st.negativeSinceDay! };
+    if (f.negativeSinceDay === undefined && id === state.userClubId) mailContract(state, [{ kind: 'NEGATIVE_BALANCE', clubId: id, balance: f.balance }]);
     if (!st.forceSale) continue;
-    const fs = forcedSales({ clubId: id, balance: f.balance, players: clubPlayers(state, id) });
+    const fs = forcedSales({
+      clubId: id,
+      balance: f.balance,
+      players: clubPlayers(state, id),
+      benchIds: benchIdsOf(state, id),
+      exclude: new Set(state.emergencySignedThisSeason?.[id] ?? []),
+    });
     if (!fs.sold.length) continue;
     postMoney(state, fs.money, sink);
     if (id === state.userClubId) {
@@ -344,6 +348,26 @@ export function negativeBalances(state: GameState, sink: LedgerEntry[], notices:
     removePlayers(state, new Set(fs.sold));
   }
   fillHumanSquads(state);
+}
+
+/**
+ * 강제 매각 대상 비주전 = "최근 5경기 선발 ≤ 2" (경제 6.5, M5). 경기 기록(records)은 사용자 구단 경기만 남으므로
+ * 그 구단만, 이번 시즌 최근 5경기 기록이 모두 있을 때만 계산한다. 아니면 undefined(OVR 상위 11명 밖 = 대용 규칙).
+ */
+export function benchIdsOf(state: GameState, clubId: ClubId): Set<PlayerId> | undefined {
+  if (clubId !== state.userClubId) return undefined;
+  const recent = state.fixtures
+    .filter((f) => f.season === state.time.season && f.played && (f.homeId === clubId || f.awayId === clubId))
+    .sort((a, b) => b.day - a.day || (a.id < b.id ? -1 : 1))
+    .slice(0, 5);
+  if (recent.length < 5) return undefined;
+  const starts = new Map<PlayerId, number>();
+  for (const f of recent) {
+    const r = state.records[f.id];
+    if (!r) return undefined;
+    for (const p of (r.home.clubId === clubId ? r.home : r.away).starters) starts.set(p.id, (starts.get(p.id) ?? 0) + 1);
+  }
+  return new Set(clubPlayers(state, clubId).filter((p) => (starts.get(p.id) ?? 0) <= 2).map((p) => p.id));
 }
 
 /** 매물 정리: 선수가 사라졌거나 소속이 매물과 달라진 것(경계의 은퇴·방출·풀 영입 등)과 그 입찰을 뺀다 */
@@ -412,6 +436,17 @@ export function openRenewals(state: GameState): void {
   mailContract(state, [{ kind: 'RENEWAL_OPEN', clubId: user, playerIds: expiring }]);
 }
 
+/**
+ * M2: pendingRenewals 없이 Day 20 을 지난 이전 세이브(2.2.1 전)를 불러올 때 AI 구단 재계약을 지금 채운다(보너스 없음).
+ * 그래야 사용자가 한 명을 재계약해 pendingRenewals 가 생겨도 AI 만료 예정자가 통째로 FA 가 되지 않는다.
+ * 재계약 창이 이미 끝났으면(Day 28) 사람 구단도 AI 규칙으로 채운다(예전 경계 폴백과 같은 결과). 해당 없으면 그대로.
+ */
+export function fillLegacyRenewals(state: GameState): void {
+  if (state.pendingRenewals !== undefined || state.time.day < CONTRACT.renewalOpenDay) return;
+  const closed = state.time.day > CONTRACT.renewalCloseDay;
+  state.pendingRenewals = aiRenewalsFor(state, sortedIds(state).filter((id) => closed || !isHuman(state, id)));
+}
+
 export function upsertRenewal(state: GameState, r: PendingRenewal): void {
   state.pendingRenewals = [...(state.pendingRenewals ?? []).filter((x) => x.playerId !== r.playerId), r];
 }
@@ -430,6 +465,8 @@ export function boundaryContracts(state: GameState, ending: number): ContractEve
   for (const c of Object.values(state.clubs)) if (c.playerIds.some((x) => expired.has(x))) state.clubs[c.id] = { ...c, playerIds: c.playerIds.filter((x) => !expired.has(x)) };
   state.pendingRenewals = [];
   state.signingsThisSeason = {};
+  delete state.releasedThisSeason;
+  delete state.emergencySignedThisSeason;
   return r.events;
 }
 
@@ -445,29 +482,40 @@ export function aiReleasePenalties(before: Readonly<Record<PlayerId, Player>>, r
 
 /**
  * 사람 구단 등록 18명 미만(지금 소속 기준) → FA 풀에서 긴급 FA 자동 계약(5.4: ask, 1시즌, 계약금 0).
- * 후보 제외(M4.8): 이번 시즌 그 구단이 방출한 선수(방출 편지 기준), 그 구단이 지금 입찰 중인 선수.
- * ponytail: 시즌당 2명 상한·캡 검사 없이 안전망으로만 채운다(사람 구단 이적·유스 UI 가 정상 경로). 포지션은 GK 2명만 보장, 나머지는 OVR 순
+ * 시즌당 상한(emergencyFaAllowed, 2명)과 캡 한도를 지킨다(C1). 계약한 선수는 emergencySignedThisSeason 에 남아 강제 매각에서 빠진다.
+ * 후보 제외(M4.8·M6): 이번 시즌 그 구단이 방출한 선수(releasedThisSeason 상태), 그 구단이 지금 입찰 중인 선수.
+ * 창 열림 조건은 보지 않는다: 정규 창은 경계를 넘어 Day 2 까지 열려 있어, 경계 만료 결원을 새 시즌 Day 1 에 채우려면 창 중에도 돌아야 한다(M4.8).
+ * ponytail: 포지션은 GK 2명만 보장, 나머지는 OVR 순
  */
 export function fillHumanSquads(state: GameState): void {
   const tiers = clubTierMap(state);
+  const canPlay = (p: Player) => p.availability.injuryDays === 0 && p.availability.suspendedMatches === 0;
   for (const id of sortedIds(state).filter((x) => isHuman(state, x))) {
     const squad = () => clubPlayers(state, id).filter((p) => !p.isTemporary);
-    if (squad().length >= CONTRACT.emergency.minRegistered) continue;
+    const signedIds = () => state.emergencySignedThisSeason?.[id] ?? [];
+    const allowed = () => {
+      const sq = squad();
+      return sq.length < CONTRACT.emergency.minRegistered && emergencyFaAllowed({ windowOpen: false, registered: sq.length, available: sq.filter(canPlay).length, signedThisSeason: signedIds().length });
+    };
+    if (!allowed()) continue;
     const tier = tiers.get(id) ?? state.settings.tier;
     const ref = TIER_REFERENCE_OVR[tier];
-    const released = new Set((state.inbox ?? []).filter((m) => m.kind === 'PLAYER_RELEASED' && m.clubId === id && m.season === state.time.season && m.playerId).map((m) => m.playerId!));
+    const limit = marketClubs(state).get(id)?.capLimit ?? capLimit(tier);
+    const released = new Set(state.releasedThisSeason?.[id] ?? []);
     const bidOn = new Set((state.transferMarket?.bids ?? []).filter((b) => b.clubId === id).map((b) => state.transferMarket!.listings.find((l) => l.id === b.listingId)?.playerId));
     const signed: string[] = [];
-    while (squad().length < CONTRACT.emergency.minRegistered) {
+    while (allowed()) {
       const needGk = squad().filter((p) => p.primary === 'GK').length < 2;
-      const pool = Object.values(state.players)
-        .filter((p) => p.clubId === null && p.ovr <= ref + 6 && (!needGk || p.primary === 'GK') && !released.has(p.id) && !bidOn.has(p.id))
-        .sort((a, b) => b.ovr - a.ovr || (a.id < b.id ? -1 : 1));
-      const x = pool[0];
-      if (!x) break;
-      const p = emergencyFaSign(x, id, tier);
+      const used = capUsage(clubPlayers(state, id));
+      const p = Object.values(state.players)
+        .filter((x) => x.clubId === null && x.ovr <= ref + 6 && (!needGk || x.primary === 'GK') && !released.has(x.id) && !bidOn.has(x.id))
+        .sort((a, b) => b.ovr - a.ovr || (a.id < b.id ? -1 : 1))
+        .map((x) => emergencyFaSign(x, id, tier))
+        .find((x) => fitsCap(used + capCharge(x), limit));
+      if (!p) break;
       state.players[p.id] = p;
       state.clubs[id] = { ...state.clubs[id]!, playerIds: [...state.clubs[id]!.playerIds, p.id] };
+      state.emergencySignedThisSeason = { ...state.emergencySignedThisSeason, [id]: [...signedIds(), p.id] };
       dropFromMarket(state, new Set([p.id]));
       signed.push(p.name);
     }

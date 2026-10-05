@@ -144,6 +144,8 @@ import {
   clubPlayers,
   dropFromMarket,
   fillHumanSquads,
+  fillLegacyRenewals,
+  CONTRACT,
   listingRecord,
   mailContract,
   marketClubs,
@@ -163,6 +165,7 @@ import {
   validateBid,
   type CapChargeInput,
   LIFECYCLE,
+  TRAINING_FOCI,
   decideYouthState,
   trainingFocusOf,
 } from '../domain';
@@ -251,6 +254,77 @@ function tacticIssues(formation: string, roles: readonly string[], instr: TeamIn
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const PHASES = ['MATCHDAY', 'OFFSEASON', 'SEASON_OVER'];
+const isInt = (v: unknown, lo = -Infinity, hi = Infinity): v is number => typeof v === 'number' && Number.isInteger(v) && v >= lo && v <= hi;
+const optInt = (v: unknown, lo = -Infinity, hi = Infinity) => v === undefined || isInt(v, lo, hi);
+const isStrArr = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === 'string');
+
+/** 선수 형태 (소속·FA·NPC·유스 후보 공통). 2.3.0 yellowAccum 0~4 */
+function playerProblem(p: unknown): boolean {
+  if (!isObj(p) || typeof p.id !== 'string' || !isObj(p.attrs) || !isObj(p.availability) || !isObj(p.contract) || !isObj(p.season) || !isNum(p.condition) || !isNum(p.ovr)) return true;
+  const a = p.availability;
+  const c = p.contract;
+  return !isInt(a.injuryDays, 0) || !isInt(a.suspendedMatches, 0) || !optInt(a.yellowAccum, 0, LIFECYCLE.yellowLimit - 1) || !isInt(c.seasonsLeft, 0) || !isInt(c.salary, 0) || !optInt(c.bonusPerSeason, 0);
+}
+
+/** 2.2.1 이적 시장 형태 (M3). 창·매물·입찰·NPC 선수 */
+function marketProblem(tm: unknown, clubs: Record<string, unknown>): string | null {
+  if (!isObj(tm) || !isObj(tm.window) || !Array.isArray(tm.listings) || !Array.isArray(tm.bids) || !isObj(tm.npcPlayers)) return '이적 시장 형식 오류';
+  const w = tm.window;
+  if (!['MID', 'REGULAR'].includes(w.kind as string) || !isInt(w.season, 1) || !isInt(w.openDay, 1, 28) || !isInt(w.settleDay, 1, 28) || !isInt(w.settleSeason, 1)) return '이적 창 형식 오류';
+  const ids = new Set<unknown>();
+  for (const l of tm.listings as unknown[]) {
+    if (!isObj(l) || typeof l.id !== 'string' || typeof l.playerId !== 'string' || !['NPC', 'FA', 'CLUB'].includes(l.kind as string)) return '이적 매물 형식 오류';
+    if (!isInt(l.value, 0) || !isInt(l.minPrice, 0) || !isInt(l.maxPrice, l.minPrice as number) || !optInt(l.bonusMax, 0) || !optInt(l.salaryFloor, 0)) return `이적 매물 ${l.id} 금액 오류`;
+    if (l.sellerClubId !== null && !isObj(clubs[l.sellerClubId as string])) return `이적 매물 ${l.id} 판매 구단 오류`;
+    ids.add(l.id);
+  }
+  for (const b of tm.bids as unknown[]) {
+    if (!isObj(b) || !ids.has(b.listingId) || !isObj(clubs[b.clubId as string]) || !isInt(b.placedDay, 1, 28)) return '입찰 형식 오류';
+    if (!optInt(b.fee, 0) || !optInt(b.bonus, 0) || !optInt(b.salary, 0) || !optInt(b.seasons, 1, 4)) return '입찰 금액 오류';
+  }
+  for (const p of Object.values(tm.npcPlayers)) if (playerProblem(p)) return 'NPC 선수 형식 오류';
+  return null;
+}
+
+/** 2.2.1~2.4.1 선택 필드 (M3): 깨진 값이 커밋되면 매일 advanceDay 가 실패하거나 돈이 생긴다 */
+function careerFieldsProblem(x: Record<string, unknown>, clubs: Record<string, unknown>, players: Record<string, unknown>): string | null {
+  if (x.transferMarket !== undefined) {
+    const m = marketProblem(x.transferMarket, clubs);
+    if (m) return m;
+  }
+  if (x.pendingRenewals !== undefined) {
+    if (!Array.isArray(x.pendingRenewals)) return '재계약 형식 오류';
+    for (const r of x.pendingRenewals as unknown[]) {
+      const p = isObj(r) ? players[r.playerId as string] : undefined;
+      if (!isObj(r) || !isObj(p) || p.clubId === null || !isInt(r.salary, CONTRACT.minSalary) || !isInt(r.seasons, 1, 4) || !isInt(r.bonusPerSeason, 0)) return '재계약 형식 오류';
+    }
+  }
+  if (x.youthIntake !== undefined) {
+    const y = x.youthIntake;
+    if (!isObj(y) || !isInt(y.season, 1) || !isObj(clubs[y.clubId as string]) || !Array.isArray(y.candidates) || !isInt(y.deadlineDay, 1, 28)) return '유스 후보 형식 오류';
+    if (y.candidates.some(playerProblem) || (y.decided !== undefined && typeof y.decided !== 'boolean') || (y.promotedIds !== undefined && !isStrArr(y.promotedIds))) return '유스 후보 형식 오류';
+  }
+  if (!optInt(x.freeReleasesLeft, 0, CONTRACT.freeReleasesOnRelegation)) return '무위약 방출권 오류';
+  for (const k of ['signingsThisSeason'] as const) {
+    const v = x[k];
+    if (v !== undefined && (!isObj(v) || !Object.values(v).every((n) => isInt(n, 0)))) return `${k} 형식 오류`;
+  }
+  for (const k of ['releasedThisSeason', 'emergencySignedThisSeason'] as const) {
+    const v = x[k];
+    if (v !== undefined && (!isObj(v) || !Object.values(v).every(isStrArr))) return `${k} 형식 오류`;
+  }
+  if (x.inbox !== undefined) {
+    if (!Array.isArray(x.inbox)) return '편지함 형식 오류';
+    for (const m of x.inbox as unknown[]) {
+      if (!isObj(m) || typeof m.id !== 'string' || typeof m.kind !== 'string' || typeof m.title !== 'string' || typeof m.body !== 'string' || !isInt(m.season, 1) || !isInt(m.day, 1, 28) || typeof m.read !== 'boolean') return '편지함 형식 오류';
+    }
+  }
+  for (const [id, c] of Object.entries(clubs)) {
+    const t = (c as Record<string, unknown>).training;
+    if (t !== undefined && (!isObj(t) || !TRAINING_FOCI.includes(t.focus as TrainingFocus) || (t.next !== undefined && !TRAINING_FOCI.includes(t.next as TrainingFocus)))) return `구단 ${id} 훈련 포커스 오류`;
+  }
+  return null;
+}
 
 /**
  * 가져오기·불러오기 세이브의 구조·참조 무결성 검사. 문제가 있으면 첫 문제 문장, 없으면 null.
@@ -272,17 +346,14 @@ function saveProblem(x: unknown): string | null {
   if (typeof x.userClubId !== 'string' || !isObj(clubs[x.userClubId])) return '사용자 구단이 없습니다';
   for (const [id, c] of Object.entries(clubs)) {
     if (!isObj(c) || c.id !== id || typeof c.name !== 'string' || !Array.isArray(c.playerIds) || !isObj(c.tactics)) return `구단 ${id} 형식 오류`;
-    for (const pid of c.playerIds) {
-      const p = players[pid as string];
-      if (!isObj(p) || !isObj(p.attrs) || !isObj(p.availability) || !isObj(p.contract) || !isObj(p.season) || !isNum(p.condition) || !isNum(p.ovr)) return `선수 ${String(pid)} 형식 오류`;
-    }
+    for (const pid of c.playerIds) if (playerProblem(players[pid as string])) return `선수 ${String(pid)} 형식 오류`;
     for (const k of ['A', 'B']) {
       const sl = (c.tactics as Record<string, unknown>)[k];
       const def = isObj(sl) ? FORMATIONS[sl.formation as keyof typeof FORMATIONS] : undefined;
       if (!isObj(sl) || !def || !Array.isArray(sl.roles) || sl.roles.length !== def.slots.length || !isObj(sl.instructions) || !isNum(sl.familiarity)) return `구단 ${id} 전술 ${k} 형식 오류`;
     }
     const f = finances[id];
-    if (!isObj(f) || !isNum(f.balance) || !isNum(f.transferOnlyBudget) || !Array.isArray(f.ledger)) return `구단 ${id} 재정 형식 오류`;
+    if (!isObj(f) || !isNum(f.balance) || !isNum(f.transferOnlyBudget) || !Array.isArray(f.ledger) || !optInt(f.negativeSinceDay, 1, 28)) return `구단 ${id} 재정 형식 오류`;
   }
   for (const f of x.fixtures as unknown[]) {
     if (!isObj(f) || typeof f.id !== 'string' || !isNum(f.season) || !isNum(f.day) || !isObj(clubs[f.homeId as string]) || !isObj(clubs[f.awayId as string])) return '일정 형식 오류';
@@ -302,9 +373,11 @@ function saveProblem(x: unknown): string | null {
     }
     if (!seen.has(x.userClubId)) return '사용자 구단이 리그에 없습니다';
   }
-  // 2.2.1: 이적 시장(선택). 있으면 창·매물·입찰·NPC 선수 형태만 본다
-  const tm = x.transferMarket;
-  if (tm !== undefined && (!isObj(tm) || !isObj(tm.window) || !Array.isArray(tm.listings) || !Array.isArray(tm.bids) || !isObj(tm.npcPlayers))) return '이적 시장 형식 오류';
+  // FA 풀 선수도 매일 처리(노화·성장)를 거친다
+  for (const [id, p] of Object.entries(players)) if (playerProblem(p) || (p as Record<string, unknown>).id !== id) return `선수 ${id} 형식 오류`;
+  // 2.2.1~2.4.1 선택 필드 (M3)
+  const career = careerFieldsProblem(x, clubs, players);
+  if (career) return career;
   const ms = x.memberships as unknown[];
   if (!ms.some((m) => isObj(m) && m.userId === x.actorUserId && m.clubId === x.userClubId)) return '현재 사용자 멤버십이 없습니다';
   return null;
@@ -485,6 +558,7 @@ class LocalGameService implements GameService {
     }
     const problem = saveProblem(parsed);
     if (problem !== null) throw new GameError('SAVE_INCOMPATIBLE', `호환되지 않는 저장 데이터입니다 (${problem})`);
+    fillLegacyRenewals(parsed); // M2: Day 20 을 이 코드 없이 지난 세이브의 AI 재계약
     try {
       // 조회 경로 사전 실행: 구조 검사를 통과해도 화면이 쓰는 계산에서 깨지면 커밋하지 않는다
       this.preview(parsed);
@@ -867,6 +941,7 @@ class LocalGameService implements GameService {
         playerClubId: marketPlayer(s, listing.playerId)?.clubId ?? null,
         squad: clubPlayers(s, s.userClubId),
         player: marketPlayer(s, listing.playerId),
+        releasedIds: new Set(s.releasedThisSeason?.[s.userClubId] ?? []),
       }),
     );
     this.commitMarket(s, { ...m, bids: upsertBid(m.bids, bid) });
@@ -955,6 +1030,8 @@ class LocalGameService implements GameService {
     this.ownerOnly(s);
     const p = this.ownPlayer(s, playerId);
     if (!renewalOpen(p, s.time.day)) this.renewalNotOpen();
+    // M1: 성립한 재계약은 확정(되돌리기·재협상 없음). 다시 받으면 갱신 보너스가 두 번 나간다
+    if (s.pendingRenewals?.some((r) => r.playerId === playerId)) throw new GameError('RENEWAL_NOT_OPEN', '이미 재계약이 성립한 선수예요. 새 계약은 다음 시즌부터 적용돼요', ['ALREADY_RENEWED']);
     if (s.finances[s.userClubId]!.balance < 0 && salary > p.contract.salary) {
       throw new GameError('NEGATIVE_BALANCE_LOCK', '잔액이 0 아래인 동안에는 연봉을 올리는 재계약을 할 수 없어요');
     }
@@ -981,8 +1058,10 @@ class LocalGameService implements GameService {
     const next: GameState = { ...s, seq: s.seq + 1, players: { ...s.players }, clubs: { ...s.clubs }, finances: { ...s.finances } };
     const club = next.clubs[s.userClubId]!;
     next.clubs[s.userClubId] = { ...club, playerIds: club.playerIds.filter((id) => id !== p.id) };
-    if (r.player) next.players[p.id] = r.player;
-    else delete next.players[p.id];
+    if (r.player) {
+      next.players[p.id] = r.player;
+      next.releasedThisSeason = { ...s.releasedThisSeason, [s.userClubId]: [...(s.releasedThisSeason?.[s.userClubId] ?? []), p.id] };
+    } else delete next.players[p.id];
     if (r.freeReleasesLeft > 0) next.freeReleasesLeft = r.freeReleasesLeft;
     else delete next.freeReleasesLeft;
     dropFromMarket(next, new Set([p.id]));
@@ -1006,7 +1085,7 @@ class LocalGameService implements GameService {
   setTrainingFocus(focus: TrainingFocus): GameSnapshot {
     const s = this.require();
     this.ownerOnly(s);
-    if (!(focus in LIFECYCLE.focus)) throw new GameError('INVALID_TACTIC', `알 수 없는 훈련 포커스: ${String(focus)}`);
+    if (!TRAINING_FOCI.includes(focus)) throw new GameError('INVALID_TACTIC', `알 수 없는 훈련 포커스: ${String(focus)}`);
     const club = s.clubs[s.userClubId]!;
     const current = trainingFocusOf(club);
     const training = focus === current ? { focus: current } : { focus: current, next: focus };

@@ -29,6 +29,8 @@ import type {
   MatchId,
   MatchPlan,
   MatchReplay,
+  Lane,
+  PitchCue,
   MatchReport,
   MatchSummary,
   Membership,
@@ -1715,23 +1717,32 @@ export class FakeGameService implements GameService {
       (c: string) => `${c}의 크로스, 골키퍼가 잡아냅니다`,
       (c: string) => `${c}, 스루패스를 노렸지만 조금 길었습니다`,
     ];
-    lines.push({ minute: 0, kind: 'PERIOD', text: '킥오프!', score: [0, 0] });
+    // 2.4.0 2D 큐: rng 순서를 바꾸지 않도록 해시로만 만든다
+    const hq = (k: string) => hashString(`${fx.id}|${k}`);
+    const LANES: Lane[] = ['L', 'C', 'R'];
+    const teamOf = (c: ClubId): 'HOME' | 'AWAY' => (c === fx.homeId ? 'HOME' : 'AWAY');
+    const startersOf = (c: ClubId) => (c === fx.homeId ? rh : ra).plan.lineup.starters;
+    lines.push({ minute: 0, kind: 'PERIOD', event: 'KICK_OFF', pitch: { team: 'HOME', zone: 1, lane: 'C' }, text: '킥오프!', score: [0, 0] });
     for (let m = 3; m < 90; m += 3 + Math.floor(rng() * 4)) {
       const c = rng() < possH ? fx.homeId : fx.awayId;
       const tpl = neutral[Math.floor(rng() * neutral.length)] ?? neutral[0];
       const chance = rng() < 0.25;
-      lines.push({ minute: m, kind: chance ? 'CHANCE' : 'NEUTRAL', clubId: c, text: tpl ? tpl(clubName(c)) : '', score: scoreAt(m) });
-      if (m < 45 && m + 4 >= 45) lines.push({ minute: 45, kind: 'PERIOD', text: '전반 종료', score: scoreAt(45) });
+      const lane = LANES[hq(`l${m}`) % 3] ?? 'C';
+      const pitch: PitchCue = chance
+        ? { team: teamOf(c), zone: 2, lane, playerId: startersOf(c)[7 + (hq(`p${m}`) % 4)], chance: chances[hq(`c${m}`) % chances.length] ?? 'CROSS', onTarget: hq(`o${m}`) % 3 === 0 }
+        : { team: teamOf(c), zone: ([0, 1, 1, 2] as const)[hq(`z${m}`) % 4] ?? 1, lane };
+      lines.push({ minute: m, kind: chance ? 'CHANCE' : 'NEUTRAL', clubId: c, ...(chance ? { event: 'SHOT' as const } : {}), pitch, text: tpl ? tpl(clubName(c)) : '', score: scoreAt(m) });
+      if (m < 45 && m + 4 >= 45) lines.push({ minute: 45, kind: 'PERIOD', event: 'HALF_TIME', text: '전반 종료', score: scoreAt(45) });
     }
-    for (const g of goals) lines.push({ minute: g.minute, ...(g.addedMinute ? { addedMinute: g.addedMinute } : {}), kind: 'GOAL', clubId: g.clubId, text: `골! ${nameOf(g.playerId)} (${clubName(g.clubId)})`, score: scoreAt(g.minute) });
-    for (const y of yellowCards) lines.push({ minute: y.minute, ...(y.addedMinute ? { addedMinute: y.addedMinute } : {}), kind: 'CARD', clubId: y.clubId, text: `경고! ${clubName(y.clubId)} ${nameOf(y.playerId)}`, score: scoreAt(y.minute) });
-    for (const t of triggers) lines.push({ minute: t.minute, kind: 'TACTIC', clubId: t.clubId, text: `[전술] ${clubName(t.clubId)} 지시 발동: ${t.text}`, score: scoreAt(t.minute) });
-    for (const x of subs) lines.push({ minute: x.minute, kind: 'SUB', clubId: x.clubId, text: `교체: ${nameOf(x.out)} → ${nameOf(x.in)}`, score: scoreAt(x.minute) });
-    for (const x of injuries) lines.push({ minute: x.minute, kind: 'CARD', clubId: x.clubId, text: `${nameOf(x.playerId)} 부상으로 쓰러집니다`, score: scoreAt(x.minute) });
+    for (const g of goals) lines.push({ minute: g.minute, ...(g.addedMinute ? { addedMinute: g.addedMinute } : {}), kind: 'GOAL', clubId: g.clubId, event: 'GOAL', pitch: { team: teamOf(g.clubId), zone: 2, lane: LANES[hq(`g${g.minute}`) % 3] ?? 'C', playerId: g.playerId, chance: g.chance, onTarget: true }, text: `골! ${nameOf(g.playerId)} (${clubName(g.clubId)})`, score: scoreAt(g.minute) });
+    for (const y of yellowCards) lines.push({ minute: y.minute, ...(y.addedMinute ? { addedMinute: y.addedMinute } : {}), kind: 'CARD', clubId: y.clubId, event: 'YELLOW_CARD', text: `경고! ${clubName(y.clubId)} ${nameOf(y.playerId)}`, score: scoreAt(y.minute) });
+    for (const t of triggers) lines.push({ minute: t.minute, kind: 'TACTIC', clubId: t.clubId, event: 'TRIGGER_FIRED', text: `[전술] ${clubName(t.clubId)} 지시 발동: ${t.text}`, score: scoreAt(t.minute) });
+    for (const x of subs) lines.push({ minute: x.minute, kind: 'SUB', clubId: x.clubId, event: 'SUBSTITUTION', text: `교체: ${nameOf(x.out)} → ${nameOf(x.in)}`, score: scoreAt(x.minute) });
+    for (const x of injuries) lines.push({ minute: x.minute, kind: 'CARD', clubId: x.clubId, event: 'INJURY', text: `${nameOf(x.playerId)} 부상으로 쓰러집니다`, score: scoreAt(x.minute) });
     const order: Record<string, number> = { PERIOD: 0, GOAL: 1 };
     const added = (l: CommentaryLine) => (l as CommentaryLine & { addedMinute?: number }).addedMinute ?? 0;
     lines.sort((a, b) => a.minute - b.minute || added(a) - added(b) || (order[a.kind] ?? 2) - (order[b.kind] ?? 2));
-    lines.push({ minute: 90, kind: 'PERIOD', text: `경기 종료 ${gh} : ${ga}`, score: [gh, ga] });
+    lines.push({ minute: 90, kind: 'PERIOD', event: 'FULL_TIME', text: `경기 종료 ${gh} : ${ga}`, score: [gh, ga] });
     const momentum = Array.from({ length: 18 }, () => round2(clamp((possH - 0.5) * 2 + (rng() - 0.5) * 1.2, -1, 1)));
     const zoneBars = Array.from({ length: 18 }, () => {
       const a = rng() + 0.3;
@@ -1740,7 +1751,21 @@ export class FakeGameService implements GameService {
       const t = a + b + c;
       return [round2(a / t), round2(b / t), round2(c / t)] as [number, number, number];
     });
-    const replay: MatchReplay = { matchId: fx.id, homeId: fx.homeId, awayId: fx.awayId, lines, momentum, zoneBars };
+    const ballTrack: NonNullable<MatchReplay['ballTrack']> = Array.from({ length: 70 }, (_, i) => {
+      const t = hq(`bt${i}`) % 100 < possH * 100 ? 0 : 1;
+      return [Math.min(90, 1 + Math.floor(i * 1.3)), t, ([0, 1, 1, 2] as const)[hq(`bz${i}`) % 4] ?? 1, (hq(`bl${i}`) % 3) as 0 | 1 | 2];
+    });
+    const replay: MatchReplay = {
+      matchId: fx.id,
+      homeId: fx.homeId,
+      awayId: fx.awayId,
+      lines,
+      momentum,
+      zoneBars,
+      formations: { home: summary.home.formation, away: summary.away.formation },
+      starters: { home: [...rh.plan.lineup.starters], away: [...ra.plan.lineup.starters] },
+      ballTrack,
+    };
     return { summary, report, replay };
   }
 

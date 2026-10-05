@@ -180,13 +180,14 @@ export {
   upsertRenewal,
   boundaryContracts,
   fillHumanSquads,
+  fillLegacyRenewals,
   transferDaily,
   autoManageDay,
   payAiRenewalBonuses,
   withPendingRenewal,
 } from './transfer/flow';
 // 2.3.0 (M5.1): 훈련 포커스·유스·징계
-export { LIFECYCLE, applyDiscipline, tierScoutRange, trainingFocusOf } from './squad/lifecycle';
+export { LIFECYCLE, TRAINING_FOCI, applyDiscipline, tierScoutRange, trainingFocusOf } from './squad/lifecycle';
 export { rollTrainingFocus } from './day/advanceDay';
 export { offerYouthIntake, decideYouthState, pickYouthFor, youthDeadline } from './career/youth';
 export { youthSalary } from './economy/economy';

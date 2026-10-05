@@ -1,11 +1,11 @@
 /** M03 텍스트 중계(즉시 재생·속도) · M05 경기 리포트 (소유: B) */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CommentaryLine, MatchReplay, MatchReport, TeamInstructions } from '../../types';
 import { Badge, Card, Empty, Segmented, Stat } from '../components/kit';
 import { INSTR_LABEL, minuteText, pct, signed, stepText } from '../format';
 import { useNav } from '../app/nav';
 import { ProposeSheet } from '../plan/PlanActions';
-import { getPrefs, useReducedMotion } from '../prefs';
+import { getPrefs, setPrefs, usePrefs, useReducedMotion } from '../prefs';
 import { useAction, useGame, useIsOwner, useQuery, useService } from '../service/ServiceContext';
 
 /**
@@ -23,7 +23,8 @@ type SummaryExt = MatchReport['summary'] & {
 };
 type Added = { addedMinute?: number };
 const minOf = (l: { minute: number } & Added) => minuteText(l.minute, l.addedMinute);
-const isYellow = (l: CommentaryLine) => l.kind === 'CARD' && l.text.startsWith('경고');
+/** 2.4.0 event 우선, 없으면(구 세이브) 문구 폴백 */
+const isYellow = (l: CommentaryLine) => (l.event ? l.event === 'YELLOW_CARD' : l.kind === 'CARD' && l.text.startsWith('경고'));
 const pair = (a?: number, b?: number) => (a === undefined || b === undefined ? '–' : `${a} : ${b}`);
 
 export function MatchCenterScreen() {
@@ -72,6 +73,10 @@ export function MatchCenterScreen() {
 
 const SPEEDS = { '1': 700, '2': 300, '4': 110 } as const;
 type Speed = keyof typeof SPEEDS | 'instant';
+/** 줄 간격 = 속도 기본값 × 가중치 (온보딩_UX 4.4·4.7). 텍스트와 2D 가 같은 시계를 쓴다 */
+const WEIGHT: Record<string, number> = { GOAL: 3, SHOT: 1.5, CHANCE: 1.5, KICK_OFF: 1.5, HALF_TIME: 1.5, FULL_TIME: 1.5, PERIOD: 1.5 };
+const beatWeight = (l?: CommentaryLine) => (l ? (WEIGHT[l.event ?? l.kind] ?? 1) : 1);
+const PitchView = lazy(() => import('../match/PitchView'));
 
 function ReplayView({ matchId }: { matchId: string }) {
   const snap = useGame();
@@ -79,12 +84,24 @@ function ReplayView({ matchId }: { matchId: string }) {
   const { go } = useNav();
   const q = useQuery((s) => s.getMatchReplay(matchId), [matchId]);
   const replay: MatchReplay | undefined = q.data;
-  const [shown, setShown] = useState(0);
+  const [shown, setShown] = useState(1);
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState<Speed>(() => getPrefs().replaySpeed);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const total = replay?.lines.length ?? 0;
   const reduceMotion = useReducedMotion();
+  const { pitch2d } = usePrefs();
+  const catalog = useQuery((s) => s.getCatalog()).data;
+  const formations = useMemo(
+    () => ({
+      home: replay?.formations && catalog?.formations.find((f) => f.id === replay.formations?.home),
+      away: replay?.formations && catalog?.formations.find((f) => f.id === replay.formations?.away),
+    }),
+    [replay, catalog],
+  );
+  const names = useMemo(() => ({ home: snap.clubs[replay?.homeId ?? '']?.shortName ?? '홈', away: snap.clubs[replay?.awayId ?? '']?.shortName ?? '원정' }), [snap.clubs, replay]);
+  const players = snap.players;
+  const playerName = useCallback((id: string) => players[id]?.name, [players]);
 
   useEffect(() => {
     try {
@@ -103,7 +120,7 @@ function ReplayView({ matchId }: { matchId: string }) {
       return;
     }
     if (!playing || shown >= total) return;
-    timer.current = setTimeout(() => setShown((n) => Math.min(total, n + 1)), SPEEDS[speed]);
+    timer.current = setTimeout(() => setShown((n) => Math.min(total, n + 1)), SPEEDS[speed] * beatWeight(replay.lines[Math.max(1, shown) - 1]));
     return () => clearTimeout(timer.current);
   }, [replay, playing, shown, total, speed]);
 
@@ -144,6 +161,21 @@ function ReplayView({ matchId }: { matchId: string }) {
           ))}
         </div>
       </Card>
+      {pitch2d && (
+        <Suspense fallback={<div className="pitch" />}>
+          <PitchView
+            replay={replay}
+            index={visible.length - 1}
+            beatMs={speed === 'instant' || !playing ? 0 : SPEEDS[speed] * beatWeight(cur)}
+            fast={speed === '4'}
+            reduced={reduceMotion}
+            userSide={replay.awayId === snap.userClubId ? 'AWAY' : 'HOME'}
+            names={names}
+            formations={formations}
+            playerName={playerName}
+          />
+        </Suspense>
+      )}
       {lastTactic && (
         <div className="tactic-banner" role="status">
           📋 {minOf(lastTactic)} {lastTactic.text}
@@ -168,6 +200,10 @@ function ReplayView({ matchId }: { matchId: string }) {
         <button type="button" className="btn btn-ghost" onClick={() => setShown(total)}>
           ⏩ 결과로
         </button>
+        <label className="pitch-switch">
+          <input type="checkbox" role="switch" checked={pitch2d} onChange={(e) => setPrefs({ pitch2d: e.target.checked })} />
+          2D
+        </label>
       </div>
       <ol className="feed" aria-label="텍스트 중계">
         {[...visible].reverse().map((l, i) => (

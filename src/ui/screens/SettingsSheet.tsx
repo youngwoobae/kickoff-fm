@@ -4,6 +4,7 @@
  */
 import { useCallback, useState } from 'react';
 import { createPortal } from 'react-dom';
+import type { BuildInfo } from '../../services';
 import { Card, Segmented, Sheet, Toggle } from '../components/kit';
 import { useToast } from '../components/Toast';
 import { downloadText } from '../format';
@@ -14,16 +15,13 @@ import { restartTour } from '../tutorial/Tour';
 
 const APP_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '–';
 
-/** 계약에 아직 없는 선택 메서드 (2.3 백엔드 요청). 있으면 버전 줄에 덧붙인다 */
-type BuildInfo = { engineVersion: string; contractVersion: string; saveSchema: number };
-
 export function SettingsSheet({ open, onClose, inGame }: { open: boolean; onClose: () => void; inGame: boolean }) {
   const prefs = usePrefs();
   const service = useService();
   const act = useAsyncAction();
   const toast = useToast();
   const { go } = useNav();
-  const build = (service as { getBuildInfo?: () => BuildInfo }).getBuildInfo?.();
+  const build: BuildInfo | undefined = service.getBuildInfo?.();
   const slot = inGame ? (service.getActiveSlot?.() ?? null) : null;
 
   const replayTour = () => {
@@ -96,6 +94,7 @@ export function SettingsSheet({ open, onClose, inGame }: { open: boolean; onClos
             ]}
           />
         </div>
+        <Toggle label="2D 경기 화면" hint="끄면 텍스트 중계만 보여요. 배터리를 아낄 수 있어요" checked={prefs.pitch2d} onChange={(pitch2d) => setPrefs({ pitch2d })} />
       </Card>
 
       {inGame && (
