@@ -320,7 +320,7 @@ function bestAttacker(t: EngineTeamInput): string {
   return best;
 }
 
-/** 상성 행렬 한 경기 (스타일 적합 스쿼드, 중립) — sim-out 튜닝 스크립트와 같은 경로 */
+/** 상성 행렬 한 경기 (스타일 적합 스쿼드, 중립) */
 function matrixPlay(R: Runner, p: StyleId, s: StyleId, i: number) {
   const fx = STYLE_FIT_MODS[p];
   const fy = STYLE_FIT_MODS[s];
@@ -337,18 +337,6 @@ export function styleMatrixMatch(seed: number, cap: TacticCap, p: StyleId, s: St
     matrixRunners.set(k, R);
   }
   const { r, xIsHome } = matrixPlay(R, p, s, i);
-  return { r, xIsHome };
-}
-
-/** 튜닝·검증용: FORMATION_PARITY 와 같은 시드·스쿼드로 (fa vs fb) i 번째 경기 */
-export function formationParityMatch(seed: number, cap: TacticCap, fa: FormationId, fb: FormationId, i: number, extra: Partial<EngineConfig> = {}): { r: MatchResult; xIsHome: boolean } {
-  const k = `${seed}|${cap}`;
-  let R = matrixRunners.get(k);
-  if (!R) {
-    R = { factory: new TeamFactory(seed), cap, seed };
-    matrixRunners.set(k, R);
-  }
-  const { r, xIsHome } = play(R, `FP-${fa}-${fb}`, i, { ovr: BASE_OVR, pkg: formationPkg(fa) }, { ovr: BASE_OVR, pkg: formationPkg(fb) }, { neutralVenue: true, ...extra });
   return { r, xIsHome };
 }
 

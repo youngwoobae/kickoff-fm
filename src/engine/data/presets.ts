@@ -222,7 +222,6 @@ export const PRESETS = Object.fromEntries(
 ) as Record<PresetId, PresetDef>;
 
 export const PRESET_IDS = Object.keys(PRESETS) as PresetId[];
-export const BOT_STYLE_IDS = STYLE_IDS.filter((s): s is BotStyle => s !== 'BALANCED');
 
 /** BotStyle(8종) → 레거시 표시 태그(5종) */
 export function legacyBotTag(style: BotStyle): BotStyleTag {

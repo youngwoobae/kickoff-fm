@@ -1,9 +1,9 @@
 /** 계약 2.5.0: 로컬 프로필(한 기기 핫시트) — 멤버 관리·전환·역할별 제안 영역·제안 작성자·이적/재계약 제안·구단주 PIN·이전 세이브 */
 import { describe, expect, it } from 'vitest';
+import { clock } from '../helpers';
 import { createGameService, createMemoryStorage, isGameError, type GameService } from '../../src/services';
 import type { GameErrorCode, GameState } from '../../src/types';
 
-const clock = { nowIso: () => '2026-10-05T00:00:00.000Z' };
 type Svc = Required<GameService>;
 const mk = (seed = 7): Svc => {
   const s = createGameService({ storage: createMemoryStorage(), clock }) as Svc;

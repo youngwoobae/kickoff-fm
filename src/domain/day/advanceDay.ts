@@ -122,10 +122,6 @@ export function starterOvr(players: readonly Player[]): number {
   return top.length > 0 ? top.reduce((s, p) => s + p.ovr, 0) / top.length : 0;
 }
 
-export function fixtureFor(state: GameState, clubId: ClubId, day: number): Fixture | undefined {
-  return state.fixtures.find((f) => f.season === state.time.season && f.day === day && (f.homeId === clubId || f.awayId === clubId));
-}
-
 function ts(state: GameState): GameTimestamp {
   return { season: state.time.season, day: state.time.day, seq: state.seq };
 }

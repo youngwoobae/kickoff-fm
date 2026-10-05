@@ -1,10 +1,10 @@
 /** M4.4: 이적·계약·편지함 서비스 연결 (창 열림 → 입찰 → AI 입찰 → 정산, 판매, 재계약, 방출, 만료 FA, 강제 매각, 결정성, 이전 세이브) */
 import { describe, expect, it } from 'vitest';
+import { clock } from '../helpers';
 import { createGameService, createMemoryStorage, isGameError, type GameService } from '../../src/services';
 import { TRANSFER } from '../../src/domain';
 import type { GameErrorCode, GameState, LedgerEntry } from '../../src/types';
 
-const clock = { nowIso: () => '2026-10-04T00:00:00.000Z' };
 type Svc = Required<GameService>;
 const mk = (seed = 7): Svc => {
   const s = createGameService({ storage: createMemoryStorage(), clock }) as Svc;

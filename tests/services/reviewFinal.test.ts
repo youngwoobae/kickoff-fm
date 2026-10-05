@@ -1,11 +1,11 @@
 /** M7.4 최종 리뷰 회귀 (docs/코드리뷰_최종.md) */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { clock } from '../helpers';
 import { createGameService, createMemorySlotStorage, isGameError, type GameService } from '../../src/services';
 import { packBody, unpackBody } from '../../src/services/idbStorage';
 import { guardSlotOwner, type SlotChannel } from '../../src/ui/app/slotGuard';
 import type { GameState } from '../../src/types';
 
-const clock = { nowIso: () => '2026-10-05T00:00:00.000Z' };
 type Svc = Required<GameService>;
 
 /** 같은 저장소를 보는 두 창 + 서로 이어진 채널 */

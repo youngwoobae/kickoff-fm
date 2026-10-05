@@ -1,10 +1,10 @@
 /** 코드 리뷰 M4·M5 (docs/코드리뷰_M4M5.md) Critical·Major 회귀 테스트. 모두 수정 전 코드에서 실패한다 */
 import { beforeAll, describe, expect, it } from 'vitest';
+import { clock } from '../helpers';
 import { createGameService, createMemoryStorage, isGameError, type GameService } from '../../src/services';
 import { TIER_REFERENCE_OVR, benchIdsOf, clubPlayers, clubTierMap, playerValue, trainingFocusOf } from '../../src/domain';
 import type { GameErrorCode, GameState, Player } from '../../src/types';
 
-const clock = { nowIso: () => '2026-10-05T00:00:00.000Z' };
 type Svc = Required<GameService>;
 const fresh = () => createGameService({ storage: createMemoryStorage(), clock }) as Svc;
 const mk = (seed = 7): Svc => {

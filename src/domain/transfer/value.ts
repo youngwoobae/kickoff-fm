@@ -49,7 +49,7 @@ export function h(...keys: readonly (string | number)[]): number {
 
 export const round1k = (x: number): Kc => Math.round(x / 1000) * 1000;
 
-/** 금액 표시 (메시지용): UI formatKc 와 같은 규칙 — 12.75M, 1M 미만은 40K, 음수는 − */
+/** 금액 표시 (메시지용, UI formatKc 도 services 경유로 이것을 쓴다) — 12.75M, 1M 미만은 40K, 음수는 − */
 export const fmtM = (kc: Kc): string => {
   const a = Math.abs(kc);
   const s = kc < 0 ? '−' : '';

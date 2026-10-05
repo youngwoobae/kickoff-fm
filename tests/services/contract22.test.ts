@@ -1,9 +1,9 @@
 /** 서비스 계약 2.2.0 (M4.1, 추가만): 이적·계약·받은 편지함 메서드의 안전한 기본 구현 */
 import { describe, expect, it } from 'vitest';
+import { clock } from '../helpers';
 import { CONTRACT_VERSION, createGameService, createMemoryStorage, isGameError, type GameService } from '../../src/services';
 import type { GameErrorCode, InboxMessage } from '../../src/types';
 
-const clock = { nowIso: () => '2026-10-04T00:00:00.000Z' };
 const mk = (): GameService => {
   const s = createGameService({ storage: createMemoryStorage(), clock });
   s.newGame({ seed: 5 });
@@ -21,7 +21,7 @@ function codeOf(fn: () => unknown): GameErrorCode | null {
 }
 
 describe('서비스 계약 2.2.0 (2.2.1 연결 뒤에도 유지되는 부분)', () => {
-  it('버전', () => {
+  it('계약 버전 (유일한 버전 단언)', () => {
     expect(CONTRACT_VERSION).toBe('2.5.0');
     expect(mk().contractVersion).toBe('2.5.0');
   });

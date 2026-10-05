@@ -1,9 +1,9 @@
 /** 서비스 통합 테스트: 공개 API(services/index)만 사용 */
 import { describe, expect, it } from 'vitest';
+import { clock } from '../helpers';
 import { createGameService, createMemoryStorage, isGameError, type GameService } from '../../src/services';
 import type { MatchPlan } from '../../src/types';
 
-const clock = { nowIso: () => '2026-09-27T00:00:00.000Z' };
 
 function svc(storage = createMemoryStorage()): GameService {
   return createGameService({ storage, clock });

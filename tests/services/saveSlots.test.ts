@@ -1,7 +1,7 @@
 /** 계약 2.0.0: 세이브 슬롯·비동기 시작·write-behind (공개 API 만 사용) */
 import { describe, expect, it } from 'vitest';
+import { clock } from '../helpers';
 import {
-  CONTRACT_VERSION,
   SAVE_SLOT_IDS,
   createGameService,
   createLocalStorageSlotStorage,
@@ -17,7 +17,6 @@ import {
   type StoragePort,
 } from '../../src/services';
 
-const clock = { nowIso: () => '2026-10-04T00:00:00.000Z' };
 
 type SlotService = Required<Pick<GameService, 'listSlots' | 'openSlot' | 'deleteSlot' | 'closeSlot' | 'flush' | 'exportSlot' | 'getActiveSlot' | 'getSaveStatus'>> & GameService;
 
@@ -35,8 +34,7 @@ async function code(p: Promise<unknown>): Promise<string> {
 }
 
 describe('세이브 슬롯 (2.0.0)', () => {
-  it('계약 버전·슬롯 3개', () => {
-    expect(CONTRACT_VERSION).toBe('2.5.0');
+  it('슬롯 3개', () => {
     expect(SAVE_SLOT_IDS).toEqual([1, 2, 3]);
   });
 

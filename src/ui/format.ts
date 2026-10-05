@@ -18,9 +18,7 @@ import type {
   Kc,
   LedgerKind,
   PromotionLabel,
-  PromotionLedgerKind,
   Tier,
-  TransferLedgerKind,
   WindowKind,
   PlanAdjustmentKind,
   PlanSource,
@@ -30,14 +28,9 @@ import type {
   Step,
   TeamInstructions,
 } from '../types';
+import { fmtM } from '../services';
 
-export function formatKc(v: Kc, signed = false): string {
-  const sign = v < 0 ? '−' : signed && v > 0 ? '+' : '';
-  const a = Math.abs(v);
-  if (a >= 1_000_000) return `${sign}${(a / 1_000_000).toFixed(a >= 100_000_000 ? 0 : 2)}M`;
-  if (a >= 1_000) return `${sign}${(a / 1_000).toFixed(0)}K`;
-  return `${sign}${a}`;
-}
+export const formatKc = (v: Kc, signed = false): string => (signed && v > 0 ? '+' : '') + fmtM(v);
 
 export const pct = (v: number, digits = 0) => `${(v * 100).toFixed(digits)}%`;
 export const signed = (v: number, digits = 2) => `${v > 0 ? '+' : v < 0 ? '−' : '±'}${Math.abs(v).toFixed(digits)}`;
@@ -111,8 +104,7 @@ export const ADJ_LABEL: Record<PlanAdjustmentKind, string> = {
   CONDITIONAL_DISABLED: '조건부 지시 비활성',
 };
 
-/** 2.2.0: TransferLedgerKind 는 M4.4 가 LedgerKind 에 합칠 때까지 별도 유니온 (라벨은 미리 둔다) */
-export const LEDGER_LABEL: Record<LedgerKind | PromotionLedgerKind | TransferLedgerKind, string> = {
+export const LEDGER_LABEL: Record<LedgerKind, string> = {
   SEASON_BUDGET: '시즌 배정금',
   SALARY: '연봉',
   MATCH_WIN: '승리 수당',

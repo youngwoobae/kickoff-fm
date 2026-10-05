@@ -4,7 +4,7 @@ import type { AttrDef, Player, PlayerId } from '../../types';
 import { Badge, Card, ConditionBar, DisciplineBadges, Empty, ErrorNote, FitMark, MoneyField, Segmented, Sheet } from '../components/kit';
 import { FIT_LABEL, MORALE_LABEL, MORALE_SHORT, POS_LABEL, POS_NAME, POS_ORDER, canPropose, fitOf, formatKc, isAvailable } from '../format';
 import { useActor, useGame, useInlineAction, useIsOwner, useQuery, useService } from '../service/ServiceContext';
-import { josa } from '../josa';
+import { josa } from '../../services';
 import { TrainingCard } from './TrainingCard';
 import { YELLOW_LIMIT, yellowAccumOf, yellowCardsOf } from '../types23';
 

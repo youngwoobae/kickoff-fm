@@ -1,9 +1,9 @@
 /** 계약 2.3.0 (M5.1): setTrainingFocus / getYouthIntake / decideYouth 서비스 연결 */
 import { describe, expect, it } from 'vitest';
+import { clock } from '../helpers';
 import { createGameService, type GameService } from '../../src/services';
 import { youthSalary } from '../../src/domain';
 
-const clock = { nowIso: () => '2026-10-05T00:00:00.000Z' };
 type Svc = Required<Pick<GameService, 'setTrainingFocus' | 'getYouthIntake' | 'decideYouth' | 'getInbox'>> & GameService;
 const svc = () => createGameService({ clock }) as Svc;
 

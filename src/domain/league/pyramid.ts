@@ -69,13 +69,6 @@ export function clubTierMap(state: Pick<GameState, 'leagues' | 'clubs' | 'settin
   return m;
 }
 
-/** 구단 → 리그 ID */
-export function clubLeagueMap(state: Pick<GameState, 'leagues' | 'clubs' | 'settings'>): Map<ClubId, LeagueId> {
-  const m = new Map<ClubId, LeagueId>();
-  for (const l of leaguesOf(state)) for (const id of l.clubIds) m.set(id, l.id);
-  return m;
-}
-
 type TableState = Pick<GameState, 'leagues' | 'clubs' | 'settings' | 'userClubId' | 'time' | 'gameSeed' | 'summaries' | 'fixtures'>;
 
 /**

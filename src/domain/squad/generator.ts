@@ -187,18 +187,6 @@ export function salaryFor(p: Pick<Player, 'id' | 'name' | 'ovr'>): number {
   return Math.round((baseSalary(p.ovr) * (0.9 + 0.2 * u)) / 1000) * 1000;
 }
 
-/** @deprecated Phase 0: 연봉 총액을 OVR² 비례로 배분. 생성은 salaryFor(K2) 를 쓴다 */
-export function assignSalaries(players: Player[], total: number): Player[] {
-  const w = players.map((p) => p.ovr * p.ovr);
-  const sum = w.reduce((a, b) => a + b, 0);
-  let assigned = 0;
-  return players.map((p, i) => {
-    const salary = i === players.length - 1 ? total - assigned : Math.round((total * w[i]!) / sum / 1000) * 1000;
-    assigned += salary;
-    return { ...p, contract: { ...p.contract, salary } };
-  });
-}
-
 /** 기준 스쿼드 22명: GK 2 / CB 4 / FB 4 / DM 2 / CM 3 / AM 2 / W 2 / ST 3 [PH] */
 export function generateSquad(rng: Rng, opts: GenerateSquadOptions): Player[] {
   const offsets = STARTER_TEMPLATE.map(() => gauss(rng) * 3);

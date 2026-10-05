@@ -13,7 +13,6 @@ import type {
   FormationDef,
   Lane,
   OpenPlayChance,
-  RoleId,
   RuleId,
   TeamInstructions,
   Units,
@@ -51,10 +50,6 @@ export type RawMap = Partial<Record<RuleId, number>>;
 export function ruleEnabled(rule: RuleId, config: EngineConfig): boolean {
   if (config.onlyRules && config.onlyRules.length > 0) return config.onlyRules.includes(rule);
   return !config.disabledRules.includes(rule);
-}
-
-export function hasRole(t: TeamView, role: RoleId): boolean {
-  return t.occ.some((o) => o?.role === role);
 }
 
 function findOcc(t: TeamView, id: string | undefined): Occupant | undefined {

@@ -39,9 +39,6 @@ export type LedgerKind =
   | 'RELEASE_PENALTY'
   | 'FORCED_SALE';
 
-/** @deprecated 2.1.1 에서 LedgerKind 에 합쳤다. 기존 코드 컴파일용 별칭 */
-export type PromotionLedgerKind = 'PROMOTION_BONUS' | 'PARACHUTE';
-
 /**
  * @deprecated 2.2.1 (M4.4) 에서 LedgerKind 에 합쳤다. 기존 코드 컴파일용 별칭.
  * 부호: 지출 −, 수입 +. TRANSFER_TAX·FORCED_SALE 는 판매 구단 기준 기록(세금 −, 강제 매각 수입 +).

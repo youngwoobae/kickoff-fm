@@ -1,10 +1,10 @@
 /** 서비스 계약 1.3.0 (추가만): 경기 통계·추가시간·경고 타임라인·경기 흐름 막대·스타일 행렬·적합도·상성 수치 */
 import { describe, expect, it } from 'vitest';
+import { clock } from '../helpers';
 import { STYLE_IDS } from '../../src/engine';
-import { CONTRACT_VERSION, createGameService, createMemoryStorage, type GameService } from '../../src/services';
+import { createGameService, createMemoryStorage, type GameService } from '../../src/services';
 import type { MatchId } from '../../src/types';
 
-const clock = { nowIso: () => '2026-09-27T00:00:00.000Z' };
 const mk = (seed: number): GameService => {
   const s = createGameService({ storage: createMemoryStorage(), clock });
   s.newGame({ seed, startTier: 'T3' }); // 시드별 기대값이 T3 사람 스쿼드 기준
@@ -25,11 +25,6 @@ function played(seed: number, n: number): { s: GameService; ids: MatchId[] } {
 describe('서비스 계약 1.3.0', () => {
   const { s, ids } = played(3, 8);
   const snap = s.getSnapshot()!;
-
-  it('CONTRACT_VERSION = 2.0.0 (1.3.0 기능 포함)', () => {
-    expect(CONTRACT_VERSION).toBe('2.5.0');
-    expect(s.contractVersion).toBe('2.5.0');
-  });
 
   it('① ReportSummary·TeamSummaryLite 에 유효슈팅·코너·경고·시간 점유가 채워지고 두 경로가 일치', () => {
     for (const id of ids) {

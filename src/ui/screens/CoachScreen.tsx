@@ -3,7 +3,7 @@ import { useState } from 'react';
 import type { ActionLogEntry, DealProposal, Membership, PlanChangePatch, Proposal, ProposalReaction, ProposalStatus, SlotKey, Step, TeamInstructions } from '../../types';
 import { Badge, Card, Empty, Segmented, Sheet, StepSlider } from '../components/kit';
 import { INSTR_LABEL, PROPOSAL_STATUS_LABEL, ROLE_NAME, SLIDERS, canPropose, memberText, proposeAreaText, seatLabel, type SliderKey } from '../format';
-import { josa } from '../josa';
+import { josa } from '../../services';
 import { MembersCard } from './MembersCard';
 import { ProfileSheet } from './ProfileSheet';
 import { ProposeSheet } from '../plan/PlanActions';

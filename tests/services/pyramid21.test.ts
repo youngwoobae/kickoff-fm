@@ -1,9 +1,9 @@
 /** 계약 2.1.0 (M3.1): 피라미드·커리어 골격 + deleteSlot 통지 순서 (공개 API 만 사용) */
 import { describe, expect, it } from 'vitest';
-import { CONTRACT_VERSION, createGameService, createMemorySlotStorage, isGameError, type GameService, type StoragePort } from '../../src/services';
+import { clock } from '../helpers';
+import { createGameService, createMemorySlotStorage, isGameError, type GameService, type StoragePort } from '../../src/services';
 import type { SaveSlotId } from '../../src/types';
 
-const clock = { nowIso: () => '2026-10-04T00:00:00.000Z' };
 type Svc = Required<Pick<GameService, 'getPyramid' | 'getCareer' | 'deleteSlot' | 'listSlots' | 'flush' | 'getActiveSlot'>> & GameService;
 const svc = (slots: StoragePort = createMemorySlotStorage()) => createGameService({ slots, clock }) as Svc;
 
@@ -17,10 +17,6 @@ function errCode(fn: () => unknown): string {
 }
 
 describe('피라미드·커리어 (2.1.0)', () => {
-  it('계약 버전', () => {
-    expect(CONTRACT_VERSION).toBe('2.5.0');
-  });
-
   it('피라미드: 5리그 × 14구단(70, 겹침 없음), 기본 시작 T5, 같은 상태면 같은 참조 (M3.2)', () => {
     const s = svc();
     s.newGame({ seed: 1 });

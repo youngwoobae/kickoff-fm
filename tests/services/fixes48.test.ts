@@ -1,9 +1,9 @@
 /** M4.8: 서비스로 확인된 도메인 문제 수정 (긴급 FA·자기 선수 입찰·재계약 선수 판매·중간 창 2차 AI 입찰) */
 import { describe, expect, it } from 'vitest';
+import { clock } from '../helpers';
 import { createGameService, createMemoryStorage, isGameError, type GameService } from '../../src/services';
 import type { GameErrorCode, GameState } from '../../src/types';
 
-const clock = { nowIso: () => '2026-10-04T00:00:00.000Z' };
 type Svc = Required<GameService>;
 const mk = (seed = 7): Svc => {
   const s = createGameService({ storage: createMemoryStorage(), clock }) as Svc;

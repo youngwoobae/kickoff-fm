@@ -1,4 +1,4 @@
-/** 테스트용 합성 팀·경기 입력 */
+/** 테스트용 합성 팀·경기 입력, 서비스 테스트 공용 시계 */
 import { ENGINE_VERSION, mulberry32, simulateMatch } from '../src/engine';
 import { PACKAGES, generateSquad, pickLineup, toEngineTeamInput, type PackageId } from '../src/domain';
 import type { Club, EngineConfig, EngineTeamInput, MatchResult, Player, TeamInstructions } from '../src/types';
@@ -34,3 +34,5 @@ export function config(extra: Partial<EngineConfig> = {}): EngineConfig {
 export function play(seed: number, home: EngineTeamInput, away: EngineTeamInput, extra: Partial<EngineConfig> = {}): MatchResult {
   return simulateMatch({ matchId: `t-${seed}`, seed, home: { ...home, isHome: true }, away: { ...away, isHome: false }, config: config(extra) });
 }
+
+export const clock = { nowIso: () => '2026-10-04T00:00:00.000Z' };

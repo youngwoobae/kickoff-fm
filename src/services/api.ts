@@ -74,75 +74,7 @@ import type {
   YouthIntake,
 } from '../types';
 
-/**
- * 1.2.0 (엔진 0.4.0, 추가만): 포메이션 3·역할 14·스타일 9(Catalog.styles, StyleDef), RuleId R11~R13,
- * 경기 통계(유효슈팅·코너·경고·시간 가중 점유·추가시간 분), OpponentScout.style, Club.style,
- * 선택 메서드 applyStyle / getStyleFits / getMatchupPreview. 세이브 스키마 2.
- *
- * 1.3.0 (추가만, 엔진 수치 불변): ReportSummary·TeamSummaryLite 에 유효슈팅·코너·경고·시간 점유 선택 필드,
- * TimelineItem·CommentaryLine.addedMinute, TimelineKind 'YELLOW_CARD', MatchReport.factorBars.state 전달,
- * CalibrationReport.details.counterMatrix. 세이브 스키마 2 유지(구 세이브는 새 필드가 없을 뿐).
- */
-/**
- * 2.0.0 (세이브 슬롯·비동기 시작): 슬롯 3개(SaveSlotId 1~3)와 SaveSlotMeta, 비동기 StoragePort(ports.ts).
- * 선택 메서드 listSlots / openSlot / deleteSlot / closeSlot / flush / exportSlot / getActiveSlot / getSaveStatus,
- * NewGameOptions.slotId, importSave(json, slotId?). 슬롯이 열려 있으면 모든 변경은 메모리에 즉시 반영되고
- * 저장소에는 뒤에서 쓴다(write-behind). loadGame·resetGame 은 deprecated(UI 이전 M2.3 뒤 제거). 아키텍처 16장.
- */
-/**
- * 2.0.1 (패치, 추가만): IndexedDB 슬롯 저장소 createIndexedDbSlotStorage()(불가 시 localStorage 폴백, 1.x 세이브 → 슬롯 1 이전),
- * StoragePort 선택 메서드 readLog/writeLog(행동 로그 분리: logEvent 가 세이브 본문을 다시 쓰지 않는다). 아키텍처 16장.
- */
-/**
- * 2.1.0 (M3.1, 추가만): 5티어 피라미드·다시즌 커리어 계약. LeagueId·LeagueInfo·Pyramid·ClubMovement·CareerRecord,
- * 선택 메서드 getPyramid / getCareer, getStandings(leagueId?), FixtureFilter.leagueId, Fixture.leagueId?,
- * SeasonOutcome.leagueId?·movements?, NewGameOptions.startTier, GameSettings.startTier?, Player.history?,
- * PromotionLedgerKind(아직 LedgerKind 미포함). 실제 70구단·승강은 M3.2·M3.3. 아키텍처 16장.
- */
-/**
- * 2.1.1 (M3.3, 패치 — 2.1.0 이 예고한 항목 완성, 시그니처 불변): LedgerKind 에 PROMOTION_BONUS·PARACHUTE 합침(PromotionLedgerKind 는 deprecated 별칭),
- * Finance.parachute?, Player.dev?·retiring?·faSince?·academyClubId?, GameState.boundarySeason?, FA 풀 = players 의 clubId null.
- * 실제 승강·수명주기·K4 정산, 세이브 스키마 3(leagues 필수, 2 → 3 자동 변환). 아키텍처 16장.
- */
-/**
- * 2.2.0 (M4.1, 추가만): 이적·계약·받은 편지함 계약. types/transfer.ts(TransferWindow·TransferListing·Bid·RenewalQuote·ReleaseQuote),
- * types/inbox.ts(InboxMessage), TransferLedgerKind(아직 LedgerKind 미포함), Finance.reserved?·legacyPoints?·negativeSinceDay?,
- * FinanceSummary.reserved?, Contract.bonusPerSeason?·capCharge?, GameState.inbox?, GameErrorCode 8종.
- * 선택 메서드 getTransferWindow … releasePlayer, getInbox / markRead. 변경 메서드는 모두 OWNER 전용(코치 PERMISSION_DENIED).
- * 실제 도메인은 M4.2·M4.3, 연결은 M4.4 — 그 전 로컬 서비스는 창 없음(null·[]·WINDOW_CLOSED), 재계약 RENEWAL_NOT_OPEN, 방출 INVALID_PHASE, 편지함은 GameState.inbox 그대로. 세이브 스키마 3 유지. 아키텍처 16장.
- */
-/**
- * 2.2.1 (M4.4, 패치 — 2.2.0 이 예고한 연결, 기존 시그니처 불변): 이적·계약·편지함 메서드가 실제 도메인을 쓴다.
- * LedgerKind 에 TransferLedgerKind 7종 합침(별칭 deprecated), GameState.transferMarket?·signingsThisSeason?·pendingRenewals?·freeReleasesLeft?,
- * 선택 메서드 getPlayerValue?(판매 등록 전 범위), getPlayer 가 NPC 매물 선수도 반환, getFinance().reserved·spendable(예약 차감·정규 창 B_off).
- * 세이브 스키마 3 유지(새 필드는 모두 선택). 아키텍처 16장.
- */
-/**
- * 2.3.0 (M5.1, 추가만): 훈련 포커스·유스·경고 누적. TrainingFocus, Club.training?, YouthCandidate·YouthIntake, GameState.youthIntake?,
- * Availability.yellowAccum?, PlayerSeasonStats.yellowCards?, LifecycleEvent(types 로 이동 + YOUTH_AUTO_NONE), ActionLogKind TRAINING_FOCUS_SET·YOUTH_DECIDED.
- * 선택 메서드 setTrainingFocus / getYouthIntake / decideYouth (OWNER 전용). 세이브 스키마 3 유지(새 필드는 모두 선택). 아키텍처 16장.
- */
-/**
- * 2.4.0 (M6.2, 추가만): 2D 중계용 CommentaryLine.event?·pitch?(PitchCue), MatchReplay.formations?·starters?·ballTrack? (엔진 결정 로그·이벤트 복사, 엔진 수치 불변),
- * 선택 메서드 getBuildInfo?, StyleDef.realModel 선택 필드화(값은 가상 표현). 세이브 스키마 3 유지. 아키텍처 16장.
- */
-/**
- * 2.4.1 (리뷰 M4·M5 결함 수정, 추가만·시그니처 불변): GameState.releasedThisSeason?·emergencySignedThisSeason?(선택),
- * ActionLogKind BID_PLACED·BID_WITHDRAWN·LISTING_CREATED·LISTING_WITHDRAWN·RENEWAL_OFFERED·PLAYER_RELEASED,
- * offerRenewal 재제안 = RENEWAL_NOT_OPEN(details ALREADY_RENEWED), placeBid 방출 선수 FA = BID_OUT_OF_RANGE(details RELEASED),
- * 가져오기 검증 강화(SAVE_INCOMPATIBLE 이 더 자주). 세이브 스키마 3 유지. 아키텍처 16장.
- */
-/**
- * 2.5.0 (로컬 프로필 — 한 기기 핫시트, 추가만): Membership.name?·emoji?·subRole?, ClubMember·MemberPatch,
- * 선택 메서드 listMembers / addMember / updateMember / removeMember / switchMember / hasOwnerPin / setOwnerPin (관리는 OWNER 전용),
- * getActor() 가 name·emoji 를 채운 멤버를 돌려준다(반환 타입 Membership 그대로, 실제 값은 ClubMember).
- * 코치 역할별 제안 영역(PermissionDenyCode ROLE_AREA): PLAN_CHANGE = TAC·ANL·SQD, TRANSFER_BID = SCT·FIN, RENEWAL = SQD·FIN (보조 역할 영역 포함).
- * 이적·재계약 제안 DealProposal(별도 저장 GameState.dealProposals?) + 선택 메서드 proposeDeal / reactDeal / approveDeal / rejectDeal / listDealProposals.
- * Proposal.authorName?·authorEmoji?, ProposalReaction.name?, ActionLogEntry.actorName?, ProposalKind 'RENEWAL',
- * ActionLogKind MEMBER_ADDED·MEMBER_UPDATED·MEMBER_REMOVED·OWNER_PIN_SET, GameErrorCode INVALID_MEMBER.
- * 구단주 PIN: GameState.ownerPin?(솔트 해시만), PIN 이 있으면 switchRole('OWNER')·switchMember(owner) 는 PIN 필요(PERMISSION_DENIED details PIN_REQUIRED·PIN_WRONG).
- * 세이브 스키마 3 유지. 아키텍처 16장.
- */
+/** 버전별 변경 이력: docs/아키텍처.md 16장 */
 export const CONTRACT_VERSION = '2.5.0';
 
 /** 2.4.0: 정보 화면용 빌드 정보 (온보딩_UX 2.3) */

@@ -26,9 +26,6 @@ export const CONTRACT = {
   ai: { keepRank: 20, keepMaxAge: 31, vetRank: 20, vetMinAge: 32, capUseMax: 0.97, maxSeasons: 3, youngMaxAge: 23, youngPriority: [[21, 4], [23, 2]] as const },
 } as const;
 
-/** @deprecated 2.2.1 (M4.4): TransferLedgerKind 가 LedgerKind 에 합쳐져 LedgerEntry 와 같다 */
-export type ContractLedgerEntry = LedgerEntry;
-
 export interface RenewalOffer {
   salary: Kc;
   seasons: number;
@@ -133,7 +130,7 @@ export interface RenewalDecision {
   ask: Kc;
   /** accepted 일 때만 */
   pending?: PendingRenewal;
-  ledger?: ContractLedgerEntry;
+  ledger?: LedgerEntry;
   event?: ContractEvent;
 }
 
@@ -245,7 +242,7 @@ export interface ReleaseResult {
   penalty: Kc;
   freeReleasesLeft: number;
   /** penalty > 0 일 때만. 강등 시즌 연봉 전용 계정 우선 차감은 호출자(M4.4) 몫 */
-  ledger?: ContractLedgerEntry;
+  ledger?: LedgerEntry;
   event: ContractEvent;
 }
 

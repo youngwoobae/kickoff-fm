@@ -11,25 +11,21 @@ export {
   type TacticUpdateResult,
   type FixtureFilter,
   type ResimulateOverrides,
-  type SubmitPlanOptions,
   type StyleApplyMode,
   type StyleApplyResult,
 } from './api';
 export { GameError, isGameError } from './errors';
+export { josa, fmtM } from '../domain';
 export {
-  createLocalStorageAdapter,
   createMemoryStorage,
   createMemorySlotStorage,
   createLocalStorageSlotStorage,
   kvSlotStorage,
-  localStorageKv,
   systemClock,
   SAVE_KEY,
-  SLOT_KEY_PREFIX,
   type StoragePort,
-  type LegacyStoragePort,
   type Clock,
   type KeyValue,
 } from './ports';
 export { createIndexedDbSlotStorage, migrateLocalSaves } from './idbStorage';
-export { createGameService, type GameServiceDeps } from './gameService';
+export { createGameService } from './gameService';

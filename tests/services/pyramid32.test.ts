@@ -1,9 +1,9 @@
 /** M3.2: 70구단 피라미드 상태·경량 시뮬·하루 진행 연결 (공개 API 만 사용) */
 import { describe, expect, it } from 'vitest';
+import { clock } from '../helpers';
 import { createGameService, createMemorySlotStorage, type GameService } from '../../src/services';
 import type { GameState } from '../../src/types';
 
-const clock = { nowIso: () => '2026-10-04T00:00:00.000Z' };
 type Svc = Required<Pick<GameService, 'getPyramid' | 'getCareer'>> & GameService;
 const svc = () => createGameService({ slots: createMemorySlotStorage(), clock }) as Svc;
 
