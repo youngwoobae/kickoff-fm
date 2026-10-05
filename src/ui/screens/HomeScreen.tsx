@@ -4,12 +4,12 @@ import type { DayResult, Fixture, MatchSummary } from '../../types';
 import { Badge, Card, Empty, Meter, Sheet, StickyActions } from '../components/kit';
 import { PromotionBanner } from './LeagueScreen';
 import { useUnreadCount } from './InboxScreen';
-import { ADJ_LABEL, BOT_STYLE_LABEL, PLAN_SOURCE_LABEL, formatKc, LEDGER_LABEL } from '../format';
+import { ADJ_LABEL, BOT_STYLE_LABEL, PLAN_SOURCE_LABEL, formatKc, LEDGER_LABEL, memberText } from '../format';
 import { useNav } from '../app/nav';
 import { usePlanEditor } from '../plan/PlanEditor';
 import { getPrefs } from '../prefs';
-import { PlanStatusLine } from '../plan/PlanActions';
-import { useAction, useActor, useGame, useQuery, useService } from '../service/ServiceContext';
+import { PlanStatusLine, usePlanLock } from '../plan/PlanActions';
+import { useAction, useActor, useGame, useOpenProposalCount, useQuery, useService } from '../service/ServiceContext';
 
 export function HomeScreen() {
   const snap = useGame();
@@ -21,6 +21,7 @@ export function HomeScreen() {
   const next = useQuery((s) => s.getNextMatch()).data ?? null;
 
   const planState = useQuery((s) => s.getPlanState()).data;
+  const lock = usePlanLock();
   const advance = () => {
     if (getPrefs().confirmUnsubmitted && next && planState?.matchId && !planState.confirmed && !confirm('오늘 플랜을 확정 제출하지 않았어요. 기본 플랜으로 경기할까요?')) return;
     const r = run((s) => s.advanceDay());
@@ -45,6 +46,12 @@ export function HomeScreen() {
           <span className="muted">{snap.phase === 'MATCHDAY' ? '경기일' : snap.phase === 'OFFSEASON' ? (snap.time.day === 27 ? '리뷰 데이' : '정산 데이') : '시즌 종료'}</span>
         </div>
         <Meter value={progress} label="시즌 진행" />
+        {actor && (
+          <p className="small home-actor">
+            지금 사용자: <strong>{memberText(actor)}</strong>
+          </p>
+        )}
+        {lock && <p className="small warn-line">{lock}</p>}
       </Card>
 
       {snap.phase === 'SEASON_OVER' && <SeasonOverCard />}
@@ -191,7 +198,7 @@ function TodoCard() {
   const actor = useActor();
   const { go } = useNav();
   const ps = useQuery((s) => s.getPlanState()).data;
-  const open = useQuery((s) => s.listProposals({ status: 'OPEN' })).data ?? [];
+  const open = useOpenProposalCount();
   const squad = useQuery((s) => s.getSquad()).data ?? [];
   const starters = new Set(ps?.preview?.plan.lineup.starters ?? []);
   const unavailable = squad.filter((p) => p.availability.injuryDays > 0 || p.availability.suspendedMatches > 0);
@@ -200,7 +207,7 @@ function TodoCard() {
   if (ps?.matchId) items.push({ done: !!ps.confirmed, text: ps.confirmed ? '오늘 플랜 확정 제출됨' : '오늘 플랜 확정 제출하기', onClick: () => go({ tab: 'tactics', tactics: 'plan' }) });
   if (unavailable.length) items.push({ done: false, text: `출전 불가 ${unavailable.length}명 (${unavailable.map((p) => p.name).slice(0, 2).join(', ')}${unavailable.length > 2 ? '…' : ''})`, onClick: () => go({ tab: 'squad', squad: 'list' }) });
   if (tired.length) items.push({ done: false, text: `선발 예정 중 컨디션 70 미만 ${tired.length}명`, onClick: () => go({ tab: 'squad', squad: 'lineup' }) });
-  if (open.length) items.push({ done: false, text: actor?.seat === 'OWNER' ? `코치 제안 ${open.length}건 처리` : `내 제안 ${open.length}건 대기 중`, onClick: () => go({ tab: 'club', club: 'coach' }) });
+  if (open) items.push({ done: false, text: actor?.seat === 'OWNER' ? `코치 제안 ${open}건 처리` : `대기 중인 제안 ${open}건`, onClick: () => go({ tab: 'club', club: 'coach' }) });
   const unread = useUnreadCount();
   if (unread) items.push({ done: false, text: `받은 편지함 안 읽은 편지 ${unread}통`, onClick: () => go({ homeView: 'inbox' }) });
   const last = lastUserFixture(snap);

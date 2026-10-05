@@ -1,8 +1,10 @@
-/** C05 코치실: 역할 전환, 제안 작성(코치) → 승인/거절(구단주), 활동 기록 (소유: B) */
+/** C05 코치실: 지금 사용자·멤버 관리(2.5.0), 제안 작성(코치) → 승인/거절(구단주), 이적·재계약 제안, 활동 기록 (소유: B) */
 import { useState } from 'react';
-import type { Membership, PlanChangePatch, Proposal, SlotKey, Step, TeamInstructions } from '../../types';
+import type { ActionLogEntry, DealProposal, Membership, PlanChangePatch, Proposal, ProposalReaction, ProposalStatus, SlotKey, Step, TeamInstructions } from '../../types';
 import { Badge, Card, Empty, Segmented, Sheet, StepSlider } from '../components/kit';
-import { INSTR_LABEL, PROPOSAL_STATUS_LABEL, SLIDERS, seatLabel, type SliderKey } from '../format';
+import { INSTR_LABEL, PROPOSAL_STATUS_LABEL, ROLE_NAME, SLIDERS, canPropose, memberText, proposeAreaText, seatLabel, type SliderKey } from '../format';
+import { MembersCard } from './MembersCard';
+import { ProfileSheet } from './ProfileSheet';
 import { ProposeSheet } from '../plan/PlanActions';
 import { useToast } from '../components/Toast';
 import { useAction, useActor, useGame, useQuery } from '../service/ServiceContext';
@@ -12,42 +14,138 @@ const REJECT_REASONS = ['이번 경기엔 안 맞음', '다른 제안과 겹침'
 export function CoachScreen() {
   const snap = useGame();
   const actor = useActor();
-  const run = useAction();
   const [filter, setFilter] = useState<'OPEN' | 'ALL'>('OPEN');
-  const list = useQuery((s) => s.listProposals(filter === 'OPEN' ? { status: 'OPEN' } : {}), [filter]).data ?? [];
+  const [profileOpen, setProfileOpen] = useState(false);
+  const status: { status?: ProposalStatus } = filter === 'OPEN' ? { status: 'OPEN' } : {};
+  const list = useQuery((s) => s.listProposals(status), [filter]).data ?? [];
+  const deals = useQuery((s) => s.listDealProposals?.(status) ?? [], [filter]).data ?? [];
   const seat = actor?.seat ?? 'OWNER';
+  // 플랜 제안과 거래 제안을 최신순으로 한 목록에
+  const cards = [...list.map((p) => ({ t: p.createdAt, p, d: null })), ...deals.map((d) => ({ t: d.createdAt, p: null, d }))].sort((a, b) => b.t.season - a.t.season || b.t.seq - a.t.seq);
 
   return (
     <div className="screen coach">
-      <Card title="역할 바꾸기">
-        <Segmented
-          label="현재 역할"
-          value={seat === 'OWNER' ? 'OWNER' : 'COACH'}
-          onChange={(v) => run((s) => s.switchRole(v), (m) => `${m.seat === 'OWNER' ? '구단주' : '전술 코치'}로 전환했어요`)}
-          options={[
-            { value: 'OWNER', label: '👑 구단주' },
-            { value: 'COACH', label: '🧢 전술 코치' },
-          ]}
-        />
+      <Card title="지금 사용자">
+        <div className="row-between">
+          <strong>{actor ? memberText(actor) : '–'}</strong>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setProfileOpen(true)}>
+            사용자 바꾸기
+          </button>
+        </div>
         <p className="small muted">
           {seat === 'OWNER'
-            ? '구단주는 플랜·전술을 직접 바꾸고, 코치 제안을 승인하거나 거절해요.'
-            : '코치는 편집 대신 제안을 보내요. 선발·경기 플랜·전술 화면의 ‘제안하기’ 버튼이나 아래 빠른 제안을 써 보세요.'}
+            ? '구단주는 플랜·전술·이적·계약을 직접 실행하고, 코치 제안을 승인하거나 거절해요.'
+            : `코치는 실행 대신 제안을 보내요. 담당 제안: ${proposeAreaText(actor)}. 다른 제안에는 찬성·반대로 의견을 남길 수 있어요.`}
         </p>
       </Card>
+      {profileOpen && <ProfileSheet onClose={() => setProfileOpen(false)} />}
 
-      {seat === 'COACH' && <QuickProposal />}
+      <MembersCard />
+
+      {canPropose(actor, 'PLAN_CHANGE') && <QuickProposal />}
 
       <div className="row-between">
         <h3 className="h3">제안함</h3>
         <Segmented label="제안 필터" size="sm" value={filter} onChange={setFilter} options={[{ value: 'OPEN', label: '대기' }, { value: 'ALL', label: '전체' }]} />
       </div>
-      {list.length === 0 ? <Empty>{filter === 'OPEN' ? '대기 중인 제안이 없어요' : '제안 기록이 없어요'}</Empty> : list.map((p) => <ProposalCard key={p.id} p={p} seat={seat} />)}
+      {cards.length === 0 ? (
+        <Empty>{filter === 'OPEN' ? '대기 중인 제안이 없어요' : '제안 기록이 없어요'}</Empty>
+      ) : (
+        cards.map((c) => (c.p ? <ProposalCard key={c.p.id} p={c.p} seat={seat} /> : c.d && <DealCard key={c.d.id} d={c.d} seat={seat} />))
+      )}
 
       <Card title="활동 기록">
         <ActivityLog entries={snap.actionLog} memberships={snap.memberships} />
       </Card>
     </div>
+  );
+}
+
+/** 작성자 표시: 작성 시점 스냅샷(authorName·authorEmoji) > 역할 이름 */
+function authorText(p: { authorName?: string; authorEmoji?: string; authorRole?: Proposal['authorRole'] }): string {
+  const name = p.authorName ?? (p.authorRole ? ROLE_NAME[p.authorRole] : '코치');
+  return p.authorEmoji ? `${p.authorEmoji} ${name}` : name;
+}
+
+function reactionsText(rs: readonly ProposalReaction[], memberships: readonly Membership[]): string {
+  return rs.map((r) => `${r.choice === 'FOR' ? '👍 찬성' : '👎 반대'} ${r.name ?? seatLabel(memberships, r.userId)}${r.reason ? ` (${r.reason})` : ''}`).join(' · ');
+}
+
+const statusTone = (st: ProposalStatus) => (st === 'APPROVED' ? 'good' : st === 'OPEN' ? 'accent' : st === 'REJECTED' || st === 'STALE' ? 'bad' : 'neutral');
+
+/** 2.5.0 이적·재계약 제안 카드: 구단주 = 승인(구단주 명의로 실행)·거절, 코치 = 찬성·반대 */
+function DealCard({ d, seat }: { d: DealProposal; seat: string }) {
+  const snap = useGame();
+  const run = useAction();
+  const toast = useToast();
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const isOpen = d.status === 'OPEN';
+  const myReaction = d.reactions.find((r) => r.userId === snap.actorUserId)?.choice;
+  const approve = () => {
+    const r = run((s) => s.approveDeal?.(d.id), (res) => (res?.ok ? (d.kind === 'TRANSFER_BID' ? '승인했어요. 구단주 이름으로 입찰했어요' : '승인했어요. 재계약이 성립했어요') : undefined));
+    if (r && !r.ok) toast.show(`실행하지 못해 제안이 무효가 됐어요: ${r.details.join(', ')}`, 'error');
+  };
+  return (
+    <Card
+      className={`proposal ${isOpen ? '' : 'is-closed'}`}
+      title={
+        <>
+          {d.kind === 'TRANSFER_BID' ? '이적 입찰 제안' : '재계약 제안'} · {authorText(d)} · Day {d.createdAt.day}
+        </>
+      }
+      extra={<Badge tone={statusTone(d.status)}>{PROPOSAL_STATUS_LABEL[d.status]}</Badge>}
+    >
+      <p>
+        <strong>{d.summary}</strong>
+      </p>
+      <p className="small muted">Day {d.expiresAt.day}로 넘어가면 만료 · 승인하면 구단주 이름으로 바로 실행해요</p>
+      <p className="reason">이유: “{d.reason}”</p>
+      {d.reactions.length > 0 && <p className="small muted">반응: {reactionsText(d.reactions, snap.memberships)}</p>}
+      {d.resolutionNote && <p className="small muted">처리 메모: {d.resolutionNote}</p>}
+      {isOpen && seat === 'OWNER' && (
+        <div className="btn-row">
+          <button type="button" className="btn btn-ghost" onClick={() => setRejectOpen(true)}>
+            거절
+          </button>
+          <button type="button" className="btn btn-primary" onClick={approve}>
+            승인하고 실행
+          </button>
+        </div>
+      )}
+      {isOpen && seat === 'COACH' && (
+        <div className="btn-row">
+          <button type="button" className={`btn ${myReaction === 'FOR' ? 'btn-primary' : 'btn-secondary'}`} aria-pressed={myReaction === 'FOR'} onClick={() => run((s) => s.reactDeal?.(d.id, 'FOR'), '찬성했어요')}>
+            👍 찬성
+          </button>
+          <button type="button" className={`btn ${myReaction === 'AGAINST' ? 'btn-primary' : 'btn-secondary'}`} aria-pressed={myReaction === 'AGAINST'} onClick={() => run((s) => s.reactDeal?.(d.id, 'AGAINST', '다른 방안 검토 필요'), '반대했어요')}>
+            👎 반대
+          </button>
+        </div>
+      )}
+      <RejectSheet open={rejectOpen} onClose={() => setRejectOpen(false)} onPick={(r) => run((s) => s.rejectDeal?.(d.id, r), '제안을 거절했어요')} />
+    </Card>
+  );
+}
+
+function RejectSheet({ open, onClose, onPick }: { open: boolean; onClose: () => void; onPick: (reason: string) => void }) {
+  return (
+    <Sheet open={open} title="거절 사유" onClose={onClose}>
+      <div className="chips">
+        {REJECT_REASONS.map((r) => (
+          <button
+            key={r}
+            type="button"
+            className="chip"
+            onClick={() => {
+              onPick(r);
+              onClose();
+            }}
+          >
+            {r}
+          </button>
+        ))}
+      </div>
+    </Sheet>
   );
 }
 
@@ -121,10 +219,10 @@ function ProposalCard({ p, seat }: { p: Proposal; seat: string }) {
       className={`proposal ${isOpen ? '' : 'is-closed'}`}
       title={
         <>
-          제안 · 전술 코치 · Day {p.createdAt.day}
+          플랜 제안 · {authorText(p)} · Day {p.createdAt.day}
         </>
       }
-      extra={<Badge tone={p.status === 'APPROVED' ? 'good' : p.status === 'OPEN' ? 'accent' : p.status === 'REJECTED' || p.status === 'STALE' ? 'bad' : 'neutral'}>{PROPOSAL_STATUS_LABEL[p.status]}</Badge>}
+      extra={<Badge tone={statusTone(p.status)}>{PROPOSAL_STATUS_LABEL[p.status]}</Badge>}
     >
       <p className="small muted">
         대상: Day {p.expiresAt.day} 경기 플랜{opp && ` (vs ${opp})`} · 마감 시 만료
@@ -140,7 +238,7 @@ function ProposalCard({ p, seat }: { p: Proposal; seat: string }) {
       <p className="reason">이유: “{p.reason}”</p>
       {p.reactions.length > 0 && (
         <p className="small muted">
-          반응: {p.reactions.map((r) => `${r.choice === 'FOR' ? '👍' : '👎'}${r.reason ? ` ${r.reason}` : ''}`).join(' · ')}
+          반응: {reactionsText(p.reactions, snap.memberships)}
         </p>
       )}
       {p.resolutionNote && <p className="small muted">처리 메모: {p.resolutionNote}</p>}
@@ -160,31 +258,15 @@ function ProposalCard({ p, seat }: { p: Proposal; seat: string }) {
       )}
       {isOpen && seat === 'COACH' && (
         <div className="btn-row">
-          <button type="button" className={`btn ${myReaction === 'FOR' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => run((s) => s.react(p.id, 'FOR'), '찬성했어요')}>
+          <button type="button" className={`btn ${myReaction === 'FOR' ? 'btn-primary' : 'btn-secondary'}`} aria-pressed={myReaction === 'FOR'} onClick={() => run((s) => s.react(p.id, 'FOR'), '찬성했어요')}>
             👍 찬성
           </button>
-          <button type="button" className={`btn ${myReaction === 'AGAINST' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => run((s) => s.react(p.id, 'AGAINST', '다른 방안 검토 필요'), '반대했어요')}>
+          <button type="button" className={`btn ${myReaction === 'AGAINST' ? 'btn-primary' : 'btn-secondary'}`} aria-pressed={myReaction === 'AGAINST'} onClick={() => run((s) => s.react(p.id, 'AGAINST', '다른 방안 검토 필요'), '반대했어요')}>
             👎 반대
           </button>
         </div>
       )}
-      <Sheet open={rejectOpen} title="거절 사유" onClose={() => setRejectOpen(false)}>
-        <div className="chips">
-          {REJECT_REASONS.map((r) => (
-            <button
-              key={r}
-              type="button"
-              className="chip"
-              onClick={() => {
-                run((s) => s.reject(p.id, r), '제안을 거절했어요');
-                setRejectOpen(false);
-              }}
-            >
-              {r}
-            </button>
-          ))}
-        </div>
-      </Sheet>
+      <RejectSheet open={rejectOpen} onClose={() => setRejectOpen(false)} onPick={(r) => run((s) => s.reject(p.id, r), '제안을 거절했어요')} />
       {editOpen && p.payload.patch.instructions && (
         <EditApproveSheet
           p={p}
@@ -247,10 +329,17 @@ const LOG_LABEL: Record<string, string> = {
   SESSION_START: '게임 시작',
   SESSION_END: '게임 종료',
   MANUAL_ROTATION: '수동 로테이션',
+  MEMBER_ADDED: '멤버 추가',
+  MEMBER_UPDATED: '멤버 수정',
+  MEMBER_REMOVED: '멤버 내보냄',
+  OWNER_PIN_SET: '구단주 PIN 변경',
+  BID_PLACED: '이적 입찰',
+  BID_WITHDRAWN: '입찰 철회',
+  RENEWAL_OFFERED: '재계약 제안',
 };
 const HIDDEN = new Set(['SESSION_START', 'SESSION_END', 'REPORT_VIEWED', 'REPLAY_VIEWED', 'SCOUT_VIEWED']);
 
-function ActivityLog({ entries, memberships }: { entries: readonly { at: string; gameTime: { season: number; day: number }; actor: string; kind: string }[]; memberships: readonly Membership[] }) {
+function ActivityLog({ entries, memberships }: { entries: readonly ActionLogEntry[]; memberships: readonly Membership[] }) {
   const rows = entries.filter((e) => !HIDDEN.has(e.kind)).slice(-20).reverse();
   if (!rows.length) return <Empty>기록이 없어요</Empty>;
   return (
@@ -261,7 +350,7 @@ function ActivityLog({ entries, memberships }: { entries: readonly { at: string;
             시즌 {e.gameTime.season} · Day {e.gameTime.day}
           </span>
           <span>{LOG_LABEL[e.kind] ?? e.kind}</span>
-          <span className="small muted">{seatLabel(memberships, e.actor)}</span>
+          <span className="small muted">{e.actorName ?? seatLabel(memberships, e.actor)}</span>
         </li>
       ))}
     </ul>

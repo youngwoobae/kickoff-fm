@@ -3,7 +3,7 @@ import { useState } from 'react';
 import type { ClubId, ConditionalOrder, Lane, SlotKey, TriggerAction, TriggerCondition } from '../../types';
 import { Badge, Card, Empty, Segmented, Sheet, Toggle } from '../components/kit';
 import { conditionalText, EDGE_LABEL, PLAN_SOURCE_LABEL, SIZE_LABEL } from '../format';
-import { PlanActions } from '../plan/PlanActions';
+import { PlanActions, usePlanLock } from '../plan/PlanActions';
 import { usePlanEditor } from '../plan/PlanEditor';
 import { useAction, useGame, useIsOwner, useQuery } from '../service/ServiceContext';
 
@@ -29,7 +29,9 @@ export function PlanScreen() {
   const oppId = planState?.opponentId ?? null;
   const oppSquad = useQuery((s) => (oppId ? s.getSquad(oppId) : []), [oppId]).data ?? [];
   const mySquad = useQuery((s) => s.getSquad()).data ?? [];
+  const lock = usePlanLock();
 
+  if (lock) return <Empty>{lock}</Empty>;
   if (!plan || !planState?.matchId) return <Empty>다음 경기가 없어요. 오프시즌에는 플랜을 제출하지 않아요.</Empty>;
   const club = snap.clubs[snap.userClubId];
   const opp = oppId ? snap.clubs[oppId] : undefined;

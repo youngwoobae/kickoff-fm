@@ -71,6 +71,11 @@ export function useIsOwner(): boolean {
   return useActor()?.seat === 'OWNER';
 }
 
+/** 대기 중 제안 수: 플랜 제안 + 2.5.0 이적·재계약 제안 */
+export function useOpenProposalCount(): number {
+  return useQuery((s) => s.listProposals({ status: 'OPEN' }).length + (s.listDealProposals?.({ status: 'OPEN' }).length ?? 0)).data ?? 0;
+}
+
 /** 변경 메서드 실행기 */
 export function useAction() {
   const { service, reportFatal } = useServiceCtx();

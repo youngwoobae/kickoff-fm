@@ -10,6 +10,8 @@ import type {
   InboxKind,
   ListingKind,
   Membership,
+  ProposalKind,
+  RoleLabel,
   ConditionalOrder,
   FitLevel,
   FormationDef,
@@ -234,11 +236,58 @@ export function downloadText(filename: string, text: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-/** 사용자 ID → 역할 이름 (멤버십 조회) */
+/** 사용자 ID → 표시 이름 (2.5.0: 멤버 이름이 있으면 이모지+이름, 없으면 역할 이름) */
 export function seatLabel(memberships: readonly Membership[], userId: string): string {
   const m = memberships.find((x) => x.userId === userId);
   if (!m) return userId;
-  return m.seat === 'OWNER' ? '구단주' : m.seat === 'COACH' ? '코치' : '관전 코치';
+  if (m.name) return `${m.emoji ? `${m.emoji} ` : ''}${m.name}`;
+  return m.seat === 'OWNER' ? '구단주' : m.seat === 'COACH' ? (m.roleLabel ? ROLE_NAME[m.roleLabel] : '코치') : '관전 코치';
+}
+
+/** 2.5.0 코치 역할 이름 (domain ROLE_NAMES 와 같은 문구) */
+export const ROLE_NAME: Record<RoleLabel, string> = { TAC: '전술 코치', SCT: '스카우트', SQD: '선수단 코치', ANL: '분석관', FIN: '재정 코치' };
+export const ROLE_SHORT: Record<RoleLabel, string> = { TAC: '전술', SCT: '스카우트', SQD: '선수단', ANL: '분석', FIN: '재정' };
+export const ROLE_ORDER: readonly RoleLabel[] = ['TAC', 'SCT', 'SQD', 'ANL', 'FIN'];
+
+/**
+ * 역할별 제안 영역 (계약 2.5.0 권한 표 · domain PROPOSAL_AREAS 의 표시용 사본 — UI 는 domain 을 import 할 수 없다).
+ * 버튼 숨김·안내용일 뿐, 최종 판정은 서비스(ROLE_AREA)가 한다.
+ */
+const ROLE_AREA: Record<RoleLabel, readonly ProposalKind[]> = {
+  TAC: ['PLAN_CHANGE'],
+  ANL: ['PLAN_CHANGE'],
+  SQD: ['PLAN_CHANGE', 'RENEWAL'],
+  SCT: ['TRANSFER_BID'],
+  FIN: ['TRANSFER_BID', 'RENEWAL'],
+};
+
+/** 이 멤버가 이 종류를 제안할 수 있나 (코치만, 보조 역할 합산, 역할 없는 코치 = 플랜 변경만) */
+type RoleHolder = Pick<Membership, 'seat' | 'roleLabel' | 'subRole'>;
+export function canPropose(m: RoleHolder | undefined, kind: ProposalKind): boolean {
+  if (m?.seat !== 'COACH') return false;
+  if (!m.roleLabel) return kind === 'PLAN_CHANGE';
+  return ROLE_AREA[m.roleLabel].includes(kind) || (!!m.subRole && ROLE_AREA[m.subRole].includes(kind));
+}
+
+/** 담당 제안 영역 문구 (예: '이적 입찰·재계약') */
+export function proposeAreaText(m: RoleHolder | undefined): string {
+  const kinds: [ProposalKind, string][] = [['PLAN_CHANGE', '플랜·전술'], ['TRANSFER_BID', '이적 입찰'], ['RENEWAL', '재계약']];
+  return kinds.filter(([k]) => canPropose(m, k)).map(([, t]) => t).join('·') || '없음';
+}
+
+/** 멤버 역할 문구 (예: '전술' · '스카우트+재정' · '구단주') */
+export function memberRoleText(m: Membership): string {
+  if (m.seat === 'OWNER') return '구단주';
+  if (!m.roleLabel) return '코치';
+  return ROLE_SHORT[m.roleLabel] + (m.subRole ? `+${ROLE_SHORT[m.subRole]}` : '');
+}
+
+/** "🧢 민수(전술)" — name·emoji 가 없는 이전 서비스·세이브는 역할 기본값 */
+export function memberText(m: Membership): string {
+  const name = m.name ?? (m.seat === 'OWNER' ? '구단주' : m.roleLabel ? ROLE_NAME[m.roleLabel] : '코치');
+  const emoji = m.emoji ?? (m.seat === 'OWNER' ? '👑' : '🧢');
+  const role = memberRoleText(m);
+  return `${emoji} ${name}${role !== name ? `(${role})` : ''}`;
 }
 
 /** 경기 분 표기: 추가시간이면 "90+3′" */

@@ -125,11 +125,21 @@ export function aiBids(args: {
   const own = staying(w, args.players);
   const ids = starterIds(own);
   const starters = own.filter((p) => ids.has(p.id));
-  const count = (g: Group) => own.filter((p) => GROUP[p.primary] === g).length;
-  const deficit = (g: Group) => Math.max(0, AI_TRANSFER.groupMin[g] - count(g));
-  const weakest = (g: Group) => {
+  // M7.2: 매물마다 다시 세던 그룹 결손·최약 OVR·주전 전력을 한 번만 계산한다 (값은 같다)
+  const memo = <T,>(f: (g: Group) => T) => {
+    const m = new Map<Group, T>();
+    return (g: Group) => (m.has(g) ? m.get(g)! : (m.set(g, f(g)), m.get(g)!));
+  };
+  const deficit = memo((g) => Math.max(0, AI_TRANSFER.groupMin[g] - own.filter((p) => GROUP[p.primary] === g).length));
+  const weakest = memo((g) => {
     const xs = (starters.some((p) => GROUP[p.primary] === g) ? starters : own).filter((p) => GROUP[p.primary] === g);
     return xs.length ? Math.min(...xs.map((p) => p.ovr)) : 0;
+  });
+  // squadStrength([...own, p]) 와 같은 값: 임시 제외 상위 11 OVR 을 같은 순서(내림차순)로 더한다
+  const ownTop = own.filter((p) => !p.isTemporary).map((p) => p.ovr).sort((a, b) => b - a).slice(0, 11);
+  const strengthWith = (p: Player) => {
+    const top = p.isTemporary ? ownTop : [...ownTop, p.ovr].sort((a, b) => b - a).slice(0, 11);
+    return top.length ? top.reduce((a, b) => a + b, 0) / top.length : 0;
   };
   const capMax = club.capLimit * AI_TRANSFER.capUseRate;
 
@@ -143,7 +153,7 @@ export function aiBids(args: {
     const gain = p.ovr - weakest(g);
     if (!need && gain < AI_TRANSFER.upgradeMin) continue;
     // 대역: 영입 뒤 주전 전력 > ref + bandHi 이면 안 산다. 필요 포지션 보충만 ref 이하 선수로 예외 (M4.8, 11.4 보충과 같은 상한)
-    if (args.band !== false && squadStrength([...own, p]) > ref + A.bandHi && !(need && p.ovr <= ref)) continue;
+    if (args.band !== false && strengthWith(p) > ref + A.bandHi && !(need && p.ovr <= ref)) continue;
     const u = h(args.gameSeed >>> 0, w.season, w.kind, club.id, l.id);
     const s = baseSalary(p.ovr);
     let bid: Bid;

@@ -6,6 +6,12 @@
  */
 import type {
   ApproveResult,
+  ClubMember,
+  DealApproveResult,
+  DealProposal,
+  DealProposalInput,
+  MemberPatch,
+  RoleLabel,
   CalibrationOptions,
   CalibrationProgress,
   CalibrationReport,
@@ -136,6 +142,14 @@ const FAKE_SAVE_KEY = 'kickoff-fm/fake/v2';
 const SCHEMA = 2;
 const USER_CLUB: ClubId = 'c00';
 const OWNER_ID = 'u-owner';
+const FAKE_ROLE_NAME: Record<RoleLabel, string> = { TAC: '전술 코치', SCT: '스카우트', SQD: '선수단 코치', ANL: '분석관', FIN: '재정 코치' };
+const FAKE_EMOJIS = ['🟦', '🟩', '🟥', '🟪', '🟧', '🟫'];
+/** 가짜 서비스도 PIN 평문은 저장하지 않는다 (간단한 문자열 해시, 개발 전용) */
+function fakePinHash(pin: string, salt: string): string {
+  let h = 2166136261;
+  for (const c of `${salt}|${pin}`) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0;
+  return h.toString(16);
+}
 const COACH_ID = 'u-coach';
 const ECON = { budget: 60_000_000, cap: 48_000_000, win: 1_200_000, draw: 500_000, loss: 200_000 };
 const FIT_MULT: Record<FitLevel, number> = { NATURAL: 1, ACCOMPLISHED: 0.95, CAPABLE: 0.88, UNSUITED: 0.75 };
@@ -825,18 +839,216 @@ export class FakeGameService implements GameService {
   }
 
   // ── 역할 ──────────────────────────────────────────────────────────
-  getActor(): Membership {
+  getActor(): ClubMember {
     const s = this.req();
-    const m = s.memberships.find((x) => x.userId === s.actorUserId);
+    const m = this.members(s).find((x) => x.userId === s.actorUserId);
     if (!m) throw new GameError('NOT_FOUND', '멤버십 없음');
     return m;
   }
   switchRole(seat: 'OWNER' | 'COACH'): Membership {
+    const m = this.members(this.req()).find((x) => x.seat === seat);
+    if (!m) throw new GameError('NOT_FOUND', `${seat} 멤버십이 없습니다`);
+    return this.switchMember(m.userId);
+  }
+
+  // ── 로컬 프로필 (2.5.0) — 간단한 근사 구현. 실제 규칙은 services/gameService ──
+  private members(s: GameState): ClubMember[] {
+    let coach = 0;
+    return s.memberships
+      .filter((m) => m.clubId === s.userClubId)
+      .map((m) => ({
+        ...m,
+        name: m.name ?? (m.seat === 'OWNER' ? '구단주' : m.roleLabel ? FAKE_ROLE_NAME[m.roleLabel] : '코치'),
+        emoji: m.emoji ?? (m.seat === 'OWNER' ? '👑' : FAKE_EMOJIS[coach++ % FAKE_EMOJIS.length]!),
+      }));
+  }
+  private requireManager(s: GameState): void {
+    if (this.seat(s) !== 'OWNER') throw new GameError('PERMISSION_DENIED', '멤버 관리는 구단주만 할 수 있어요', ['NOT_OWNER']);
+  }
+  private checkMember(name: string | undefined, role?: RoleLabel, subRole?: RoleLabel): void {
+    if (name !== undefined && (name.trim().length < 1 || [...name.trim()].length > 12)) throw new GameError('INVALID_MEMBER', '이름은 1~12자여야 해요');
+    if (subRole && subRole === role) throw new GameError('INVALID_MEMBER', '보조 역할은 주 역할과 다른 역할 1개만 고를 수 있어요');
+  }
+  listMembers(): ClubMember[] {
+    return this.members(this.req());
+  }
+  hasOwnerPin(): boolean {
+    return !!this.req().ownerPin;
+  }
+  switchMember(memberId: string, pin?: string): ClubMember {
     const s = clone(this.req());
-    s.actorUserId = seat === 'OWNER' ? OWNER_ID : COACH_ID;
-    this.log(s, 'ROLE_SWITCHED', { seat });
+    const m = this.members(s).find((x) => x.userId === memberId);
+    if (!m) throw new GameError('NOT_FOUND', `멤버 없음: ${memberId}`);
+    if (m.seat === 'OWNER' && s.ownerPin && m.userId !== s.actorUserId) {
+      if (pin === undefined) throw new GameError('PERMISSION_DENIED', '구단주로 바꾸려면 PIN 4자리를 입력하세요', ['PIN_REQUIRED']);
+      if (fakePinHash(pin, s.ownerPin.salt) !== s.ownerPin.hash) throw new GameError('PERMISSION_DENIED', 'PIN 이 맞지 않아요', ['PIN_WRONG']);
+    }
+    s.actorUserId = m.userId;
+    this.log(s, 'ROLE_SWITCHED', { seat: m.seat, userId: m.userId });
     this.commit(s);
-    return this.getActor();
+    return m;
+  }
+  addMember(name: string, role: RoleLabel, extra: { subRole?: RoleLabel; emoji?: string } = {}): ClubMember {
+    const s = clone(this.req());
+    this.requireManager(s);
+    if (this.members(s).filter((m) => m.seat !== 'OWNER').length >= 5) throw new GameError('INVALID_MEMBER', '코치는 최대 5명이에요');
+    this.checkMember(name, role, extra.subRole);
+    const ids = new Set(s.memberships.map((m) => m.userId));
+    let n = s.memberships.length;
+    while (ids.has(`u-m${n}`)) n++;
+    const used = new Set(this.members(s).map((m) => m.emoji));
+    const m: Membership = {
+      clubId: s.userClubId,
+      userId: `u-m${n}`,
+      seat: 'COACH',
+      roleLabel: role,
+      ...(extra.subRole ? { subRole: extra.subRole } : {}),
+      joinedAt: { season: s.time.season, day: s.time.day, seq: s.seq },
+      hasOwnClub: false,
+      name: name.trim(),
+      emoji: extra.emoji ?? FAKE_EMOJIS.find((e) => !used.has(e)) ?? FAKE_EMOJIS[0],
+    };
+    s.memberships.push(m);
+    this.log(s, 'MEMBER_ADDED', { memberId: m.userId, name: m.name, role });
+    this.commit(s);
+    return this.members(s).find((x) => x.userId === m.userId)!;
+  }
+  updateMember(memberId: string, patch: MemberPatch): ClubMember {
+    const s = clone(this.req());
+    this.requireManager(s);
+    const m = s.memberships.find((x) => x.userId === memberId && x.clubId === s.userClubId);
+    if (!m) throw new GameError('NOT_FOUND', `멤버 없음: ${memberId}`);
+    this.checkMember(patch.name);
+    if (patch.name !== undefined) m.name = patch.name.trim();
+    if (patch.emoji !== undefined) m.emoji = patch.emoji;
+    if (m.seat !== 'OWNER') {
+      if (patch.role) m.roleLabel = patch.role;
+      if (patch.subRole === null || patch.subRole === m.roleLabel) delete m.subRole;
+      else if (patch.subRole) m.subRole = patch.subRole;
+    }
+    this.log(s, 'MEMBER_UPDATED', { memberId });
+    this.commit(s);
+    return this.members(s).find((x) => x.userId === memberId)!;
+  }
+  removeMember(memberId: string): void {
+    const s = clone(this.req());
+    this.requireManager(s);
+    const m = s.memberships.find((x) => x.userId === memberId && x.clubId === s.userClubId);
+    if (!m) throw new GameError('NOT_FOUND', `멤버 없음: ${memberId}`);
+    if (m.seat === 'OWNER') throw new GameError('INVALID_MEMBER', '구단주는 제거할 수 없어요');
+    s.memberships = s.memberships.filter((x) => x !== m);
+    for (const p of [...Object.values(s.proposals), ...Object.values(s.dealProposals ?? {})]) {
+      if (p.authorId === memberId && p.status === 'OPEN') Object.assign(p, { status: 'EXPIRED', resolutionNote: '작성자가 구단을 떠났어요' });
+    }
+    this.log(s, 'MEMBER_REMOVED', { memberId });
+    this.commit(s);
+  }
+  setOwnerPin(pin: string | null): void {
+    const s = clone(this.req());
+    this.requireManager(s);
+    if (pin === null) delete s.ownerPin;
+    else {
+      if (!/^\d{4}$/.test(pin)) throw new GameError('INVALID_MEMBER', 'PIN 은 숫자 4자리예요');
+      const salt = Math.random().toString(36).slice(2, 10);
+      s.ownerPin = { salt, hash: fakePinHash(pin, salt) };
+    }
+    this.log(s, 'OWNER_PIN_SET', { enabled: pin !== null });
+    this.commit(s);
+  }
+
+  // ── 이적·재계약 제안 (2.5.0) ──
+  proposeDeal(input: DealProposalInput): DealProposal {
+    const s = clone(this.req());
+    this.requireCoach(s);
+    const author = this.members(s).find((m) => m.userId === s.actorUserId)!;
+    const pl = input.payload;
+    const areas = [author.roleLabel, author.subRole];
+    const ok = pl.kind === 'TRANSFER_BID' ? areas.some((r) => r === 'SCT' || r === 'FIN') : areas.some((r) => r === 'SQD' || r === 'FIN');
+    if (!ok) throw new GameError('PERMISSION_DENIED', `${pl.kind === 'TRANSFER_BID' ? '이적 입찰' : '재계약'} 제안은 담당 역할이 아니에요`, ['ROLE_AREA']);
+    const reason = input.reason.trim();
+    if (reason.length < 1 || reason.length > 80) throw new GameError('PROPOSAL_INVALID', '제안 사유는 1~80자여야 해요');
+    let summary: string;
+    if (pl.kind === 'TRANSFER_BID') {
+      const L = this.mkt(s).listings.find((l) => l.id === pl.bid.listingId);
+      if (!L) throw new GameError('NOT_FOUND', `매물이 없어요: ${pl.bid.listingId}`);
+      const name = s.players[L.playerId]?.name ?? L.playerId;
+      summary = pl.bid.fee !== undefined ? `${name} 영입 입찰 · 이적료 ${formatKc(pl.bid.fee)}` : `${name} FA 영입 · 연봉 ${formatKc(pl.bid.salary ?? 0)} × ${pl.bid.seasons ?? 1}시즌`;
+    } else {
+      this.getRenewalQuote(pl.playerId); // 재계약 창 검증
+      summary = `${s.players[pl.playerId]?.name ?? pl.playerId} 재계약 · 연봉 ${formatKc(pl.salary)} × ${pl.seasons}시즌`;
+    }
+    const id = `dp-${s.seq + 1}`;
+    const deal: DealProposal = {
+      id,
+      clubId: s.userClubId,
+      authorId: author.userId,
+      ...(author.roleLabel ? { authorRole: author.roleLabel } : {}),
+      authorName: author.name,
+      authorEmoji: author.emoji,
+      kind: pl.kind,
+      payload: clone(pl),
+      summary,
+      reason,
+      reactions: [],
+      createdAt: this.ts(s),
+      expiresAt: { season: s.time.season, day: s.time.day + 1 },
+      status: 'OPEN',
+    };
+    s.dealProposals = { ...s.dealProposals, [id]: deal };
+    this.log(s, 'PROPOSAL_CREATED', { id, kind: pl.kind });
+    this.commit(s);
+    return deal;
+  }
+  private openDeal(s: GameState, id: ProposalId): DealProposal {
+    const d = s.dealProposals?.[id];
+    if (!d) throw new GameError('NOT_FOUND', id);
+    if (d.status !== 'OPEN') throw new GameError('PROPOSAL_NOT_OPEN', '열린 제안이 아닙니다');
+    return d;
+  }
+  reactDeal(proposalId: ProposalId, choice: 'FOR' | 'AGAINST', reason?: string): DealProposal {
+    const s = clone(this.req());
+    this.requireCoach(s);
+    const d = this.openDeal(s, proposalId);
+    const name = this.members(s).find((m) => m.userId === s.actorUserId)?.name;
+    d.reactions = [...d.reactions.filter((r) => r.userId !== s.actorUserId), { userId: s.actorUserId, choice, ...(reason ? { reason } : {}), ...(name ? { name } : {}) }];
+    this.log(s, 'PROPOSAL_REACTED', { id: proposalId, choice });
+    this.commit(s);
+    return d;
+  }
+  approveDeal(proposalId: ProposalId): DealApproveResult {
+    this.requireOwner(this.req());
+    this.openDeal(this.req(), proposalId);
+    const details: string[] = [];
+    try {
+      const d = this.req().dealProposals![proposalId]!;
+      if (d.payload.kind === 'TRANSFER_BID') this.placeBid(d.payload.bid);
+      else {
+        const r = this.offerRenewal(d.payload.playerId, d.payload.salary, d.payload.seasons);
+        if (!r.accepted) details.push(`선수가 연봉 ${formatKc(r.ask)} 이상을 원해요`);
+      }
+    } catch (e) {
+      details.push(e instanceof Error ? e.message : String(e));
+    }
+    const s = clone(this.req()); // 실행이 커밋한 상태 위에 기록
+    const d = s.dealProposals![proposalId]!;
+    Object.assign(d, { status: details.length ? 'STALE' : 'APPROVED', resolvedBy: s.actorUserId, resolvedAt: this.ts(s), ...(details.length ? { resolutionNote: details.join(' / ') } : {}) });
+    this.log(s, 'PROPOSAL_APPROVED', { id: proposalId, stale: details.length > 0 });
+    this.commit(s);
+    return details.length ? { ok: false, proposal: d, reason: 'STALE', details } : { ok: true, proposal: d };
+  }
+  rejectDeal(proposalId: ProposalId, note?: string): DealProposal {
+    const s = clone(this.req());
+    this.requireOwner(s);
+    const d = this.openDeal(s, proposalId);
+    Object.assign(d, { status: 'REJECTED', resolvedBy: s.actorUserId, resolvedAt: this.ts(s), ...(note ? { resolutionNote: note } : {}) });
+    this.log(s, 'PROPOSAL_REJECTED', { id: proposalId });
+    this.commit(s);
+    return d;
+  }
+  listDealProposals(filter: { status?: ProposalStatus } = {}): DealProposal[] {
+    return Object.values(this.req().dealProposals ?? {})
+      .filter((p) => !filter.status || p.status === filter.status)
+      .sort((a, b) => b.createdAt.seq - a.createdAt.seq);
   }
 
   // ── 조회 ──────────────────────────────────────────────────────────
@@ -1270,6 +1482,12 @@ export class FakeGameService implements GameService {
     let userResolvedPlan: ResolvedPlan | undefined;
     let seasonOutcome: SeasonOutcome | undefined;
 
+    for (const d of Object.values(s.dealProposals ?? {})) {
+      if (d.status === 'OPEN' && (d.expiresAt.season < s.time.season || d.expiresAt.day <= s.time.day + 1)) {
+        d.status = 'EXPIRED';
+        this.log(s, 'PROPOSAL_EXPIRED', { id: d.id });
+      }
+    }
     if (s.phase === 'MATCHDAY') {
       const day = s.time.day;
       for (const p of Object.values(s.proposals)) {

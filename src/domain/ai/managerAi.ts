@@ -98,16 +98,24 @@ export function pickLineup(ctx: ManagerAiContext, tactic: TacticSlot): MatchPlan
   const starters: (string | null)[] = new Array<string | null>(formation.slots.length).fill(null);
   const freeSlots = formation.slots.map((s) => s.index);
   const used = new Set<string>();
+  // 점수는 탐욕 루프 동안 변하지 않으므로 (자리 × 선수) 한 번만 계산한다 (M7.2: 하루 처리의 ~10%)
+  const scores = new Map<number, number[]>(
+    freeSlots.map((idx) => {
+      const fs = formation.slots[idx]!;
+      const role = tactic.roles[fs.index] ?? fs.defaultRole;
+      return [idx, pool.map((p) => slotScore(p, fs.position, role, true))];
+    }),
+  );
   while (freeSlots.length > 0) {
     let best = -Infinity;
     let bp: Player | null = null;
     let bsIdx = 0;
     for (let j = 0; j < freeSlots.length; j++) {
-      const fs = formation.slots[freeSlots[j]!]!;
-      const role = tactic.roles[fs.index] ?? fs.defaultRole;
-      for (const p of pool) {
+      const row = scores.get(freeSlots[j]!)!;
+      for (let i = 0; i < pool.length; i++) {
+        const p = pool[i]!;
         if (used.has(p.id)) continue;
-        const v = slotScore(p, fs.position, role, true);
+        const v = row[i]!;
         if (v > best) {
           best = v;
           bp = p;
@@ -122,9 +130,17 @@ export function pickLineup(ctx: ManagerAiContext, tactic: TacticSlot): MatchPlan
   }
   const bench: string[] = [];
   const rest = pool.filter((p) => !used.has(p.id));
-  const bestOverall = (p: Player) =>
-    Math.max(...(['GK', 'CB', 'FB', 'DM', 'CM', 'AM', 'W', 'ST'] as Position[]).map((pos) => ovrAt(p, pos) * EngineConstants.FIT_MULT[fitOf(p, pos)])) *
-    conditionEfficiency(p.condition);
+  const overall = new Map<string, number>();
+  const bestOverall = (p: Player) => {
+    let v = overall.get(p.id);
+    if (v === undefined) {
+      v =
+        Math.max(...(['GK', 'CB', 'FB', 'DM', 'CM', 'AM', 'W', 'ST'] as Position[]).map((pos) => ovrAt(p, pos) * EngineConstants.FIT_MULT[fitOf(p, pos)])) *
+        conditionEfficiency(p.condition);
+      overall.set(p.id, v);
+    }
+    return v;
+  };
   const take = (pred: (p: Player) => boolean) => {
     const c = rest.filter((p) => pred(p) && !bench.includes(p.id)).sort((a, b) => bestOverall(b) - bestOverall(a) || a.id.localeCompare(b.id))[0];
     if (c && bench.length < 7) bench.push(c.id);

@@ -44,6 +44,27 @@ const full = (id: SaveSlotId) => (e: unknown) => {
   throw new GameError('STORAGE_FULL', `슬롯 ${id} 저장 실패: 저장 공간이 부족합니다`, [String(e)]);
 };
 
+/**
+ * M7.2: 세이브 본문은 gzip 바이트로 둔다 (10시즌 본문 JSON 약 3.7MB → 약 0.4MB, DoD 슬롯당 ≤ 3MB).
+ * Blob 스트림이 조각(약 64KB)씩 흘러 큰 압축 한 번으로 메인 스레드를 오래 막지 않는다.
+ * CompressionStream 이 없으면(사파리 16.4 미만) 문자열 그대로 쓴다. 읽기는 문자열(이전 세이브)·바이트 둘 다 받는다.
+ */
+export async function packBody(json: string): Promise<string | Uint8Array> {
+  if (typeof CompressionStream === 'undefined') return json;
+  return new Uint8Array(await new Response(new Blob([json]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
+}
+
+/** 깨진 압축 본문은 '' → 서비스가 SAVE_INCOMPATIBLE 로 알린다 */
+export async function unpackBody(v: unknown): Promise<string | null> {
+  if (typeof v === 'string') return v;
+  if (!ArrayBuffer.isView(v) || typeof DecompressionStream === 'undefined') return null;
+  try {
+    return await new Response(new Blob([v as Uint8Array<ArrayBuffer>]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+  } catch {
+    return '';
+  }
+}
+
 function idbSlotStorage(db: IDBDatabase): StoragePort {
   const str = (v: unknown) => (typeof v === 'string' ? v : null);
   return {
@@ -51,13 +72,15 @@ function idbSlotStorage(db: IDBDatabase): StoragePort {
       const all = (await tx(db, ['slots'], 'readonly', (t) => t.objectStore('slots').getAll())) ?? [];
       return all.filter(isSlotMeta).sort((a, b) => a.slotId - b.slotId);
     },
-    read: async (id) => str(await tx(db, ['saves'], 'readonly', (t) => t.objectStore('saves').get(id))),
-    // 한 트랜잭션이라 원자적이지만 순서 규칙(본문 먼저, 메타 마지막)도 지킨다
-    write: (id, data, meta) =>
-      tx(db, ['saves', 'slots'], 'readwrite', (t) => {
-        t.objectStore('saves').put(data, id);
+    read: async (id) => unpackBody(await tx(db, ['saves'], 'readonly', (t) => t.objectStore('saves').get(id))),
+    // 한 트랜잭션이라 원자적이지만 순서 규칙(본문 먼저, 메타 마지막)도 지킨다. 압축은 트랜잭션 밖에서 먼저 (await 하면 트랜잭션이 닫힌다)
+    write: async (id, data, meta) => {
+      const body = await packBody(data);
+      await tx(db, ['saves', 'slots'], 'readwrite', (t) => {
+        t.objectStore('saves').put(body, id);
         t.objectStore('slots').put(meta, id);
-      }).then(() => undefined, full(id)),
+      }).then(() => undefined, full(id));
+    },
     remove: async (id) => {
       await tx(db, STORES, 'readwrite', (t) => {
         t.objectStore('slots').delete(id);

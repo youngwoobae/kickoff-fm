@@ -5,17 +5,26 @@
  * AI 입찰·다른 구단 입찰 수는 보이지 않는다(블라인드, 경제 6.6). 메서드가 없거나 창이 닫혀 있으면 "닫힘" 안내만.
  */
 import { useState } from 'react';
-import type { Bid, GameSnapshot, ListingKind, Player, PlayerId, Position, TransferListing, TransferWindow } from '../../types';
+import type { Bid, BidInput, GameSnapshot, ListingKind, Player, PlayerId, Position, TransferListing, TransferWindow } from '../../types';
 import { Badge, Card, Empty, ErrorNote, MoneyField, Segmented, Sheet, Stat } from '../components/kit';
-import { LISTING_KIND_LABEL, POS_LABEL, POS_NAME, POS_ORDER, WINDOW_KIND_LABEL, exactM, formatKc } from '../format';
-import { useGame, useInlineAction, useIsOwner, useQuery } from '../service/ServiceContext';
+import { LISTING_KIND_LABEL, POS_LABEL, POS_NAME, POS_ORDER, WINDOW_KIND_LABEL, canPropose, exactM, formatKc } from '../format';
+import { useActor, useGame, useInlineAction, useIsOwner, useQuery, useService } from '../service/ServiceContext';
 
 type View = 'market' | 'bids' | 'sell';
 const OWNER_ONLY = '코치는 볼 수만 있어요. 입찰과 판매 등록은 구단주가 해요.';
+/** 2.5.0: 스카우트·재정 코치는 입찰을 실행 대신 제안한다 */
+const COACH_PROPOSE = '입찰은 구단주가 실행해요. 매물을 눌러 구단주에게 입찰을 제안할 수 있어요.';
+
+function useCanProposeBid(): boolean {
+  const service = useService();
+  const actor = useActor();
+  return !!service.proposeDeal && canPropose(actor, 'TRANSFER_BID');
+}
 
 export function TransferScreen() {
   const snap = useGame();
   const isOwner = useIsOwner();
+  const canBid = useCanProposeBid();
   const win = useQuery((s) => s.getTransferWindow?.() ?? null).data ?? null;
   const fin = useQuery((s) => s.getFinance()).data;
   const all = useQuery((s) => s.listTransferListings?.() ?? []).data ?? [];
@@ -46,7 +55,7 @@ export function TransferScreen() {
             <Stat label="내 입찰" value={`${bids.length}건`} />
           </div>
         )}
-        {!isOwner && <p className="small muted">{OWNER_ONLY}</p>}
+        {!isOwner && <p className="small muted">{canBid ? COACH_PROPOSE : `${OWNER_ONLY} 입찰 제안은 스카우트·재정 코치가 해요.`}</p>}
       </Card>
       {win && (
         <>
@@ -262,6 +271,8 @@ function BidSheet({ listing: l, bid, onClose }: { listing: TransferListing | nul
 function BidForm({ l, bid, onClose }: { l: TransferListing; bid?: Bid; onClose: () => void }) {
   const snap = useGame();
   const isOwner = useIsOwner();
+  const canBid = useCanProposeBid();
+  const [reason, setReason] = useState('');
   const { run, error } = useInlineAction();
   const p = useQuery((s) => s.getPlayer(l.playerId), [l.playerId]).data;
   const range = l.seasonsRange ?? [1, 1];
@@ -278,8 +289,13 @@ function BidForm({ l, bid, onClose }: { l: TransferListing; bid?: Bid; onClose: 
   const invalid = feeBad || bonusBad || salaryBad || released;
   const seasonOpts = Array.from({ length: range[1] - range[0] + 1 }, (_, i) => String(range[0] + i));
 
+  const input: BidInput = fa ? { listingId: l.id, bonus: bonus ?? 0, salary: salary ?? 0, seasons } : { listingId: l.id, fee: fee ?? 0 };
   const submit = () => {
-    const r = run((s) => s.placeBid?.(fa ? { listingId: l.id, bonus: bonus ?? 0, salary: salary ?? 0, seasons } : { listingId: l.id, fee: fee ?? 0 }), bid ? '입찰을 고쳤어요' : '입찰했어요. 금액이 예약됐어요');
+    const r = run((s) => s.placeBid?.(input), bid ? '입찰을 고쳤어요' : '입찰했어요. 금액이 예약됐어요');
+    if (r) onClose();
+  };
+  const propose = () => {
+    const r = run((s) => s.proposeDeal?.({ payload: { kind: 'TRANSFER_BID', bid: input }, reason: reason.trim() }), '입찰 제안을 보냈어요. 구단주 승인을 기다려요');
     if (r) onClose();
   };
   const withdraw = () => {
@@ -303,8 +319,12 @@ function BidForm({ l, bid, onClose }: { l: TransferListing; bid?: Bid; onClose: 
               {bid ? '입찰 고치기' : '입찰하기'}
             </button>
           </div>
+        ) : canBid ? (
+          <button type="button" className="btn btn-primary btn-block" disabled={invalid || !reason.trim()} onClick={propose}>
+            구단주에게 입찰 제안
+          </button>
         ) : (
-          <p className="small muted">{OWNER_ONLY}</p>
+          <p className="small muted">{OWNER_ONLY} 입찰 제안은 스카우트·재정 코치가 해요.</p>
         )
       }
     >
@@ -349,6 +369,15 @@ function BidForm({ l, bid, onClose }: { l: TransferListing; bid?: Bid; onClose: 
           </>
         ) : (
           <MoneyField label="이적료" value={fee} onChange={setFee} invalid={feeBad} hint={`${exactM(l.minPrice)}~${exactM(l.maxPrice)} 사이로 정해요`} />
+        )}
+        {canBid && (
+          <label className="field">
+            <span>제안 이유 (필수, 최대 80자)</span>
+            <input value={reason} maxLength={80} aria-describedby="bid-reason-count" onChange={(e) => setReason(e.target.value)} placeholder="예: 왼쪽 수비 보강이 급해요" />
+            <small id="bid-reason-count" className="muted">
+              {reason.length}/80 · 구단주가 다음 날로 넘기기 전에 승인하면 입찰돼요
+            </small>
+          </label>
         )}
         <p className="small muted">입찰하면 금액이 예약돼 지출 가능액에서 빠져요. 다른 구단 입찰은 보이지 않아요.</p>
         <ErrorNote error={error} dev={snap.settings.devMode} />

@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import type { FormationDef, MatchPlan, Player, PlayerId } from '../../types';
 import { Badge, Card, ConditionBar, DisciplineBadges, Empty, FitMark, Segmented, Stars, Toggle } from '../components/kit';
 import { POS_LABEL, fitOf, isAvailable, pitchRows, roleFit } from '../format';
-import { PlanActions } from '../plan/PlanActions';
+import { PlanActions, usePlanLock } from '../plan/PlanActions';
 import { getPrefs } from '../prefs';
 import { usePlanEditor } from '../plan/PlanEditor';
 import { useGame, useQuery } from '../service/ServiceContext';
@@ -47,10 +47,12 @@ export function LineupScreen() {
   const [pick, setPick] = useState<Pick | null>(null);
   const [view, setView] = useState<'pitch' | 'list'>(() => (getPrefs().fontScale === 1.25 ? 'list' : 'pitch'));
   const [detail, setDetail] = useState<PlayerId | null>(null);
+  const lock = usePlanLock();
 
   const byId = useMemo(() => new Map(squad.map((p) => [p.id, p])), [squad]);
   const club = snap.clubs[snap.userClubId];
 
+  if (lock) return <Empty>{lock}</Empty>;
   if (!plan || !planState?.matchId || !club) {
     return <Empty>다음 경기가 없어 선발을 편집할 수 없어요 (오프시즌·시즌 종료)</Empty>;
   }

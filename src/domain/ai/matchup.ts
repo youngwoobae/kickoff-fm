@@ -170,8 +170,17 @@ export function tacticEdge(us: TacticShape, them: TacticShape): Partial<Record<R
   return out;
 }
 
+/** 순수 함수라 모양 쌍으로 캐시한다 (M7.2: 봇 슬롯 선택이 매일 경기마다 두 번씩 부른다). ponytail: 1,000쌍 넘으면 통째로 비움 */
+const edgeCache = new Map<string, number>();
 export function tacticEdgeTotal(us: TacticShape, them: TacticShape): number {
-  return Object.values(tacticEdge(us, them)).reduce((a, b) => a + (b ?? 0), 0);
+  const key = JSON.stringify([us.formation, us.instructions, us.roles, them.formation, them.instructions, them.roles]);
+  let v = edgeCache.get(key);
+  if (v === undefined) {
+    if (edgeCache.size >= 1000) edgeCache.clear();
+    v = Object.values(tacticEdge(us, them)).reduce((a, b) => a + (b ?? 0), 0);
+    edgeCache.set(key, v);
+  }
+  return v;
 }
 
 const RULE_NAME: Record<RuleId, string> = {

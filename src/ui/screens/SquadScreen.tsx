@@ -2,8 +2,8 @@
 import { useMemo, useState } from 'react';
 import type { AttrDef, Player, PlayerId } from '../../types';
 import { Badge, Card, ConditionBar, DisciplineBadges, Empty, ErrorNote, FitMark, MoneyField, Segmented, Sheet } from '../components/kit';
-import { FIT_LABEL, MORALE_LABEL, MORALE_SHORT, POS_LABEL, POS_NAME, POS_ORDER, fitOf, formatKc, isAvailable } from '../format';
-import { useGame, useInlineAction, useIsOwner, useQuery } from '../service/ServiceContext';
+import { FIT_LABEL, MORALE_LABEL, MORALE_SHORT, POS_LABEL, POS_NAME, POS_ORDER, canPropose, fitOf, formatKc, isAvailable } from '../format';
+import { useActor, useGame, useInlineAction, useIsOwner, useQuery, useService } from '../service/ServiceContext';
 import { josa } from '../josa';
 import { TrainingCard } from './TrainingCard';
 import { YELLOW_LIMIT, yellowAccumOf, yellowCardsOf } from '../types23';
@@ -249,6 +249,10 @@ function GrowthHistory({ p }: { p: Player }) {
 function ContractSection({ p, onClose }: { p: Player; onClose: () => void }) {
   const snap = useGame();
   const isOwner = useIsOwner();
+  // 2.5.0: 선수단·재정 코치는 재계약을 실행 대신 제안한다
+  const service = useService();
+  const actor = useActor();
+  const canRenew = !!service.proposeDeal && canPropose(actor, 'RENEWAL');
   const [mode, setMode] = useState<'none' | 'renew' | 'release'>('none');
   const mine = p.clubId === snap.userClubId;
   const c = p.contract;
@@ -286,8 +290,17 @@ function ContractSection({ p, onClose }: { p: Player; onClose: () => void }) {
           </li>
         )}
       </ul>
-      {!mine ? null : !isOwner ? (
-        <p className="small muted">재계약과 방출은 구단주가 해요. 의견이 있으면 구단주에게 전해 주세요.</p>
+      {!mine ? null : !isOwner && canRenew ? (
+        renewed ? (
+          <p className="small muted">✓ 이미 재계약한 선수예요.</p>
+        ) : (
+          <>
+            <p className="small muted">재계약은 구단주가 실행해요. 조건을 정해 구단주에게 제안할 수 있어요.</p>
+            <RenewalPanel p={p} propose />
+          </>
+        )
+      ) : !isOwner ? (
+        <p className="small muted">재계약과 방출은 구단주가 해요. 재계약 제안은 선수단·재정 코치가 할 수 있어요.</p>
       ) : (
         <>
           <div className="btn-row">
@@ -313,7 +326,7 @@ function ContractSection({ p, onClose }: { p: Player; onClose: () => void }) {
   );
 }
 
-function RenewalPanel({ p }: { p: Player }) {
+function RenewalPanel({ p, propose }: { p: Player; propose?: boolean }) {
   const snap = useGame();
   const q = useQuery((s) => s.getRenewalQuote?.(p.id), [p.id]);
   const quote = q.data;
@@ -321,6 +334,8 @@ function RenewalPanel({ p }: { p: Player }) {
   const [salary, setSalary] = useState<number | null>(quote?.askSalary ?? null);
   const [seasons, setSeasons] = useState<number>(quote?.seasonsRange[0] ?? 1);
   const [result, setResult] = useState<{ accepted: boolean; ask: number; bonus: number } | null>(null);
+  const [reason, setReason] = useState('');
+  const [sent, setSent] = useState(false);
   // 수락한 재계약은 시즌 경계에 적용된다(2.4.1: 다시 제안하면 RENEWAL_NOT_OPEN · ALREADY_RENEWED)
   if (result?.accepted)
     return (
@@ -332,6 +347,11 @@ function RenewalPanel({ p }: { p: Player }) {
   if (!quote) return <p className="small muted">재계약은 아직 열리지 않았어요.</p>;
   const [lo, hi] = quote.seasonsRange;
   const bonus = Math.round((quote.bonusPerSeasonRate * (salary ?? 0) * seasons) / 1000) * 1000;
+  const sendProposal = () => {
+    const r = run((s) => s.proposeDeal?.({ payload: { kind: 'RENEWAL', playerId: p.id, salary: salary ?? 0, seasons }, reason: reason.trim() }), '재계약 제안을 보냈어요. 구단주 승인을 기다려요');
+    if (r) setSent(true);
+  };
+  if (sent) return <p className="small"><Badge tone="accent">⏳ 제안함</Badge> 구단주 승인을 기다려요. 코치실 제안함에서 볼 수 있어요.</p>;
   const offer = () => {
     setResult(null);
     const r = run((s) => s.offerRenewal?.(p.id, salary ?? 0, seasons));
@@ -353,9 +373,24 @@ function RenewalPanel({ p }: { p: Player }) {
           options={Array.from({ length: hi - lo + 1 }, (_, i) => ({ value: String(lo + i), label: `${lo + i}시즌` }))}
         />
       </div>
-      <button type="button" className="btn btn-primary" disabled={!salary} onClick={offer}>
-        재계약 제안
-      </button>
+      {propose ? (
+        <>
+          <label className="field">
+            <span>제안 이유 (필수, 최대 80자)</span>
+            <input value={reason} maxLength={80} aria-describedby={`renew-reason-${p.id}`} onChange={(e) => setReason(e.target.value)} placeholder="예: 주전 수비수라 꼭 잡아야 해요" />
+            <small id={`renew-reason-${p.id}`} className="muted">
+              {reason.length}/80
+            </small>
+          </label>
+          <button type="button" className="btn btn-primary" disabled={!salary || !reason.trim()} onClick={sendProposal}>
+            구단주에게 재계약 제안
+          </button>
+        </>
+      ) : (
+        <button type="button" className="btn btn-primary" disabled={!salary} onClick={offer}>
+          재계약 제안
+        </button>
+      )}
       {result && (
         <p className="small">
           <Badge tone="bad">✕ 거절</Badge> 선수가 거절했어요 (요구 연봉 {formatKc(result.ask)}).

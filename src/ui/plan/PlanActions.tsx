@@ -2,9 +2,16 @@
 import { useState } from 'react';
 import type { PlanChangePatch } from '../../types';
 import { Sheet, StickyActions } from '../components/kit';
-import { seatLabel } from '../format';
-import { useAction, useIsOwner, useSnapshot } from '../service/ServiceContext';
+import { isGameError } from '../../services';
+import { canPropose, seatLabel } from '../format';
+import { useAction, useActor, useIsOwner, useQuery, useSnapshot } from '../service/ServiceContext';
 import { diffPatch, isEmptyPatch, usePlanEditor } from './PlanEditor';
+
+/** 2.5.0 NEW_COACH_LOCK: 합류한 날의 코치는 그날 경기 플랜을 볼 수 없다 → 안내 문구, 아니면 null */
+export function usePlanLock(): string | null {
+  const e = useQuery((s) => s.getPlanState()).error;
+  return e && isGameError(e) && e.details.includes('NEW_COACH_LOCK') ? '🔒 합류한 첫날이라 오늘 경기 플랜은 볼 수 없어요. 다음 날부터 볼 수 있어요.' : null;
+}
 
 export function PlanStatusLine() {
   const { planState, dirty } = usePlanEditor();
@@ -76,6 +83,7 @@ const PATCH_LABEL: Record<string, string> = {
 
 export function PlanActions() {
   const isOwner = useIsOwner();
+  const actor = useActor();
   const run = useAction();
   const { plan, base, dirty, planState, markSaved, reset } = usePlanEditor();
   const [proposeOpen, setProposeOpen] = useState(false);
@@ -85,11 +93,11 @@ export function PlanActions() {
     const patch = base ? diffPatch(base, plan) : {};
     return (
       <>
-        <StickyActions note={<PlanStatusLine />}>
+        <StickyActions note={canPropose(actor, 'PLAN_CHANGE') ? <PlanStatusLine /> : <span className="muted">플랜 제안은 전술·선수단 코치와 분석관이 해요. 볼 수만 있어요.</span>}>
           <button type="button" className="btn btn-secondary" disabled={!dirty} onClick={reset}>
             되돌리기
           </button>
-          <button type="button" className="btn btn-primary" disabled={isEmptyPatch(patch)} onClick={() => setProposeOpen(true)}>
+          <button type="button" className="btn btn-primary" disabled={isEmptyPatch(patch) || !canPropose(actor, 'PLAN_CHANGE')} onClick={() => setProposeOpen(true)}>
             제안하기
           </button>
         </StickyActions>

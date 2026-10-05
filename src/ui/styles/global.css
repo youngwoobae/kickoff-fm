@@ -209,6 +209,75 @@ h3 {
   background: var(--warn-soft);
   border-color: var(--warn);
 }
+/* 2.5.0 로컬 프로필: 칩은 이모지+이름, 긴 이름은 말줄임 */
+.role-chip {
+  min-width: var(--tap);
+  max-width: 9.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.member-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.member-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.member-row.is-current {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.member-emoji {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+.member-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+}
+.emoji-opt {
+  min-height: var(--tap);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: 1.375rem;
+  cursor: pointer;
+}
+.emoji-opt.is-active {
+  border: 2px solid var(--accent);
+  background: var(--accent-soft);
+}
+.pin-input {
+  font-size: 1.5rem;
+  letter-spacing: 0.5em;
+  text-align: center;
+  max-width: 10rem;
+}
+.home-actor {
+  margin: 8px 0 0;
+}
 .app-main {
   flex: 1;
   padding: 12px var(--gutter);

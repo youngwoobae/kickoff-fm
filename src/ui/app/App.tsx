@@ -8,13 +8,14 @@ import { ToastProvider } from '../components/Toast';
 import { Segmented } from '../components/kit';
 import { formatKc } from '../format';
 import { PlanEditorProvider } from '../plan/PlanEditor';
-import { ServiceProvider, useAction, useActor, useAsyncAction, useQuery, useSaveStatus, useService, useServiceCtx, useSnapshot } from '../service/ServiceContext';
+import { ServiceProvider, useActor, useAsyncAction, useOpenProposalCount, useQuery, useSaveStatus, useService, useServiceCtx, useSnapshot } from '../service/ServiceContext';
 import { DEV_TOOLS, createServiceFor, resolveServiceMode, type ServiceMode } from '../service/serviceHost';
 import { HomeScreen } from '../screens/HomeScreen';
 import { InboxScreen, useUnreadCount } from '../screens/InboxScreen';
 // 리그·스쿼드는 홈(PromotionBanner)·편지함(PlayerSheet)이 정적으로 쓰므로 첫 청크에 남긴다
 import { LeagueScreen } from '../screens/LeagueScreen';
 import { SquadScreen } from '../screens/SquadScreen';
+import { MemberChip } from '../screens/ProfileSheet';
 import { SettingsButton } from '../screens/SettingsSheet';
 import { TitleScreen } from '../screens/TitleScreen';
 import { Tour } from '../tutorial/Tour';
@@ -169,7 +170,7 @@ function Shell() {
 function useTabBadges(): Partial<Record<TabId, string>> {
   const actor = useActor();
   const ps = useQuery((s) => s.getPlanState()).data;
-  const open = useQuery((s) => s.listProposals({ status: 'OPEN' })).data ?? [];
+  const open = useOpenProposalCount();
   const unread = useUnreadCount();
   const out: Partial<Record<TabId, string>> = {};
   if (unread > 0) out.home = `안 읽은 편지 ${unread}통`;
@@ -177,7 +178,7 @@ function useTabBadges(): Partial<Record<TabId, string>> {
     out.home = '플랜 미제출';
     out.tactics = '플랜 미확정';
   }
-  if (actor?.seat === 'OWNER' && open.length > 0) out.club = `제안 ${open.length}건 대기`;
+  if (actor?.seat === 'OWNER' && open > 0) out.club = `제안 ${open}건 대기`;
   return out;
 }
 
@@ -254,8 +255,6 @@ function TabContent({ tab }: { tab: TabId }) {
 
 function TopBar() {
   const snap = useSnapshot();
-  const actor = useActor();
-  const run = useAction();
   const { mode } = useServiceCtx();
   const fin = useQuery((s) => s.getFinance()).data;
   if (!snap) return null;
@@ -271,14 +270,7 @@ function TopBar() {
           {mode === 'fake' && <span className="badge badge-warn hdr-fake">FAKE</span>}
         </span>
       </div>
-      <button
-        type="button"
-        className={`role-chip ${actor?.seat === 'COACH' ? 'is-coach' : ''}`}
-        aria-label={`현재 역할 ${actor?.seat === 'OWNER' ? '구단주' : '코치'}, 눌러서 전환`}
-        onClick={() => run((s) => s.switchRole(actor?.seat === 'OWNER' ? 'COACH' : 'OWNER'), (m) => `${m.seat === 'OWNER' ? '구단주' : '전술 코치'}로 전환했어요`)}
-      >
-        {actor?.seat === 'OWNER' ? '👑 구단주' : '🧢 코치'}
-      </button>
+      <MemberChip />
       <InboxButton />
       <SettingsButton inGame />
       <TitleButton />
