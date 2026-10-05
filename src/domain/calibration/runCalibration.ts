@@ -163,7 +163,7 @@ class TeamFactory {
     let s = this.squads.get(key);
     if (!s) {
       const rng = mulberry32(hashString(`${this.seed}|squad|${ovr}|${idx}|${clubId}`));
-      let ps = generateSquad(rng, { clubId, targetOvr: ovr, size: 22, tier: 'T3' });
+      let ps = generateSquad(rng, { clubId, targetOvr: ovr, size: 22, tier: 'T3', legacyRng: true });
       if (mod) {
         const cl = (v: number) => Math.max(1, Math.min(20, v));
         ps = ps.map((p) => {

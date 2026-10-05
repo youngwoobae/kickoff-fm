@@ -23,6 +23,8 @@ export interface GenerateSquadOptions {
   targetOvr: number;
   size: number;
   tier: Tier;
+  /** 보정 배치 전용: 성장 난수 소비를 0.6.0 보정 당시(옛 나이 분포)와 같게 해 고정 스쿼드 표본을 유지한다 */
+  legacyRng?: boolean;
 }
 
 const ATTR_KEYS: AttrKey[] = [
@@ -118,7 +120,7 @@ export function generateName(rng: Rng): string {
   return pick(rng, FAMILY) + pick(rng, GIVEN_A) + pick(rng, GIVEN_B);
 }
 
-export function generatePlayer(rng: Rng, position: Position, targetOvr: number, age?: number): Player {
+export function generatePlayer(rng: Rng, position: Position, targetOvr: number, age?: number, legacyRng = false): Player {
   const L = targetOvr / 5;
   const weights = OVR_WEIGHTS[position];
   const attrs = {} as Attributes;
@@ -141,7 +143,8 @@ export function generatePlayer(rng: Rng, position: Position, targetOvr: number, 
     if (delta === 0) break;
     for (const k of Object.keys(weights) as AttrKey[]) attrs[k] = clamp(attrs[k] + delta, 1, 20);
   }
-  const ageV = age ?? clamp(Math.round(24.5 + gauss(rng) * 5), 17, 35);
+  const g = age === undefined ? gauss(rng) : 0;
+  const ageV = age ?? clamp(Math.round(24.5 + g * 5), 17, 35);
   const positions: Partial<Record<Position, FitLevel>> = { [position]: 'NATURAL' };
   for (const [pos, levels] of SECONDARY[position]) {
     const lv = pick(rng, levels);
@@ -149,6 +152,10 @@ export function generatePlayer(rng: Rng, position: Position, targetOvr: number, 
   }
   const ovr = computeOvr({ attrs, primary: position });
   const growth = ageV <= 21 ? randInt(rng, 2, 6) : ageV <= 24 ? randInt(rng, 0, 3) : ageV <= 28 ? randInt(rng, 0, 1) : 0;
+  // ponytail: 보정 배치(legacyRng)는 M3.6 나이 분포 변경 전과 rng 소비를 같게 둔다 — 옛 나이(25 + g×4) ≤ 28 이면 성장 난수를 하나 쓴다.
+  // 소비가 달라지면 다음 선수 능력치가 바뀌어 엔진 보정(STYLE_MATRIX 등)이 맞춰진 스쿼드 표본이 흔들린다. 커리어 보정은 새 흐름에 맞춰져 있어 기본값은 그대로.
+  // 엔진을 다시 보정할 때 이 분기를 지우고 새 흐름으로 맞출 것
+  if (legacyRng && ageV > 28 && age === undefined && Math.round(25 + g * 4) <= 28) rng();
   const potential = clamp(ovr + growth, ovr, 95);
   const seasonsLeft = ageV <= 23 ? randInt(rng, 1, 3) : randInt(rng, 1, 5);
   return {
@@ -204,7 +211,7 @@ export function generateSquad(rng: Rng, opts: GenerateSquadOptions): Player[] {
     plan.push({ pos, ovr: opts.targetOvr - ROTATION_OVR_GAP - 2 + gauss(rng) * 3 });
   }
   const players = plan.slice(0, opts.size).map((x, i) => {
-    const p = generatePlayer(rng, x.pos, Math.round(x.ovr));
+    const p = generatePlayer(rng, x.pos, Math.round(x.ovr), undefined, opts.legacyRng);
     const id = `${opts.clubId}p${String(i + 1).padStart(2, '0')}`;
     return { ...p, id, clubId: opts.clubId };
   });
