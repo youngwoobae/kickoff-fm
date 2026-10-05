@@ -59,6 +59,7 @@ export function MatchCenterScreen() {
       </label>
       <Segmented
         label="경기 화면"
+        panelId="match-panel"
         value={nav.matchView}
         onChange={(v) => go({ matchView: v })}
         options={[
@@ -66,7 +67,9 @@ export function MatchCenterScreen() {
           { value: 'report', label: '경기 리포트' },
         ]}
       />
-      {nav.matchView === 'replay' ? <ReplayView key={matchId} matchId={matchId} /> : <ReportView key={matchId} matchId={matchId} />}
+      <div role="tabpanel" id="match-panel" aria-labelledby={`match-panel-tab-${nav.matchView}`} className="screen">
+        {nav.matchView === 'replay' ? <ReplayView key={matchId} matchId={matchId} /> : <ReportView key={matchId} matchId={matchId} />}
+      </div>
     </div>
   );
 }
@@ -147,12 +150,12 @@ function ReplayView({ matchId }: { matchId: string }) {
           <span className="sb-team">{away?.shortName}</span>
         </div>
         <div className="sb-min">{done ? '경기 종료' : cur ? minOf(cur) : '0′'}</div>
-        <div className="zone-bar" aria-label={`홈 팀 공격 구역 분포: 수비 진영 ${pct(zone[0])}, 중원 ${pct(zone[1])}, 공격 진영 ${pct(zone[2])}`}>
+        <div className="zone-bar" role="img" aria-label={`홈 팀 공격 구역 분포: 수비 진영 ${pct(zone[0])}, 중원 ${pct(zone[1])}, 공격 진영 ${pct(zone[2])}`}>
           <span style={{ flex: zone[0] }}>수비 진영</span>
           <span style={{ flex: zone[1] }}>중원</span>
           <span style={{ flex: zone[2] }}>공격 진영</span>
         </div>
-        <div className="momentum" aria-label="모멘텀 (위: 홈 우세, 아래: 원정 우세)">
+        <div className="momentum" role="img" aria-label="모멘텀 (위: 홈 우세, 아래: 원정 우세)">
           {replay.momentum.map((m, i) => (
             <span key={i} className={`mo ${i > seg && !done ? 'is-future' : ''}`}>
               <span className="mo-up" style={{ height: `${Math.max(0, m) * 50}%` }} />
@@ -336,7 +339,7 @@ function ReportView({ matchId }: { matchId: string }) {
           {bars.map(([label, v]) => (
             <li key={label} className="bar-row">
               <span className="bar-label">{label}</span>
-              <span className="bar-track" aria-label={`${label} ${signed(v)}`}>
+              <span className="bar-track" aria-hidden="true">
                 <span className="bar-mid" />
                 <span className={`bar-fill ${v >= 0 ? 'is-pos' : 'is-neg'}`} style={{ width: `${(Math.abs(v) / maxBar) * 50}%`, [v >= 0 ? 'left' : 'right']: '50%' }} />
               </span>

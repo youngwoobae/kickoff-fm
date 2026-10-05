@@ -3,7 +3,7 @@ import { useState } from 'react';
 import type { PlayerId, ScoutGrade } from '../../types';
 import { Badge, Card, Empty, ErrorNote } from '../components/kit';
 import { POS_LABEL, POS_NAME } from '../format';
-import { useGame, useInlineAction, useIsOwner, useQuery } from '../service/ServiceContext';
+import { useGame, useInlineAction, useIsOwner, useQuery, useService } from '../service/ServiceContext';
 import type { YouthCandidate } from '../types23';
 
 const MAX_PROMOTE = 2;
@@ -25,8 +25,10 @@ function potentialText(c: YouthCandidate): { grade: string; words?: string; hot:
 export function YouthScreen() {
   const snap = useGame();
   const isOwner = useIsOwner();
+  const service = useService();
   const q = useQuery((s) => s.getYouthIntake?.());
-  const squadSize = useQuery((s) => s.getSquad().length).data ?? 0;
+  // 2.4.1: 25명 상한은 임시 계약(긴급 충원) 선수를 빼고 센다 (서비스 판정과 같게)
+  const squadSize = useQuery((s) => s.getSquad().filter((p) => !p.isTemporary).length).data ?? 0;
   const { run, error } = useInlineAction();
   const [sel, setSel] = useState<PlayerId[]>([]);
   const [confirming, setConfirming] = useState(false);
@@ -58,6 +60,7 @@ export function YouthScreen() {
     return <div className="screen">{resultCard(promoted, intake.candidates.length - promoted.length)}</div>;
   }
 
+  const canDecide = !!service.decideYouth;
   const daysLeft = intake.deadlineDay - snap.time.day;
   const full = squadSize + sel.length > SQUAD_MAX;
   const toggle = (id: PlayerId) => {
@@ -65,7 +68,9 @@ export function YouthScreen() {
     setSel((xs) => (xs.includes(id) ? xs.filter((x) => x !== id) : xs.length >= MAX_PROMOTE ? xs : [...xs, id]));
   };
   const decide = () => {
+    if (!service.decideYouth) return;
     const names = intake.candidates.filter((c) => sel.includes(c.id)).map((c) => c.name);
+    // decideYouth 가 없는 서비스면 아무 일도 안 일어난 것이라 성공으로 처리하지 않는다
     const ok = run((s) => s.decideYouth?.(sel), names.length ? `${names.join(', ')} 선수를 승격했어요` : '이번 시즌 유스 결정을 마쳤어요');
     if (ok) setResult({ promoted: names, released: intake.candidates.length - names.length });
     setConfirming(false);
@@ -119,7 +124,9 @@ export function YouthScreen() {
             선택 {sel.length}/{MAX_PROMOTE}명 · 선수단 {squadSize}명 → {squadSize + sel.length}명
           </p>
           {full && <p className="warn-line">선수단이 {SQUAD_MAX}명을 넘어요. 먼저 선수를 방출하거나 판매해 주세요.</p>}
-          {confirming ? (
+          {!canDecide ? (
+            <p className="small muted">이 버전에서는 유스 결정을 할 수 없어요.</p>
+          ) : confirming ? (
             <div className="btn-row">
               <button type="button" className="btn btn-secondary" onClick={() => setConfirming(false)}>
                 취소

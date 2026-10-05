@@ -1227,6 +1227,8 @@ export class FakeGameService implements GameService {
       this.paySalary(s, id);
     }
     this.mkt(s).signings = 0;
+    s.releasedThisSeason = {};
+    s.emergencySignedThisSeason = {};
     this.emergencyFill(s);
     this.weekStart(s);
     this.genYouth(s);
@@ -2152,6 +2154,7 @@ export class FakeGameService implements GameService {
     if ((fin?.balance ?? 0) < 0) throw new GameError('NEGATIVE_BALANCE_LOCK', '잔액이 0 아래인 동안에는 입찰할 수 없어요');
     const bid: Bid = { listingId: L.id, clubId: s.userClubId, placedDay: s.time.day };
     if (L.kind === 'FA') {
+      if (s.releasedThisSeason?.[s.userClubId]?.includes(L.playerId)) throw new GameError('BID_OUT_OF_RANGE', '이번 시즌에 방출한 선수는 FA로 다시 데려올 수 없어요', ['RELEASED']);
       const [lo, hi] = L.seasonsRange ?? [1, 1];
       const bonus = input.bonus ?? 0;
       const salary = input.salary ?? 0;
@@ -2235,6 +2238,8 @@ export class FakeGameService implements GameService {
   offerRenewal(playerId: PlayerId, salary: number, seasons: number): RenewalResult {
     const s = clone(this.req());
     this.requireOwner(s);
+    // 2.4.1: 성립한 재계약은 다시 제안할 수 없다 (덮어쓰기로 보너스를 두 번 받는 우회 차단)
+    if (s.pendingRenewals?.some((r) => r.playerId === playerId)) throw new GameError('RENEWAL_NOT_OPEN', '이미 재계약한 선수예요. 새 계약은 다음 시즌부터 적용돼요', ['ALREADY_RENEWED']);
     const q = this.getRenewalQuote(playerId);
     const p = this.myPlayer(s, playerId);
     if ((s.finances[s.userClubId]?.balance ?? 0) < 0 && salary > p.contract.salary) throw new GameError('NEGATIVE_BALANCE_LOCK', '잔액이 0 아래인 동안에는 연봉을 올리는 재계약을 할 수 없어요');
@@ -2243,8 +2248,8 @@ export class FakeGameService implements GameService {
     const accepted = salary >= q.askSalary && seasons >= q.seasonsRange[0] && seasons <= q.seasonsRange[1];
     if (!accepted) return { accepted, ask: q.askSalary };
     const bonus = round1k(q.bonusPerSeasonRate * salary * seasons);
-    // 실제 서비스처럼 성립 재계약은 pendingRenewals 에 두고 시즌 경계에 적용 (같은 선수 재제안 = 덮어쓰기)
-    s.pendingRenewals = [...(s.pendingRenewals ?? []).filter((r) => r.playerId !== playerId), { playerId, salary, seasons, bonusPerSeason: Math.round(bonus / seasons) }];
+    // 실제 서비스처럼 성립 재계약은 pendingRenewals 에 두고 시즌 경계에 적용
+    s.pendingRenewals = [...(s.pendingRenewals ?? []), { playerId, salary, seasons, bonusPerSeason: Math.round(bonus / seasons) }];
     this.tledger(s, s.userClubId, 'RENEWAL_BONUS', -bonus);
     this.commit(s);
     return { accepted, ask: q.askSalary };
@@ -2269,18 +2274,25 @@ export class FakeGameService implements GameService {
     m.bids = m.bids.filter((b) => !gone.has(b.listingId));
     s.pendingRenewals = s.pendingRenewals?.filter((r) => r.playerId !== playerId);
     p.contract = { seasonsLeft: 0, salary: 0 };
+    // 2.4.1: 이번 시즌 방출 선수는 FA 로 다시 데려올 수 없다
+    const rel = (s.releasedThisSeason ??= {});
+    rel[s.userClubId] = [...(rel[s.userClubId] ?? []), playerId];
     this.inbox(s, 'PLAYER_RELEASED', `${p.name} 방출`, q.penalty > 0 ? `${p.name} 선수와 계약을 끝냈어요. 위약금 ${formatKc(q.penalty)}를 냈어요.` : `${p.name} 선수와 위약금 없이 계약을 끝냈어요.`, { playerId, clubId: s.userClubId });
     this.emergencyFill(s);
     this.commit(s);
   }
-  /** 등록 18명 미만이면 긴급 FA 1시즌 계약 (실제 서비스는 FA 풀에서, fake 는 새로 만든다). 방출·시즌 경계 뒤 */
+  /** 등록 18명 미만이면 긴급 FA 1시즌 임시 계약 (실제 서비스는 FA 풀에서, fake 는 새로 만든다). 방출·시즌 경계 뒤. 2.4.1: 시즌당 2명 상한 */
   private emergencyFill(s: GameState): void {
     const m = this.mkt(s);
     const signed: string[] = [];
-    while (this.squadOf(s, s.userClubId).length < 18) {
+    const em = (s.emergencySignedThisSeason ??= {});
+    const done = (em[s.userClubId] ??= []);
+    while (this.squadOf(s, s.userClubId).length < 18 && done.length < 2) {
       const tid = `t${s.time.season}-${s.time.day}-${m.nextId++}`;
       const t = genPlayer(mulberry32(s.gameSeed + m.nextId), tid, s.userClubId, 'CM', 45);
       t.contract = { seasonsLeft: 1, salary: 200_000 };
+      t.isTemporary = true;
+      done.push(tid);
       s.players[tid] = t;
       s.clubs[s.userClubId]?.playerIds.push(tid);
       signed.push(t.name);

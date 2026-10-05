@@ -291,14 +291,21 @@ function ContractSection({ p, onClose }: { p: Player; onClose: () => void }) {
       ) : (
         <>
           <div className="btn-row">
-            <button type="button" className={`btn ${mode === 'renew' ? 'btn-primary' : 'btn-secondary'}`} aria-expanded={mode === 'renew'} onClick={() => setMode(mode === 'renew' ? 'none' : 'renew')}>
-              재계약
-            </button>
+            {/* 2.4.1: 성립한 재계약은 다시 제안할 수 없다(RENEWAL_NOT_OPEN · ALREADY_RENEWED) */}
+            {renewed ? (
+              <span className="btn btn-secondary" role="status">
+                ✓ 재계약함
+              </span>
+            ) : (
+              <button type="button" className={`btn ${mode === 'renew' ? 'btn-primary' : 'btn-secondary'}`} aria-expanded={mode === 'renew'} onClick={() => setMode(mode === 'renew' ? 'none' : 'renew')}>
+                재계약
+              </button>
+            )}
             <button type="button" className={`btn ${mode === 'release' ? 'btn-danger' : 'btn-secondary'}`} aria-expanded={mode === 'release'} onClick={() => setMode(mode === 'release' ? 'none' : 'release')}>
               방출
             </button>
           </div>
-          {mode === 'renew' && <RenewalPanel p={p} />}
+          {mode === 'renew' && !renewed && <RenewalPanel p={p} />}
           {mode === 'release' && <ReleasePanel p={p} onDone={onClose} />}
         </>
       )}
@@ -314,7 +321,7 @@ function RenewalPanel({ p }: { p: Player }) {
   const [salary, setSalary] = useState<number | null>(quote?.askSalary ?? null);
   const [seasons, setSeasons] = useState<number>(quote?.seasonsRange[0] ?? 1);
   const [result, setResult] = useState<{ accepted: boolean; ask: number; bonus: number } | null>(null);
-  // 수락한 재계약은 시즌 경계에 적용된다(그 전에 다시 제안하면 덮어쓴다)
+  // 수락한 재계약은 시즌 경계에 적용된다(2.4.1: 다시 제안하면 RENEWAL_NOT_OPEN · ALREADY_RENEWED)
   if (result?.accepted)
     return (
       <p className="small">
@@ -363,6 +370,8 @@ function ReleasePanel({ p, onDone }: { p: Player; onDone: () => void }) {
   const snap = useGame();
   const q = useQuery((s) => s.getReleaseQuote?.(p.id), [p.id]);
   const { run, error } = useInlineAction();
+  // 되돌릴 수 없는 동작이라 2단계 확인 (2.4.1 리뷰): 첫 탭은 확인 화면, 두 번째 탭에서 실행
+  const [confirm, setConfirm] = useState(false);
   if (q.error) return <p className="small muted">{q.error.message}</p>;
   const quote = q.data;
   if (!quote) return <p className="small muted">방출은 아직 열리지 않았어요.</p>;
@@ -377,9 +386,25 @@ function ReleasePanel({ p, onDone }: { p: Player; onDone: () => void }) {
     <div className="form-stack">
       <p>{quote.exempt ? '위약금 없이 방출할 수 있어요.' : <>바로 내야 할 위약금: <strong className="neg">{formatKc(quote.penalty)}</strong> (남은 연봉의 절반)</>}</p>
       <p className="small muted">방출은 언제든 할 수 있어요. 방출한 선수는 FA가 되고 연봉 캡에서 빠져요. 등록 선수가 18명보다 적어지면 FA 선수와 1시즌 긴급 계약을 자동으로 맺고 받은 편지함으로 알려 드려요.</p>
-      <button type="button" className="btn btn-danger" onClick={release}>
-        {quote.exempt ? '방출하기' : `위약금 ${formatKc(quote.penalty)} 내고 방출`}
-      </button>
+      {!confirm ? (
+        <button type="button" className="btn btn-danger" onClick={() => setConfirm(true)}>
+          {quote.exempt ? '방출하기' : `위약금 ${formatKc(quote.penalty)} 내고 방출`}
+        </button>
+      ) : (
+        <div className="form-stack" role="group" aria-label="방출 확인">
+          <p className="warn-line">
+            ⚠ 정말 {josa(p.name, '을/를')} 방출할까요? 되돌릴 수 없고, 이번 시즌에는 FA로 다시 데려올 수 없어요.
+          </p>
+          <div className="btn-row">
+            <button type="button" className="btn btn-secondary" onClick={() => setConfirm(false)}>
+              취소
+            </button>
+            <button type="button" className="btn btn-danger" onClick={release}>
+              방출 확정
+            </button>
+          </div>
+        </div>
+      )}
       <ErrorNote error={error} dev={snap.settings.devMode} />
     </div>
   );

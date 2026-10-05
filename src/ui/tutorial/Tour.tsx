@@ -303,7 +303,7 @@ export function Tour() {
           <h2 id={titleId} className="tour-title" tabIndex={-1}>
             {intro ? '처음이세요?' : bubble.title}
           </h2>
-          <span className="tour-progress" aria-label={`${TOTAL}단계 중 ${intro ? 1 : step}단계`}>
+          <span className="tour-progress" role="img" aria-label={`${TOTAL}단계 중 ${intro ? 1 : step}단계`}>
             {intro ? 1 : step} / {TOTAL}
           </span>
         </div>

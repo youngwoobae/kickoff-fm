@@ -126,7 +126,7 @@ export function LineupScreen() {
       </div>
 
       {view === 'pitch' && formation ? (
-        <div className="pitch" data-tour="lineup.pitch" aria-label="피치 (위가 상대 골대)">
+        <div className="pitch" data-tour="lineup.pitch" role="group" aria-label="피치 (위가 상대 골대)">
           <span className="pitch-goal-label">상대 골대 ↑</span>
           {pitchRows(formation).map((row, ri) => (
             <div key={ri} className="pitch-row">

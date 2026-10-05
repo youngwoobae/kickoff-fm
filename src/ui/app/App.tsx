@@ -10,25 +10,28 @@ import { formatKc } from '../format';
 import { PlanEditorProvider } from '../plan/PlanEditor';
 import { ServiceProvider, useAction, useActor, useAsyncAction, useQuery, useSaveStatus, useService, useServiceCtx, useSnapshot } from '../service/ServiceContext';
 import { DEV_TOOLS, createServiceFor, resolveServiceMode, type ServiceMode } from '../service/serviceHost';
-import { CareerScreen } from '../screens/CareerScreen';
-import { CoachScreen } from '../screens/CoachScreen';
-import { FinanceScreen } from '../screens/FinanceScreen';
 import { HomeScreen } from '../screens/HomeScreen';
 import { InboxScreen, useUnreadCount } from '../screens/InboxScreen';
+// 리그·스쿼드는 홈(PromotionBanner)·편지함(PlayerSheet)이 정적으로 쓰므로 첫 청크에 남긴다
 import { LeagueScreen } from '../screens/LeagueScreen';
-import { LineupScreen } from '../screens/LineupScreen';
-import { MatchCenterScreen } from '../screens/MatchCenterScreen';
-import { PlanScreen } from '../screens/PlanScreen';
 import { SquadScreen } from '../screens/SquadScreen';
-import { TacticsScreen } from '../screens/TacticsScreen';
-import { TransferScreen } from '../screens/TransferScreen';
-import { YouthScreen } from '../screens/YouthScreen';
 import { SettingsButton } from '../screens/SettingsSheet';
 import { TitleScreen } from '../screens/TitleScreen';
 import { Tour } from '../tutorial/Tour';
 import { UpdateBanner } from '../pwa/UpdateBanner';
 import { ErrorBoundary, ServiceUnavailable } from './Fallbacks';
 import { INITIAL_NAV, NavCtx, useNav, type NavState, type TabId } from './nav';
+
+/** 첫 화면(홈·타이틀)에 필요 없는 화면은 각자 청크로 지연 로딩한다 (M7.3) */
+const CareerScreen = lazy(() => import('../screens/CareerScreen').then((m) => ({ default: m.CareerScreen })));
+const CoachScreen = lazy(() => import('../screens/CoachScreen').then((m) => ({ default: m.CoachScreen })));
+const FinanceScreen = lazy(() => import('../screens/FinanceScreen').then((m) => ({ default: m.FinanceScreen })));
+const LineupScreen = lazy(() => import('../screens/LineupScreen').then((m) => ({ default: m.LineupScreen })));
+const MatchCenterScreen = lazy(() => import('../screens/MatchCenterScreen').then((m) => ({ default: m.MatchCenterScreen })));
+const PlanScreen = lazy(() => import('../screens/PlanScreen').then((m) => ({ default: m.PlanScreen })));
+const TacticsScreen = lazy(() => import('../screens/TacticsScreen').then((m) => ({ default: m.TacticsScreen })));
+const TransferScreen = lazy(() => import('../screens/TransferScreen').then((m) => ({ default: m.TransferScreen })));
+const YouthScreen = lazy(() => import('../screens/YouthScreen').then((m) => ({ default: m.YouthScreen })));
 
 /** 개발자 패널: 개발 도구 허용 빌드에서만 별도 청크로 불러온다 (프로덕션 번들 제외) */
 const DevPanel = DEV_TOOLS ? lazy(() => import('../screens/DevPanel').then((m) => ({ default: m.DevPanel }))) : null;
@@ -56,7 +59,7 @@ export function App() {
     setFatal(e);
   }, []);
 
-  if (boot.status === 'loading') return <div className="boot">불러오는 중…</div>;
+  if (boot.status === 'loading') return <div className="boot" role="status">불러오는 중…</div>;
   if (boot.status === 'failed') return <ServiceUnavailable error={boot.error} mode={mode} />;
   if (fatal) return <ServiceUnavailable error={fatal} mode={mode} />;
 
@@ -135,7 +138,9 @@ function Shell() {
         <SaveBanner />
         <main className="app-main">
           <ErrorBoundary mode={mode} resetKey={nav.tab}>
-            <TabContent tab={nav.tab} />
+            <Suspense fallback={<div className="boot" role="status">불러오는 중…</div>}>
+              <TabContent tab={nav.tab} />
+            </Suspense>
           </ErrorBoundary>
         </main>
         <nav className="app-tabbar" aria-label="주 메뉴">
@@ -151,7 +156,7 @@ function Shell() {
                 {t.icon}
               </span>
               <span>{t.label}</span>
-              {badges[t.id] && <span className="tab-dot" aria-label={badges[t.id]} />}
+              {badges[t.id] && <span className="tab-dot" role="img" aria-label={badges[t.id]} />}
             </button>
           ))}
         </nav>
@@ -180,10 +185,13 @@ function TabContent({ tab }: { tab: TabId }) {
   const { nav, go } = useNav();
   const service = useService();
   const snap = useSnapshot();
-  const sub = (node: ReactNode, seg: ReactNode) => (
+  // 하위 화면 탭(Segmented panelId=id) ↔ 본문 tabpanel 연결
+  const sub = (node: ReactNode, seg: ReactNode, id: string, cur: string) => (
     <>
       <div className="subnav">{seg}</div>
-      {node}
+      <div role="tabpanel" id={id} aria-labelledby={`${id}-tab-${cur}`}>
+        {node}
+      </div>
     </>
   );
   switch (tab) {
@@ -197,16 +205,21 @@ function TabContent({ tab }: { tab: TabId }) {
         cur === 'list' ? <SquadScreen /> : cur === 'lineup' ? <LineupScreen /> : <YouthScreen />,
         <Segmented
           label="스쿼드 하위 화면"
+          panelId="squad-panel"
           value={cur}
           onChange={(v) => go({ squad: v })}
           options={[{ value: 'list', label: '선수 목록' }, { value: 'lineup', label: '선발·벤치' }, ...(youth ? [{ value: 'youth' as const, label: '유스' }] : [])]}
         />,
+        'squad-panel',
+        cur,
       );
     }
     case 'tactics':
       return sub(
         nav.tactics === 'team' ? <TacticsScreen /> : <PlanScreen />,
-        <Segmented label="전술 하위 화면" value={nav.tactics} onChange={(v) => go({ tactics: v })} options={[{ value: 'team', label: '팀 전술' }, { value: 'plan', label: '경기 플랜' }]} />,
+        <Segmented label="전술 하위 화면" panelId="tactics-panel" value={nav.tactics} onChange={(v) => go({ tactics: v })} options={[{ value: 'team', label: '팀 전술' }, { value: 'plan', label: '경기 플랜' }]} />,
+        'tactics-panel',
+        nav.tactics,
       );
     case 'match':
       return <MatchCenterScreen />;
@@ -214,15 +227,12 @@ function TabContent({ tab }: { tab: TabId }) {
       const dev = !!DevPanel && (snap?.settings.devMode ?? true);
       const cur = !dev && nav.club === 'dev' ? 'league' : nav.club;
       const body =
-        cur === 'league' ? <LeagueScreen /> : cur === 'career' ? <CareerScreen /> : cur === 'finance' ? <FinanceScreen /> : cur === 'transfer' ? <TransferScreen /> : cur === 'coach' ? <CoachScreen /> : DevPanel && (
-          <Suspense fallback={<div className="boot">불러오는 중…</div>}>
-            <DevPanel />
-          </Suspense>
-        );
+        cur === 'league' ? <LeagueScreen /> : cur === 'career' ? <CareerScreen /> : cur === 'finance' ? <FinanceScreen /> : cur === 'transfer' ? <TransferScreen /> : cur === 'coach' ? <CoachScreen /> : DevPanel && <DevPanel />;
       return sub(
         body,
         <Segmented
           label="클럽 하위 화면"
+          panelId="club-panel"
           size="sm"
           value={cur}
           onChange={(v) => go({ club: v })}
@@ -235,6 +245,8 @@ function TabContent({ tab }: { tab: TabId }) {
             ...(dev ? [{ value: 'dev' as const, label: '개발자' }] : []),
           ]}
         />,
+        'club-panel',
+        cur,
       );
     }
   }

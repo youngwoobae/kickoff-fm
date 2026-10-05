@@ -32,5 +32,19 @@ export default defineConfig({
   plugins: [react(), serviceWorker()],
   define: { __APP_VERSION__: JSON.stringify(version) },
   worker: { format: 'es' },
-  build: { target: 'es2022', sourcemap: true },
+  build: {
+    target: 'es2022',
+    sourcemap: true,
+    rollupOptions: {
+      output: {
+        // 자주 안 바뀌는 React 와 엔진·도메인·서비스를 UI 와 다른 청크로: 단일 청크 500 kB 경고 해소 + 화면만 바뀐 업데이트의 재다운로드 축소
+        manualChunks(id) {
+          const f = id.replace(/\\/g, '/');
+          if (f.includes('/node_modules/react') || f.includes('/node_modules/scheduler/')) return 'vendor';
+          if (/\/src\/(engine|domain|services|types)\//.test(f)) return 'game';
+          return undefined;
+        },
+      },
+    },
+  },
 });

@@ -52,6 +52,7 @@ export function TransferScreen() {
         <>
           <Segmented
             label="이적시장 하위 화면"
+            panelId="transfer-panel"
             size="sm"
             value={view}
             onChange={setView}
@@ -61,9 +62,11 @@ export function TransferScreen() {
               { value: 'sell', label: '판매 등록' },
             ]}
           />
-          {view === 'market' && <MarketView all={all} bids={bids} />}
-          {view === 'bids' && <BidsView all={all} bids={bids} />}
-          {view === 'sell' && <SellView all={all} win={win} />}
+          <div role="tabpanel" id="transfer-panel" aria-labelledby={`transfer-panel-tab-${view}`} className="screen">
+            {view === 'market' && <MarketView all={all} bids={bids} />}
+            {view === 'bids' && <BidsView all={all} bids={bids} />}
+            {view === 'sell' && <SellView all={all} win={win} />}
+          </div>
         </>
       )}
     </div>
@@ -270,7 +273,9 @@ function BidForm({ l, bid, onClose }: { l: TransferListing; bid?: Bid; onClose: 
   const feeBad = !fa && (fee === null || fee < l.minPrice || fee > l.maxPrice);
   const bonusBad = fa && (bonus === null || bonus < 0 || bonus > (l.bonusMax ?? 0));
   const salaryBad = fa && (salary === null || salary < (l.salaryFloor ?? 0));
-  const invalid = feeBad || bonusBad || salaryBad;
+  // 2.4.1: 이번 시즌 우리가 방출한 선수는 FA 로 다시 데려올 수 없다 (서비스는 BID_OUT_OF_RANGE · RELEASED)
+  const released = fa && !!snap.releasedThisSeason?.[snap.userClubId]?.includes(l.playerId);
+  const invalid = feeBad || bonusBad || salaryBad || released;
   const seasonOpts = Array.from({ length: range[1] - range[0] + 1 }, (_, i) => String(range[0] + i));
 
   const submit = () => {
@@ -304,6 +309,7 @@ function BidForm({ l, bid, onClose }: { l: TransferListing; bid?: Bid; onClose: 
       }
     >
       <div className="form-stack">
+        {released && <p className="warn-line" role="note">⚠ 이번 시즌에 방출한 선수는 FA로 다시 데려올 수 없어요</p>}
         {p && (
           <p>
             <span className={`pos-badge pos-${p.primary}`}>{POS_LABEL[p.primary]}</span> {POS_NAME[p.primary]} · {p.age}세 · <strong>OVR {p.ovr}</strong> · 스카우트 {p.scoutRange[0]}~{p.scoutRange[1]}
@@ -358,6 +364,7 @@ function SellView({ all, win }: { all: TransferListing[]; win: TransferWindow })
   const { run, error } = useInlineAction();
   const mine = all.filter((l) => l.sellerClubId === snap.userClubId);
   const listed = new Set(mine.map((l) => l.playerId));
+  const renewedIds = new Set((snap.pendingRenewals ?? []).map((r) => r.playerId));
   const byId = new Map(squad.map((p) => [p.id, p]));
   const [sel, setSel] = useState<Player | null>(null);
   return (
@@ -392,7 +399,8 @@ function SellView({ all, win }: { all: TransferListing[]; win: TransferWindow })
           {squad
             .filter((p) => !listed.has(p.id))
             .map((p) => {
-              const blocked = win.kind === 'REGULAR' && p.contract.seasonsLeft <= 1 ? '계약이 이번 시즌에 끝나는 선수는 정규 창에 올릴 수 없어요' : undefined;
+              // 2.4.1: 성립한 재계약(pendingRenewals)이 있으면 새 계약으로 보아 정규 창에도 올릴 수 있다 (도메인 withPendingRenewal 과 같은 판정)
+              const blocked = win.kind === 'REGULAR' && p.contract.seasonsLeft <= 1 && !renewedIds.has(p.id) ? '계약이 이번 시즌에 끝나는 선수는 정규 창에 올릴 수 없어요' : undefined;
               return (
               <li key={p.id} className="list-row">
                 <span>

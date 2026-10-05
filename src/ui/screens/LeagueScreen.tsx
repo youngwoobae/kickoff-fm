@@ -18,6 +18,7 @@ export function LeagueScreen() {
     <div className="screen league">
       <Segmented
         label="리그 화면"
+        panelId="league-panel"
         size="sm"
         value={view}
         onChange={setView}
@@ -27,11 +28,13 @@ export function LeagueScreen() {
           { value: 'outcome', label: '시즌 결산', disabled: !outcome },
         ]}
       />
-      {view !== 'outcome' && pyramid && <TierTabs leagues={pyramid.leagues} value={league?.id} onChange={setPicked} />}
-      {view !== 'outcome' && league && <LeagueHead league={league} />}
-      {view === 'table' && <StandingsTable leagueId={league?.id} promote={league?.promoteCount} relegate={league?.relegateCount} />}
-      {view === 'fixtures' && <FixturesView key={league?.id ?? 'user'} leagueId={league?.id} isUserLeague={league?.isUserLeague ?? true} />}
-      {view === 'outcome' && <OutcomeView />}
+      <div role="tabpanel" id="league-panel" aria-labelledby={`league-panel-tab-${view}`} className="screen">
+        {view !== 'outcome' && pyramid && <TierTabs leagues={pyramid.leagues} value={league?.id} onChange={setPicked} />}
+        {view !== 'outcome' && league && <LeagueHead league={league} />}
+        {view === 'table' && <StandingsTable leagueId={league?.id} promote={league?.promoteCount} relegate={league?.relegateCount} />}
+        {view === 'fixtures' && <FixturesView key={league?.id ?? 'user'} leagueId={league?.id} isUserLeague={league?.isUserLeague ?? true} />}
+        {view === 'outcome' && <OutcomeView />}
+      </div>
     </div>
   );
 }
@@ -61,8 +64,8 @@ function LeagueHead({ league }: { league: LeagueInfo }) {
 }
 
 function ZoneMark({ zone }: { zone: StandingRow['zone'] }) {
-  if (zone === 'PROMOTION') return <span className="zone-mark zone-up" aria-label="승격권">▲</span>;
-  if (zone === 'RELEGATION') return <span className="zone-mark zone-down" aria-label="강등권">▼</span>;
+  if (zone === 'PROMOTION') return <span className="zone-mark zone-up" role="img" aria-label="승격권">▲</span>;
+  if (zone === 'RELEGATION') return <span className="zone-mark zone-down" role="img" aria-label="강등권">▼</span>;
   return <span className="zone-mark" aria-hidden="true" />;
 }
 
@@ -100,7 +103,7 @@ export function StandingsTable({ rows: given, leagueId, promote, relegate }: { r
                 <td className="t-left">
                   {c?.shortName ?? r.clubId}
                   {c?.isHuman && <span className="tag">나</span>}
-                  <span className="form" aria-label={`최근 ${r.form.join(' ')}`}>
+                  <span className="form" role="img" aria-label={`최근 경기 ${r.form.map((f) => (f === 'W' ? '승' : f === 'D' ? '무' : '패')).join(' ')}`}>
                     {r.form.map((f, i) => (
                       <span key={i} className={`form-${f}`}>
                         {f === 'W' ? '승' : f === 'D' ? '무' : '패'}

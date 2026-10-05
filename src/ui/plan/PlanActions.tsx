@@ -59,8 +59,8 @@ export function ProposeSheet({ open, onClose, patch, title = '코치 제안 보�
       <p className="muted">바꾼 항목: {Object.keys(patch).map((k) => PATCH_LABEL[k] ?? k).join(', ') || '없음'}</p>
       <label className="field">
         <span>이유 (필수, 최대 80자)</span>
-        <input value={reason} maxLength={80} onChange={(e) => setReason(e.target.value)} placeholder="예: 상대 왼쪽 풀백이 느려요. 뒷공간 노림" />
-        <small className="muted">{reason.length}/80</small>
+        <input value={reason} maxLength={80} required aria-describedby="plan-reason-count" onChange={(e) => setReason(e.target.value)} placeholder="예: 상대 왼쪽 풀백이 느려요. 뒷공간 노림" />
+        <small id="plan-reason-count" className="muted">{reason.length}/80</small>
       </label>
     </Sheet>
   );
