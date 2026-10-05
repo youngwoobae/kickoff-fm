@@ -194,9 +194,6 @@ h3 {
 .hdr-sub > span {
   white-space: nowrap;
 }
-.hdr-fake {
-  margin-left: 6px;
-}
 .role-chip {
   min-height: 44px;
   padding: 0 12px;

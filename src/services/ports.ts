@@ -1,7 +1,6 @@
 /**
  * services 의 외부 의존 포트. 테스트·CLI 는 메모리 구현, 브라우저는 localStorage 구현을 주입한다.
  * 2.0.0: 슬롯 저장소 `StoragePort` 는 비동기다(IndexedDB 어댑터 M2.2 가 같은 포트를 구현한다).
- * 이전 동기 단일 세이브 포트는 `LegacyStoragePort` 로 남는다(loadGame/resetGame 경로, M2.3 이후 제거).
  */
 import type { GameState, SaveSlotId, SaveSlotMeta } from '../types';
 import { SAVE_SLOT_IDS } from './api';
@@ -45,14 +44,6 @@ export function isSlotMeta(m: unknown): m is SaveSlotMeta {
   return typeof x === 'object' && x !== null && (SAVE_SLOT_IDS as readonly unknown[]).includes(x.slotId) && typeof x.clubName === 'string' && typeof x.season === 'number';
 }
 
-/** @deprecated 1.x 동기 단일 세이브 포트. loadGame/resetGame 과 함께 M2.3 에서 제거 */
-export interface LegacyStoragePort {
-  load(): string | null;
-  /** 용량 초과 시 GameError('STORAGE_FULL') */
-  save(data: string): void;
-  clear(): void;
-}
-
 export interface Clock {
   /** 실제 시각 ISO 문자열 (행동 로그용). 게임 시간과 무관 */
   nowIso(): string;
@@ -61,33 +52,6 @@ export interface Clock {
 /** 1.x 단일 세이브 키. M2.2 가 이 값을 슬롯 1 로 이전한다 */
 export const SAVE_KEY = 'kickoff-fm/save/v1';
 export const SLOT_KEY_PREFIX = 'kickoff-fm/slot/';
-
-/** @deprecated 1.x 동기 어댑터 (LegacyStoragePort) */
-export function createLocalStorageAdapter(key: string = SAVE_KEY): LegacyStoragePort {
-  return {
-    load: () => globalThis.localStorage?.getItem(key) ?? null,
-    save: (data) => {
-      globalThis.localStorage?.setItem(key, data);
-    },
-    clear: () => {
-      globalThis.localStorage?.removeItem(key);
-    },
-  };
-}
-
-/** @deprecated 1.x 동기 메모리 저장소 (LegacyStoragePort) */
-export function createMemoryStorage(initial: string | null = null): LegacyStoragePort {
-  let value = initial;
-  return {
-    load: () => value,
-    save: (data) => {
-      value = data;
-    },
-    clear: () => {
-      value = null;
-    },
-  };
-}
 
 function parseMeta(raw: string | null): SaveSlotMeta | null {
   if (!raw) return null;

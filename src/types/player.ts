@@ -122,7 +122,7 @@ export interface Player {
 
 /** 2.3.0 (M5.1): 유스 후보. tierRange = 구단 티어 기준 상대 등급(U3: 그 티어 기준 OVR 을 C 근처로 맞춘 척도, 표시용) */
 export interface YouthCandidate extends Player {
-  /** 로컬 서비스는 항상 채운다 (선택인 이유: UI fake 호환) */
+  /** 로컬 서비스는 항상 채운다 */
   tierRange?: [ScoutGrade, ScoutGrade];
 }
 
@@ -130,7 +130,7 @@ export interface YouthCandidate extends Player {
 export interface YouthIntake {
   season: SeasonNo;
   clubId: ClubId;
-  /** 생성 시점 구단 티어 (tierRange·자동 결정 기준). 로컬 서비스는 항상 채운다 (선택인 이유: UI fake 호환) */
+  /** 생성 시점 구단 티어 (tierRange·자동 결정 기준). 로컬 서비스는 항상 채운다 */
   tier?: Tier;
   /** 후보는 players 맵에 넣지 않는다(승격 시 이동, 나머지는 세계에서 사라짐). clubId null, academyClubId = 구단 */
   candidates: YouthCandidate[];

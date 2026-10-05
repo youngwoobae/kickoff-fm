@@ -1,10 +1,8 @@
 /**
- * 계약 2.3.0 (M5.1) 접근자 모음 (소유: B). 타입은 src/types 의 실제 2.3.0 타입을 다시 내보낸다.
+ * 계약 2.3.0 (M5.1) 접근자 모음 (소유: B).
  * 2.3.0 필드는 모두 선택이라 없을 때의 기본값을 여기서 한 번만 정한다.
  */
 import type { Club, Player } from '../types';
-
-export type { TrainingFocus, YouthCandidate, YouthIntake } from '../types';
 
 /** Club.training (없으면 { focus: 'BALANCED' }) */
 export const trainingOf = (club: Club | undefined): NonNullable<Club['training']> => club?.training ?? { focus: 'BALANCED' };

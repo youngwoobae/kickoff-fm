@@ -16,7 +16,7 @@ export interface SlotChannel {
 export function guardSlotOwner(service: Pick<GameService, 'subscribe' | 'getActiveSlot' | 'closeSlot'>, ch: SlotChannel, onTaken: (slot: SaveSlotId) => void): () => void {
   let mine: SaveSlotId | null = null;
   const announce = () => {
-    const id = service.getActiveSlot?.() ?? null;
+    const id = service.getActiveSlot();
     if (id !== null && id !== mine) ch.postMessage(id);
     mine = id;
   };
@@ -24,8 +24,8 @@ export function guardSlotOwner(service: Pick<GameService, 'subscribe' | 'getActi
   announce();
   ch.onmessage = (e) => {
     const id = e.data as SaveSlotId;
-    if (id === null || id !== service.getActiveSlot?.()) return;
-    void service.closeSlot?.().then(() => onTaken(id), () => undefined);
+    if (id === null || id !== service.getActiveSlot()) return;
+    void service.closeSlot().then(() => onTaken(id), () => undefined);
   };
   return () => {
     off();

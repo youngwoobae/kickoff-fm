@@ -15,7 +15,6 @@ export {
   STYLES,
   STYLE_IDS,
   STYLE_MATRIX_EXPECTED,
-  legacyBotTag,
   nearestStyle,
   RULE_DEFS,
   RULE_IDS,

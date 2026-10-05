@@ -1,25 +1,24 @@
 /** 코드 리뷰 M4·M5 (docs/코드리뷰_M4M5.md) Critical·Major 회귀 테스트. 모두 수정 전 코드에서 실패한다 */
 import { beforeAll, describe, expect, it } from 'vitest';
-import { clock } from '../helpers';
-import { createGameService, createMemoryStorage, isGameError, type GameService } from '../../src/services';
+import { svc } from '../helpers';
+import { isGameError, type GameService } from '../../src/services';
 import { TIER_REFERENCE_OVR, benchIdsOf, clubPlayers, clubTierMap, playerValue, trainingFocusOf } from '../../src/domain';
 import type { GameErrorCode, GameState, Player } from '../../src/types';
 
-type Svc = Required<GameService>;
-const fresh = () => createGameService({ storage: createMemoryStorage(), clock }) as Svc;
-const mk = (seed = 7): Svc => {
+const fresh = () => svc();
+const mk = (seed = 7): GameService => {
   const s = fresh();
   s.newGame({ seed });
   return s;
 };
-const snap = (s: Svc) => s.getSnapshot()! as GameState;
-const load = (x: unknown): Svc => {
+const snap = (s: GameService) => s.getSnapshot()! as GameState;
+const load = (x: unknown): GameService => {
   const t = fresh();
   t.importSave(JSON.stringify(x));
   return t;
 };
 
-function goTo(s: Svc, season: number, day: number): void {
+function goTo(s: GameService, season: number, day: number): void {
   for (let i = 0; i < 200; i++) {
     const t = snap(s).time;
     if (t.season === season && t.day === day && snap(s).phase !== 'SEASON_OVER') return;

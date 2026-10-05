@@ -9,8 +9,8 @@ import { guardSlotOwner } from './slotGuard';
 import { Segmented } from '../components/kit';
 import { formatKc } from '../format';
 import { PlanEditorProvider } from '../plan/PlanEditor';
-import { ServiceProvider, useActor, useAsyncAction, useOpenProposalCount, useQuery, useSaveStatus, useService, useServiceCtx, useSnapshot } from '../service/ServiceContext';
-import { DEV_TOOLS, createServiceFor, resolveServiceMode, type ServiceMode } from '../service/serviceHost';
+import { ServiceProvider, useActor, useAsyncAction, useOpenProposalCount, useQuery, useSaveStatus, useService, useSnapshot } from '../service/ServiceContext';
+import { DEV_TOOLS, createService } from '../service/serviceHost';
 import { HomeScreen } from '../screens/HomeScreen';
 import { InboxScreen, useUnreadCount } from '../screens/InboxScreen';
 // 리그·스쿼드는 홈(PromotionBanner)·편지함(PlayerSheet)이 정적으로 쓰므로 첫 청크에 남긴다
@@ -41,20 +41,19 @@ const DevPanel = DEV_TOOLS ? lazy(() => import('../screens/DevPanel').then((m) =
 type Boot ={ status: 'loading' } | { status: 'ready'; service: GameService } | { status: 'failed'; error: unknown };
 
 export function App() {
-  const [mode] = useState<ServiceMode>(resolveServiceMode);
   const [boot, setBoot] = useState<Boot>({ status: 'loading' });
   const [fatal, setFatal] = useState<unknown>(null);
 
   useEffect(() => {
     let alive = true;
-    createServiceFor(mode).then(
+    createService().then(
       (service) => alive && setBoot({ status: 'ready', service }),
       (error: unknown) => alive && setBoot({ status: 'failed', error }),
     );
     return () => {
       alive = false;
     };
-  }, [mode]);
+  }, []);
 
   const reportFatal = useCallback((e: unknown) => {
     console.error('[ui] 서비스 오류', e);
@@ -62,13 +61,13 @@ export function App() {
   }, []);
 
   if (boot.status === 'loading') return <div className="boot" role="status">불러오는 중…</div>;
-  if (boot.status === 'failed') return <ServiceUnavailable error={boot.error} mode={mode} />;
-  if (fatal) return <ServiceUnavailable error={fatal} mode={mode} />;
+  if (boot.status === 'failed') return <ServiceUnavailable error={boot.error} />;
+  if (fatal) return <ServiceUnavailable error={fatal} />;
 
   return (
     <ToastProvider>
-      <ServiceProvider value={{ service: boot.service, mode, reportFatal }}>
-        <ErrorBoundary mode={mode}>
+      <ServiceProvider value={{ service: boot.service, reportFatal }}>
+        <ErrorBoundary>
           <GameRoot />
         </ErrorBoundary>
         <UpdateBanner />
@@ -111,7 +110,7 @@ function useSessionLog() {
     };
     log('SESSION_START');
     // 앱을 떠나거나 가릴 때 밀린 자동 저장을 끝낸다 (실패는 저장 상태 배너가 알린다)
-    const flush = () => void service.flush?.().catch(() => undefined);
+    const flush = () => void service.flush().catch(() => undefined);
     const onVis = () => {
       const hidden = document.visibilityState !== 'visible';
       log(hidden ? 'SESSION_END' : 'SESSION_START');
@@ -141,7 +140,6 @@ function Shell() {
     globalThis.scrollTo?.({ top: 0 });
   }, []);
   const api = useMemo(() => ({ nav, go }), [nav, go]);
-  const { mode } = useServiceCtx();
   const badges = useTabBadges();
 
   return (
@@ -150,7 +148,7 @@ function Shell() {
         <TopBar />
         <SaveBanner />
         <main className="app-main">
-          <ErrorBoundary mode={mode} resetKey={nav.tab}>
+          <ErrorBoundary resetKey={nav.tab}>
             <Suspense fallback={<div className="boot" role="status">불러오는 중…</div>}>
               <TabContent tab={nav.tab} />
             </Suspense>
@@ -196,7 +194,6 @@ function useTabBadges(): Partial<Record<TabId, string>> {
 
 function TabContent({ tab }: { tab: TabId }) {
   const { nav, go } = useNav();
-  const service = useService();
   const snap = useSnapshot();
   // 하위 화면 탭(Segmented panelId=id) ↔ 본문 tabpanel 연결
   const sub = (node: ReactNode, seg: ReactNode, id: string, cur: string) => (
@@ -211,9 +208,7 @@ function TabContent({ tab }: { tab: TabId }) {
     case 'home':
       return nav.homeView === 'inbox' ? <InboxScreen /> : <HomeScreen />;
     case 'squad': {
-      // 유스는 2.3.0 getYouthIntake 가 있는 서비스에서만
-      const youth = !!service.getYouthIntake;
-      const cur = !youth && nav.squad === 'youth' ? 'list' : nav.squad;
+      const cur = nav.squad;
       return sub(
         cur === 'list' ? <SquadScreen /> : cur === 'lineup' ? <LineupScreen /> : <YouthScreen />,
         <Segmented
@@ -221,7 +216,7 @@ function TabContent({ tab }: { tab: TabId }) {
           panelId="squad-panel"
           value={cur}
           onChange={(v) => go({ squad: v })}
-          options={[{ value: 'list', label: '선수 목록' }, { value: 'lineup', label: '선발·벤치' }, ...(youth ? [{ value: 'youth' as const, label: '유스' }] : [])]}
+          options={[{ value: 'list', label: '선수 목록' }, { value: 'lineup', label: '선발·벤치' }, { value: 'youth', label: '유스' }]}
         />,
         'squad-panel',
         cur,
@@ -267,7 +262,6 @@ function TabContent({ tab }: { tab: TabId }) {
 
 function TopBar() {
   const snap = useSnapshot();
-  const { mode } = useServiceCtx();
   const fin = useQuery((s) => s.getFinance()).data;
   if (!snap) return null;
   const club = snap.clubs[snap.userClubId];
@@ -281,7 +275,6 @@ function TopBar() {
             S{snap.time.season} · {phaseLabel}
           </span>
           {fin && <> <span>· 잔액 {formatKc(fin.balance)}</span></>}
-          {mode === 'fake' && <span className="badge badge-warn hdr-fake">FAKE</span>}
         </span>
       </div>
       <MemberChip />
@@ -321,7 +314,7 @@ function TitleButton() {
       disabled={busy}
       onClick={async () => {
         setBusy(true);
-        await act((s) => s.closeSlot?.());
+        await act((s) => s.closeSlot());
         setBusy(false);
       }}
     >
@@ -338,7 +331,7 @@ function SaveBanner() {
   return (
     <div className="save-banner" role="alert">
       <span title={status.error}>⚠ 저장하지 못했어요. 저장 공간이 부족할 수 있어요.</span>
-      <button type="button" className="btn btn-secondary btn-sm" onClick={() => void act((s) => s.flush?.(), '저장했어요')}>
+      <button type="button" className="btn btn-secondary btn-sm" onClick={() => void act((s) => s.flush(), '저장했어요')}>
         다시 저장
       </button>
     </div>

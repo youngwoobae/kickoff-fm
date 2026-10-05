@@ -4,7 +4,7 @@ import type { DayResult, Fixture, MatchSummary } from '../../types';
 import { Badge, Card, Empty, Meter, Sheet, StickyActions } from '../components/kit';
 import { PromotionBanner } from './LeagueScreen';
 import { useUnreadCount } from './InboxScreen';
-import { ADJ_LABEL, BOT_STYLE_LABEL, PLAN_SOURCE_LABEL, formatKc, LEDGER_LABEL, MEMO_KINDS, memberText } from '../format';
+import { ADJ_LABEL, PLAN_SOURCE_LABEL, formatKc, LEDGER_LABEL, MEMO_KINDS, memberText } from '../format';
 import { useNav } from '../app/nav';
 import { usePlanEditor } from '../plan/PlanEditor';
 import { getPrefs } from '../prefs';
@@ -123,7 +123,7 @@ function NextMatchCard({ fixture }: { fixture: Fixture }) {
       {scout && (
         <div className="scout">
           <div>
-            상대 스타일: <strong>{styleLabel ?? (scout.botStyle ? BOT_STYLE_LABEL[scout.botStyle] : '사람 구단')}</strong>
+            상대 스타일: <strong>{styleLabel ?? '사람 구단'}</strong>
             {styleLabel && scout.styleEstimated && <> <Badge tone="warn">추정</Badge></>}
             {scout.last5[0] && <> · 최근 {scout.last5[0].formation}</>}
           </div>

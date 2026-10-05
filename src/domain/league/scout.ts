@@ -1,6 +1,6 @@
 /** 상대 분석 요약 (12.3, 11 H01): 최근 5경기 포메이션·지시 요약 + 약점 한 줄. 소유: A. */
 import type { BotStyle, Club, ClubId, MatchSummary, OpponentRecentMatch, OpponentScout, RuleId, StyleId, TeamInstructions } from '../../types';
-import { legacyBotTag, nearestStyle } from '../../engine';
+import { nearestStyle } from '../../engine';
 import type { TacticShape } from '../ai/matchup';
 
 const LABELS: [keyof TeamInstructions, string][] = [
@@ -54,12 +54,9 @@ const STYLE_HINT: Record<StyleId, string> = {
   WINGBACK_3: '3백 윙백형: 윙백 뒤 공간이 빈다 — 빠른 윙어로 측면 1:1 을 노려 보세요',
 };
 
-/** 봇 성향 (style 우선, 스키마 1 레거시 botStyle 은 'WIDE' → 'WING_PLAY') */
+/** 봇 성향 (스키마 1 레거시 botStyle 은 세이브 변환이 style 로 옮긴다) */
 export function botStyleOf(club: Club | undefined): BotStyle | undefined {
-  if (!club) return undefined;
-  if (club.style) return club.style;
-  if (club.botStyle) return club.botStyle === 'WIDE' ? 'WING_PLAY' : club.botStyle;
-  return undefined;
+  return club?.style;
 }
 
 
@@ -95,7 +92,6 @@ export function buildOpponentScout(clubs: Readonly<Record<string, Club>>, summar
   const weakness = top ? WEAKNESS_TEXT[top] : style ? STYLE_HINT[style] : '아직 경기 기록이 없어요. 몇 경기를 치르면 약점을 알려 드릴게요';
   return {
     clubId,
-    ...(bot ? { botStyle: legacyBotTag(bot) } : {}),
     ...(style ? { style, styleEstimated: !bot } : {}),
     last5,
     weakness,

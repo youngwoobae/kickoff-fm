@@ -5,7 +5,7 @@ import type { StyleApplyMode } from '../../services';
 import { Badge, Card, Meter, Segmented, Sheet, Stars, StepSlider, StickyActions, Toggle } from '../components/kit';
 import { FIT_LEVEL_LABEL, FIT_LEVEL_TONE, INSTR_LABEL, POS_LABEL, SLIDERS, nearestStyle, roleFit, stepText } from '../format';
 import { ProposeSheet } from '../plan/PlanActions';
-import { useAction, useGame, useIsOwner, useQuery, useService } from '../service/ServiceContext';
+import { useAction, useGame, useIsOwner, useQuery } from '../service/ServiceContext';
 
 type Draft = Omit<TacticSlot, 'familiarity' | 'key'>;
 
@@ -24,7 +24,6 @@ export function TacticsScreen() {
   const [proposeOpen, setProposeOpen] = useState(false);
   const [styleOpen, setStyleOpen] = useState<StyleDef | null>(null);
   const [roleSlot, setRoleSlot] = useState<number | null>(null);
-  const service = useService();
   const squad = useQuery((s) => s.getSquad()).data;
   const resolved = useQuery((s) => s.previewResolvedPlan()).data;
 
@@ -68,14 +67,14 @@ export function TacticsScreen() {
 
   const applyStyle = (st: StyleDef, mode: StyleApplyMode) => {
     setStyleOpen(null);
-    if (isOwner && service.applyStyle) {
+    if (isOwner) {
       run(
-        (s) => s.applyStyle!(slotKey, st.id, mode),
+        (s) => s.applyStyle(slotKey, st.id, mode),
         (r) => r.warning ?? (mode === 'FULL' ? `${st.label}: 포메이션·역할·지시를 적용했어요` : `${st.label}: 팀 지시를 적용했어요 (숙련도 유지)`),
       );
       return;
     }
-    // 폴백(메서드 없음·코치): 편집본에만 반영 → 저장/제안 버튼으로 확정
+    // 코치: 편집본에만 반영 → 저장/제안 버튼으로 확정
     setDraft((d) =>
       d ? (mode === 'FULL' ? { formation: st.formation, roles: [...st.roles], instructions: { ...st.instructions } } : { ...d, instructions: { ...st.instructions } }) : d,
     );
@@ -235,7 +234,7 @@ function StylePicker({
   fallbackPresets: PresetDef[];
   onPreset: (id: PresetId) => void;
 }) {
-  const fits = useQuery((s) => s.getStyleFits?.() ?? null).data ?? null;
+  const fits = useQuery((s) => s.getStyleFits()).data ?? null;
   if (styles.length === 0) {
     // 목 서비스 호환: styles 가 없으면 기존 프리셋 칩
     const cur = fallbackPresets.find((p) => same(p.instructions, instructions));
@@ -318,7 +317,7 @@ function StyleSheet({
   onApply: (s: StyleDef, mode: StyleApplyMode) => void;
 }) {
   const [confirmFull, setConfirmFull] = useState(false);
-  const fits = useQuery((s) => s.getStyleFits?.() ?? null).data ?? null;
+  const fits = useQuery((s) => s.getStyleFits()).data ?? null;
   useEffect(() => setConfirmFull(false), [style]);
   if (!style) return null;
   const halves = style.formation !== currentFormation;

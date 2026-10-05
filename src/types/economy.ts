@@ -30,20 +30,7 @@ export type LedgerKind =
   | 'PROMOTION_BONUS'
   /** 2.1.1: 강등 연봉 전용 계정(Finance.parachute)이 새 캡 초과 연봉을 대신 낸 금액 (+) */
   | 'PARACHUTE'
-  /** 2.2.1 (M4.4): 이적·계약 7종 (아래 TransferLedgerKind 와 같은 값) */
-  | 'TRANSFER_FEE_PAID'
-  | 'TRANSFER_FEE_RECEIVED'
-  | 'TRANSFER_TAX'
-  | 'SIGNING_BONUS'
-  | 'RENEWAL_BONUS'
-  | 'RELEASE_PENALTY'
-  | 'FORCED_SALE';
-
-/**
- * @deprecated 2.2.1 (M4.4) 에서 LedgerKind 에 합쳤다. 기존 코드 컴파일용 별칭.
- * 부호: 지출 −, 수입 +. TRANSFER_TAX·FORCED_SALE 는 판매 구단 기준 기록(세금 −, 강제 매각 수입 +).
- */
-export type TransferLedgerKind =
+  /** 2.2.1 (M4.4): 이적·계약 7종. TRANSFER_TAX·FORCED_SALE 는 판매 구단 기준 기록(세금 −, 강제 매각 수입 +) */
   | 'TRANSFER_FEE_PAID'
   | 'TRANSFER_FEE_RECEIVED'
   | 'TRANSFER_TAX'

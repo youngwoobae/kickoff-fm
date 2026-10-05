@@ -10,20 +10,20 @@ import { YOUTH_INBOX_KINDS } from '../types23';
 
 /** 안 읽은 편지 수 (홈 배지·상단 버튼) */
 export function useUnreadCount(): number {
-  return useQuery((s) => s.getInbox?.({ unreadOnly: true }).length ?? 0).data ?? 0;
+  return useQuery((s) => s.getInbox({ unreadOnly: true }).length).data ?? 0;
 }
 
 export function InboxScreen() {
   const service = useService();
   const { go } = useNav();
-  const q = useQuery((s) => s.getInbox?.());
+  const q = useQuery((s) => s.getInbox());
   const list = q.data;
   const unread = useUnreadCount();
   const [player, setPlayer] = useState<PlayerId | null>(null);
   // 읽음은 게임 사건이 아니라 실패해도 화면을 막지 않는다
   const markRead = (ids?: string[]) => {
     try {
-      service.markRead?.(ids);
+      service.markRead(ids);
     } catch {
       /* noop */
     }

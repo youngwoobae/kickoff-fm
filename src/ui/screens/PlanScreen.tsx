@@ -233,7 +233,7 @@ export function PlanScreen() {
 function MatchupCard({ slot, oppId }: { slot: SlotKey; oppId: ClubId }) {
   const catalog = useQuery((s) => s.getCatalog()).data;
   const scout = useQuery((s) => s.getOpponentScout(oppId), [oppId]).data;
-  const q = useQuery((s) => s.getMatchupPreview?.(slot, oppId) ?? null, [slot, oppId]);
+  const q = useQuery((s) => s.getMatchupPreview(slot, oppId), [slot, oppId]);
   const mp = q.data ?? null;
   const styleId = mp?.opponentStyle ?? scout?.style;
   const estimated = mp ? mp.opponentStyleEstimated : scout?.styleEstimated;

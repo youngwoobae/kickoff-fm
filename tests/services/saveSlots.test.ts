@@ -1,28 +1,21 @@
 /** 계약 2.0.0: 세이브 슬롯·비동기 시작·write-behind (공개 API 만 사용) */
 import { describe, expect, it } from 'vitest';
-import { clock } from '../helpers';
+import { clock, svc } from '../helpers';
 import {
   SAVE_SLOT_IDS,
-  createGameService,
   createLocalStorageSlotStorage,
   createMemorySlotStorage,
-  createMemoryStorage,
   isGameError,
   createIndexedDbSlotStorage,
   migrateLocalSaves,
   kvSlotStorage,
   SAVE_KEY,
-  type GameService,
   type KeyValue,
   type StoragePort,
 } from '../../src/services';
 
 
-type SlotService = Required<Pick<GameService, 'listSlots' | 'openSlot' | 'deleteSlot' | 'closeSlot' | 'flush' | 'exportSlot' | 'getActiveSlot' | 'getSaveStatus'>> & GameService;
 
-function svc(slots: StoragePort = createMemorySlotStorage()): SlotService {
-  return createGameService({ slots, clock }) as SlotService;
-}
 
 async function code(p: Promise<unknown>): Promise<string> {
   try {
@@ -149,14 +142,6 @@ describe('세이브 슬롯 (2.0.0)', () => {
     expect((await svc(store).openSlot(3)).gameSeed).toBe(9);
   });
 
-  it('레거시 경로 유지: 슬롯 없이 newGame → 동기 저장소 → loadGame', () => {
-    const storage = createMemoryStorage();
-    const a = createGameService({ storage, clock });
-    a.newGame({ seed: 11 });
-    expect(storage.load()).not.toBeNull();
-    expect(createGameService({ storage, clock }).loadGame()?.gameSeed).toBe(11);
-  });
-
   it('localStorage 슬롯 어댑터 왕복 (키 kickoff-fm/slot/{n})', async () => {
     const m = new Map<string, string>();
     const fake = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) };
@@ -191,11 +176,10 @@ describe('로그 분리·세이브 이전 (2.0.1)', () => {
   }
   const mapKv = (m: Map<string, string>): KeyValue => ({ get: (k) => m.get(k) ?? null, set: (k, v) => void m.set(k, v), del: (k) => void m.delete(k) });
   function v1Save(seed: number, clubName = 'v1 FC'): string {
-    const storage = createMemoryStorage();
-    const a = createGameService({ storage, clock });
+    const a = svc();
     a.newGame({ seed, clubName });
     a.logEvent('SESSION_START');
-    return storage.load()!;
+    return a.exportSave();
   }
 
   it('logEvent 1건 = 로그 쓰기만, 세이브 본문 재직렬화 없음. 본문엔 actionLog 가 없고 다시 열면 합쳐진다', async () => {

@@ -9,7 +9,7 @@ import { useAction, useGame, useQuery } from '../service/ServiceContext';
 export function LeagueScreen() {
   const snap = useGame();
   const outcome = useQuery((s) => s.getSeasonOutcome()).data ?? null;
-  const pyramid = useQuery((s) => s.getPyramid?.() ?? null).data ?? null;
+  const pyramid = useQuery((s) => s.getPyramid()).data ?? null;
   const [view, setView] = useState<'table' | 'fixtures' | 'outcome'>(snap.phase === 'SEASON_OVER' ? 'outcome' : 'table');
   const [picked, setPicked] = useState<LeagueId | null>(null);
   // 승강으로 사용자 리그가 바뀌면 고른 탭이 사라질 수 있다 → 사용자 리그로

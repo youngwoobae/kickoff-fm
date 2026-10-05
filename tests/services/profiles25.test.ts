@@ -1,16 +1,15 @@
 /** 계약 2.5.0: 로컬 프로필(한 기기 핫시트) — 멤버 관리·전환·역할별 제안 영역·제안 작성자·이적/재계약 제안·구단주 PIN·이전 세이브 */
 import { describe, expect, it } from 'vitest';
-import { clock } from '../helpers';
-import { createGameService, createMemoryStorage, isGameError, type GameService } from '../../src/services';
+import { svc } from '../helpers';
+import { isGameError, type GameService } from '../../src/services';
 import type { GameErrorCode, GameState } from '../../src/types';
 
-type Svc = Required<GameService>;
-const mk = (seed = 7): Svc => {
-  const s = createGameService({ storage: createMemoryStorage(), clock }) as Svc;
+const mk = (seed = 7): GameService => {
+  const s = svc();
   s.newGame({ seed });
   return s;
 };
-const snap = (s: Svc) => s.getSnapshot()! as GameState;
+const snap = (s: GameService) => s.getSnapshot()! as GameState;
 
 function fail(fn: () => unknown): { code: GameErrorCode; details: readonly string[] } | null {
   try {
@@ -22,7 +21,7 @@ function fail(fn: () => unknown): { code: GameErrorCode; details: readonly strin
   return null;
 }
 
-function goTo(s: Svc, season: number, day: number): void {
+function goTo(s: GameService, season: number, day: number): void {
   for (let i = 0; i < 200; i++) {
     const t = snap(s).time;
     if (t.season === season && t.day === day && snap(s).phase !== 'SEASON_OVER') return;
@@ -33,7 +32,7 @@ function goTo(s: Svc, season: number, day: number): void {
 }
 
 /** 다음 경기 id (getPlanState 기준) */
-const nextMatch = (s: Svc) => s.getPlanState().matchId!;
+const nextMatch = (s: GameService) => s.getPlanState().matchId!;
 
 describe('멤버 관리 (2.5.0)', () => {
   it('새 게임 기본 멤버 = 구단주 + 전술 코치, 표시 필드 채움', () => {
@@ -218,7 +217,7 @@ describe('구단주 PIN (2.5.0)', () => {
     s.switchMember('u-owner', '4321');
     // 내보내기·가져오기 후에도 같은 PIN
     const json = s.exportSave();
-    const t = createGameService({ storage: createMemoryStorage(), clock }) as Svc;
+    const t = svc();
     t.importSave(json);
     t.switchRole('COACH');
     expect(fail(() => t.switchMember('u-owner', '1111'))!.details).toEqual(['PIN_WRONG']);

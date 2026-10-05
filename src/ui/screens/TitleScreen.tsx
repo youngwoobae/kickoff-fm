@@ -32,7 +32,7 @@ function lastPlayed(iso: string): string {
 
 export function TitleScreen() {
   const service = useService();
-  const { mode, reportFatal } = useServiceCtx();
+  const { reportFatal } = useServiceCtx();
   const act = useAsyncAction();
   const toast = useToast();
   const [metas, setMetas] = useState<SaveSlotMeta[] | null>(null);
@@ -46,7 +46,7 @@ export function TitleScreen() {
   const reload = useCallback(() => {
     setMetas(null);
     setLoadError(null);
-    pendingSlotOp.then(() => service.listSlots?.() ?? []).then(setMetas, (e: unknown) => setLoadError(e instanceof Error ? e.message : String(e)));
+    pendingSlotOp.then(() => service.listSlots()).then(setMetas, (e: unknown) => setLoadError(e instanceof Error ? e.message : String(e)));
   }, [service]);
   useEffect(reload, [reload]);
 
@@ -63,7 +63,7 @@ export function TitleScreen() {
   const open = (id: SaveSlotId) =>
     withBusy('세이브를 불러오는 중…', async () => {
       try {
-        await service.openSlot?.(id);
+        await service.openSlot(id);
       } catch (e) {
         if (isGameError(e) && e.code === 'SAVE_INCOMPATIBLE') return setCorrupt((c) => ({ ...c, [id]: e.message }));
         if (isGameError(e) && e.code === 'NOT_FOUND') return reload();
@@ -74,14 +74,14 @@ export function TitleScreen() {
   const remove = (id: SaveSlotId, name: string) => {
     if (!confirm(`슬롯 ${id} (${name}) 세이브를 삭제할까요? 되돌릴 수 없어요.`)) return;
     void withBusy('삭제하는 중…', async () => {
-      await act((s) => s.deleteSlot?.(id), `슬롯 ${id} 세이브를 지웠어요`);
+      await act((s) => s.deleteSlot(id), `슬롯 ${id} 세이브를 지웠어요`);
       setCorrupt((c) => ({ ...c, [id]: undefined }));
       reload();
     });
   };
 
   const exportSlot = (id: SaveSlotId) =>
-    void act((s) => s.exportSlot?.(id)).then((json) => {
+    void act((s) => s.exportSlot(id)).then((json) => {
       if (json) downloadText(`kickoff-slot${id}-${new Date().toLocaleDateString('sv-SE')}.json`, json);
     });
 
@@ -126,7 +126,6 @@ export function TitleScreen() {
         <h1 className="hero">킥오프 FM</h1>
         <p className="muted">
           매일 경기 플랜을 제출하고 하루씩 진행하는 축구 구단 운영 게임이에요. 진행은 매일 자동 저장돼요.
-          {mode === 'fake' && ' (가짜 서비스 모드)'}
         </p>
         <IosInstallHint />
         {SAVE_SLOT_IDS.map((id) => {

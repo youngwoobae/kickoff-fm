@@ -1,13 +1,10 @@
 /** 서비스 통합 테스트: 공개 API(services/index)만 사용 */
 import { describe, expect, it } from 'vitest';
-import { clock } from '../helpers';
-import { createGameService, createMemoryStorage, isGameError, type GameService } from '../../src/services';
+import { svc } from '../helpers';
+import { createMemorySlotStorage, isGameError } from '../../src/services';
 import type { MatchPlan } from '../../src/types';
 
 
-function svc(storage = createMemoryStorage()): GameService {
-  return createGameService({ storage, clock });
-}
 
 function code(fn: () => unknown): string {
   try {
@@ -19,16 +16,17 @@ function code(fn: () => unknown): string {
 }
 
 describe('GameService', () => {
-  it('게임이 없으면 NO_GAME, 새 게임 → 저장소에 영속화 → loadGame 복원', () => {
-    const storage = createMemoryStorage();
-    const s = svc(storage);
+  it('게임이 없으면 NO_GAME, 새 게임 → 슬롯에 영속화 → openSlot 복원', async () => {
+    const slots = createMemorySlotStorage();
+    const s = svc(slots);
     expect(s.getSnapshot()).toBeNull();
     expect(code(() => s.getStandings())).toBe('NO_GAME');
-    const snap = s.newGame({ seed: 7, clubName: '테스트 FC' });
+    const snap = s.newGame({ seed: 7, clubName: '테스트 FC', slotId: 1 });
     expect(snap.clubs[snap.userClubId]!.name).toBe('테스트 FC');
     expect(s.getSnapshot()).toBe(s.getSnapshot()); // 같은 상태 = 같은 참조
-    const s2 = svc(storage);
-    expect(s2.loadGame()?.gameSeed).toBe(7);
+    await s.flush();
+    const s2 = svc(slots);
+    expect((await s2.openSlot(1)).gameSeed).toBe(7);
     expect(s2.getStandings()).toHaveLength(14);
   });
 
@@ -165,20 +163,15 @@ describe('GameService', () => {
     expect(day.expiredProposals).toContain(p2.id);
   });
 
-  it('importSave 는 호환 불가 데이터를 거부, resetGame 은 저장소를 비운다', () => {
-    const storage = createMemoryStorage();
-    const s = svc(storage);
+  it('importSave 는 호환 불가 데이터를 거부한다', () => {
+    const s = svc();
     s.newGame({ seed: 2 });
     expect(code(() => s.importSave('{bad'))).toBe('SAVE_INCOMPATIBLE');
     expect(code(() => s.importSave(JSON.stringify({ schemaVersion: 999 })))).toBe('SAVE_INCOMPATIBLE');
-    s.resetGame();
-    expect(s.getSnapshot()).toBeNull();
-    expect(storage.load()).toBeNull();
   });
 
-  it('[리뷰 R1] 구조가 깨진 세이브는 가져오기 거부 + 기존 저장 유지, 불러오기는 null', () => {
-    const storage = createMemoryStorage();
-    const s = svc(storage);
+  it('[리뷰 R1] 구조가 깨진 세이브는 가져오기 거부 + 기존 상태 유지', () => {
+    const s = svc();
     s.newGame({ seed: 3 });
     const good = s.exportSave();
     const before = s.getSnapshot();
@@ -197,8 +190,6 @@ describe('GameService', () => {
     ];
     for (const json of cases) expect(code(() => s.importSave(json))).toBe('SAVE_INCOMPATIBLE');
     expect(s.getSnapshot()).toBe(before);
-    expect(storage.load()).toBe(good);
-    expect(svc(createMemoryStorage(cases[1]!)).loadGame()).toBeNull();
     expect(code(() => s.importSave(good))).toBe('no-error');
   });
 
@@ -218,18 +209,6 @@ describe('GameService', () => {
     expect(d.before).toBe(snap.players[rec.lineup.starters[6]!]!.name);
     const bad = { instructions: { slot: 'C', patch: { press: 1 } } } as never;
     expect(code(() => s.propose({ payload: { kind: 'PLAN_CHANGE', matchId, patch: bad }, reason: 'x' }))).toBe('PROPOSAL_INVALID');
-  });
-
-  it('저장 실패 시 이전 상태를 유지하고 STORAGE_FULL', () => {
-    let fail = false;
-    const base = createMemoryStorage();
-    const storage = { ...base, save: (d: string) => (fail ? (() => { throw new Error('QuotaExceeded'); })() : base.save(d)) };
-    const s = createGameService({ storage, clock });
-    s.newGame({ seed: 11 });
-    const before = s.getSnapshot();
-    fail = true;
-    expect(code(() => s.advanceDay())).toBe('STORAGE_FULL');
-    expect(s.getSnapshot()).toBe(before);
   });
 
   it('재정 요약, 상대 분석, 카탈로그', () => {

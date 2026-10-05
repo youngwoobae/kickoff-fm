@@ -15,7 +15,7 @@ import { useActor, useGame, useInlineAction, useQuery } from '../service/Service
 /** 이 구단 멤버 (구단주 먼저). 표시 필드는 memberText 가 기본값을 채운다 */
 export function useMembers(): Membership[] {
   const snap = useGame();
-  const listed = useQuery((s) => s.listMembers?.() ?? null).data;
+  const listed = useQuery((s) => s.listMembers()).data;
   return listed ?? snap.memberships.filter((m) => m.clubId === snap.userClubId);
 }
 
@@ -40,7 +40,7 @@ export function MemberChip() {
 export function ProfileSheet({ onClose }: { onClose: () => void }) {
   const actor = useActor();
   const members = useMembers();
-  const hasPin = useQuery((s) => s.hasOwnerPin?.() ?? false).data ?? false;
+  const hasPin = useQuery((s) => s.hasOwnerPin()).data ?? false;
   const { go } = useNav();
   const toast = useToast();
   const { run, error, clear } = useInlineAction();
@@ -55,7 +55,7 @@ export function ProfileSheet({ onClose }: { onClose: () => void }) {
   }, [pinFor]);
 
   const switchTo = (m: Membership, withPin?: string) => {
-    const r = run((s) => (s.switchMember ? s.switchMember(m.userId, withPin) : s.switchRole(m.seat === 'OWNER' ? 'OWNER' : 'COACH')));
+    const r = run((s) => s.switchMember(m.userId, withPin));
     if (r) {
       toast.show(`${memberText(r)} 차례예요`, 'success');
       onClose();

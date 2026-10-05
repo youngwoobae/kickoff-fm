@@ -1,7 +1,6 @@
 /** 표시 전용 포맷터·라벨 (소유: B). 게임 규칙 계산은 하지 않는다. */
 import type {
   AttrKey,
-  BotStyleTag,
   MatchupPreview,
   MatchupRuleHint,
   StyleDef,
@@ -85,10 +84,6 @@ export function instructionsSummary(i: TeamInstructions): string {
   if (i.offsideTrap) parts.push('트랩');
   return parts.length ? parts.join(' · ') : '모두 보통';
 }
-
-export const BOT_STYLE_LABEL: Record<BotStyleTag, string> = {
-  POSSESSION: '점유형', COUNTER: '역습형', HIGH_PRESS: '전방압박형', LOW_BLOCK: '잠그기형', WIDE: '측면형',
-};
 
 export const PLAN_SOURCE_LABEL: Record<PlanSource, string> = {
   CONFIRMED: '확정 제출한 플랜',

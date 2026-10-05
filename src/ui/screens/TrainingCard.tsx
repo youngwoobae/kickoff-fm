@@ -1,8 +1,9 @@
 /** 스쿼드 상단 훈련 카드 (M5.2, 계약 2.3.0 setTrainingFocus·Club.training). 구단 단위 1개, 다음 주부터 적용 */
 import { useState } from 'react';
 import { Badge, Card } from '../components/kit';
-import { useAction, useGame, useIsOwner, useService } from '../service/ServiceContext';
-import { trainingOf, type TrainingFocus } from '../types23';
+import { useAction, useGame, useIsOwner } from '../service/ServiceContext';
+import { trainingOf } from '../types23';
+import type { TrainingFocus } from '../../types';
 
 /** 수명주기 설계 8.2 효과표 (표시용 문구) */
 export const FOCUS_INFO: Record<TrainingFocus, { label: string; growth: string; effect: string }> = {
@@ -24,29 +25,16 @@ function applyAtText(day: number, phase: string): string {
 
 export function TrainingCard() {
   const snap = useGame();
-  const service = useService();
   const isOwner = useIsOwner();
   const run = useAction();
   const [open, setOpen] = useState(false);
   const t = trainingOf(snap.clubs[snap.userClubId]);
-  const canSet = !!service.setTrainingFocus;
   const when = applyAtText(snap.time.day, snap.phase);
   const pending = t.next && t.next !== t.focus ? t.next : undefined;
 
-  if (!canSet) {
-    return (
-      <Card className="card-compact">
-        <div className="row-between small">
-          <span>🏋 훈련 · {FOCUS_INFO[t.focus].label}</span>
-          <span className="muted">훈련 포커스 선택은 곧 열려요</span>
-        </div>
-      </Card>
-    );
-  }
-
   const pick = (f: TrainingFocus) => {
     if (f === (pending ?? t.focus)) return;
-    run((s) => s.setTrainingFocus?.(f), f === t.focus ? '예약을 취소하고 지금 훈련을 이어 가요' : `${FOCUS_INFO[f].label} 훈련을 ${when} 적용해요`);
+    run((s) => s.setTrainingFocus(f), f === t.focus ? '예약을 취소하고 지금 훈련을 이어 가요' : `${FOCUS_INFO[f].label} 훈련을 ${when} 적용해요`);
   };
 
   return (

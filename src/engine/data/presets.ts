@@ -2,7 +2,7 @@
  * 실제 전술 스타일 9종(실축구_전술설계 1장)과 규칙 카탈로그 문구. 소유: A.
  * 기존 프리셋 ID 5종은 유지하고 라벨·값만 실제 스타일로 바꿨다(POSSESSION = 포지셔널, COUNTER = 미드 블록 역습, HIGH_PRESS = 게겐프레싱).
  */
-import type { BotStyle, BotStyleTag, PresetDef, PresetId, RoleId, RuleDef, RuleId, StyleDef, StyleId, TeamInstructions } from '../../types';
+import type { PresetDef, PresetId, RoleId, RuleDef, RuleId, StyleDef, StyleId, TeamInstructions } from '../../types';
 
 export const NEUTRAL_INSTRUCTIONS: TeamInstructions = {
   mentality: 0,
@@ -222,21 +222,6 @@ export const PRESETS = Object.fromEntries(
 ) as Record<PresetId, PresetDef>;
 
 export const PRESET_IDS = Object.keys(PRESETS) as PresetId[];
-
-/** BotStyle(8종) → 레거시 표시 태그(5종) */
-export function legacyBotTag(style: BotStyle): BotStyleTag {
-  switch (style) {
-    case 'DIRECT':
-      return 'COUNTER';
-    case 'HIGH_LINE':
-      return 'HIGH_PRESS';
-    case 'WING_PLAY':
-    case 'WINGBACK_3':
-      return 'WIDE';
-    default:
-      return style;
-  }
-}
 
 /** 지시값에서 가장 가까운 스타일 (슬라이더 L1 거리 + 토글) */
 export function nearestStyle(i: TeamInstructions): { id: StyleId; exact: boolean } {

@@ -4,7 +4,7 @@ import { LABEL_TEXT, LABEL_TONE, TIER_NAME, tierText } from '../format';
 import { useQuery } from '../service/ServiceContext';
 
 export function CareerScreen() {
-  const q = useQuery((s) => s.getCareer?.() ?? null);
+  const q = useQuery((s) => s.getCareer());
   const c = q.data;
   if (q.error) return <Empty>커리어 기록을 불러오지 못했어요 ({q.error.message})</Empty>;
   if (!c) return <Empty>커리어 기록은 아직 볼 수 없어요</Empty>;

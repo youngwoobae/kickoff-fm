@@ -1,11 +1,7 @@
 /** M3.2: 70구단 피라미드 상태·경량 시뮬·하루 진행 연결 (공개 API 만 사용) */
 import { describe, expect, it } from 'vitest';
-import { clock } from '../helpers';
-import { createGameService, createMemorySlotStorage, type GameService } from '../../src/services';
+import { svc } from '../helpers';
 import type { GameState } from '../../src/types';
-
-type Svc = Required<Pick<GameService, 'getPyramid' | 'getCareer'>> & GameService;
-const svc = () => createGameService({ slots: createMemorySlotStorage(), clock }) as Svc;
 
 describe('피라미드 하루 진행 (M3.2)', () => {
   it('하루에 사용자 리그 7경기(엔진) + 다른 4리그 28경기(경량 시뮬), 다른 리그는 스코어·순위만', () => {

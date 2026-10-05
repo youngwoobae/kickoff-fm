@@ -20,7 +20,7 @@ export function CoachScreen() {
   const [profileOpen, setProfileOpen] = useState(false);
   const status: { status?: ProposalStatus } = filter === 'OPEN' ? { status: 'OPEN' } : {};
   const list = useQuery((s) => s.listProposals(status), [filter]).data ?? [];
-  const deals = useQuery((s) => s.listDealProposals?.(status) ?? [], [filter]).data ?? [];
+  const deals = useQuery((s) => s.listDealProposals(status), [filter]).data ?? [];
   const seat = actor?.seat ?? 'OWNER';
   // 플랜 제안과 거래 제안을 최신순으로 한 목록에
   const cards = [...list.map((p) => ({ t: p.createdAt, p, d: null })), ...deals.map((d) => ({ t: d.createdAt, p: null, d }))].sort((a, b) => b.t.season - a.t.season || b.t.seq - a.t.seq);
@@ -84,7 +84,7 @@ function DealCard({ d, seat }: { d: DealProposal; seat: string }) {
   const isOpen = d.status === 'OPEN';
   const myReaction = d.reactions.find((r) => r.userId === snap.actorUserId)?.choice;
   const approve = () => {
-    const r = run((s) => s.approveDeal?.(d.id), (res) => (res?.ok ? (d.kind === 'TRANSFER_BID' ? '승인했어요. 구단주 이름으로 입찰했어요' : '승인했어요. 재계약이 성립했어요') : undefined));
+    const r = run((s) => s.approveDeal(d.id), (res) => (res?.ok ? (d.kind === 'TRANSFER_BID' ? '승인했어요. 구단주 이름으로 입찰했어요' : '승인했어요. 재계약이 성립했어요') : undefined));
     if (r && !r.ok) toast.show(`실행하지 못해 제안이 무효가 됐어요: ${r.details.join(', ')}`, 'error');
   };
   return (
@@ -116,15 +116,15 @@ function DealCard({ d, seat }: { d: DealProposal; seat: string }) {
       )}
       {isOpen && seat === 'COACH' && (
         <div className="btn-row">
-          <button type="button" className={`btn ${myReaction === 'FOR' ? 'btn-primary' : 'btn-secondary'}`} aria-pressed={myReaction === 'FOR'} onClick={() => run((s) => s.reactDeal?.(d.id, 'FOR'), '찬성했어요')}>
+          <button type="button" className={`btn ${myReaction === 'FOR' ? 'btn-primary' : 'btn-secondary'}`} aria-pressed={myReaction === 'FOR'} onClick={() => run((s) => s.reactDeal(d.id, 'FOR'), '찬성했어요')}>
             👍 찬성
           </button>
-          <button type="button" className={`btn ${myReaction === 'AGAINST' ? 'btn-primary' : 'btn-secondary'}`} aria-pressed={myReaction === 'AGAINST'} onClick={() => run((s) => s.reactDeal?.(d.id, 'AGAINST', '다른 방안 검토 필요'), '반대했어요')}>
+          <button type="button" className={`btn ${myReaction === 'AGAINST' ? 'btn-primary' : 'btn-secondary'}`} aria-pressed={myReaction === 'AGAINST'} onClick={() => run((s) => s.reactDeal(d.id, 'AGAINST', '다른 방안 검토 필요'), '반대했어요')}>
             👎 반대
           </button>
         </div>
       )}
-      <RejectSheet open={rejectOpen} reasons={DEAL_REJECT_REASONS} onClose={() => setRejectOpen(false)} onPick={(r) => run((s) => s.rejectDeal?.(d.id, r), '제안을 거절했어요')} />
+      <RejectSheet open={rejectOpen} reasons={DEAL_REJECT_REASONS} onClose={() => setRejectOpen(false)} onPick={(r) => run((s) => s.rejectDeal(d.id, r), '제안을 거절했어요')} />
     </Card>
   );
 }

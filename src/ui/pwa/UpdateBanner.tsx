@@ -39,7 +39,7 @@ export function UpdateBanner() {
   const apply = async () => {
     setBusy(true);
     // 저장 실패면 act 가 오류 토스트를 띄우고 undefined → 교체하지 않는다
-    const ok = await act(async (s) => (await s.flush?.(), true));
+    const ok = await act(async (s) => (await s.flush(), true));
     if (!ok) return setBusy(false);
     navigator.serviceWorker.addEventListener('controllerchange', () => globalThis.location.reload(), { once: true });
     w.postMessage('SKIP_WAITING');

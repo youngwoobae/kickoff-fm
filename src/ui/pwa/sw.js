@@ -23,7 +23,7 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
-  // 내비게이션(?fake=1 등 포함)은 앱 셸 index.html 로, 나머지는 캐시 우선 → 네트워크.
+  // 내비게이션(쿼리 포함)은 앱 셸 index.html 로, 나머지는 캐시 우선 → 네트워크.
   // ignoreVary: 서버가 Vary: Origin 을 붙이면 crossorigin 모듈 스크립트 요청(Origin 헤더 있음)이 캐시와 안 맞는다
   const opts = { cacheName: CACHE, ignoreVary: true };
   const hit = req.mode === 'navigate' ? caches.match('index.html', opts) : caches.match(req, opts);

@@ -1,11 +1,7 @@
 /** 계약 2.3.0 (M5.1): setTrainingFocus / getYouthIntake / decideYouth 서비스 연결 */
 import { describe, expect, it } from 'vitest';
-import { clock } from '../helpers';
-import { createGameService, type GameService } from '../../src/services';
+import { svc } from '../helpers';
 import { youthSalary } from '../../src/domain';
-
-type Svc = Required<Pick<GameService, 'setTrainingFocus' | 'getYouthIntake' | 'decideYouth' | 'getInbox'>> & GameService;
-const svc = () => createGameService({ clock }) as Svc;
 
 describe('훈련 포커스 (2.3.0)', () => {
   it('예약 → 다음 주 시작(Day 8)에 적용, 같은 값이면 예약 취소, 코치·잘못된 값 거부, 행동 로그', () => {

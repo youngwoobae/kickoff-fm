@@ -8,7 +8,7 @@ import { useState } from 'react';
 import type { Bid, BidInput, GameSnapshot, ListingKind, Player, PlayerId, Position, TransferListing, TransferWindow } from '../../types';
 import { Badge, Card, Empty, ErrorNote, MoneyField, Segmented, Sheet, Stat } from '../components/kit';
 import { LISTING_KIND_LABEL, POS_LABEL, POS_NAME, POS_ORDER, WINDOW_KIND_LABEL, canPropose, exactM, formatKc } from '../format';
-import { useActor, useGame, useInlineAction, useIsOwner, useQuery, useService } from '../service/ServiceContext';
+import { useActor, useGame, useInlineAction, useIsOwner, useQuery } from '../service/ServiceContext';
 
 type View = 'market' | 'bids' | 'sell';
 const OWNER_ONLY = '코치는 볼 수만 있어요. 입찰과 판매 등록은 구단주가 해요.';
@@ -16,19 +16,18 @@ const OWNER_ONLY = '코치는 볼 수만 있어요. 입찰과 판매 등록은 �
 const COACH_PROPOSE = '입찰은 구단주가 실행해요. 매물을 눌러 구단주에게 입찰을 제안할 수 있어요.';
 
 function useCanProposeBid(): boolean {
-  const service = useService();
   const actor = useActor();
-  return !!service.proposeDeal && canPropose(actor, 'TRANSFER_BID');
+  return canPropose(actor, 'TRANSFER_BID');
 }
 
 export function TransferScreen() {
   const snap = useGame();
   const isOwner = useIsOwner();
   const canBid = useCanProposeBid();
-  const win = useQuery((s) => s.getTransferWindow?.() ?? null).data ?? null;
+  const win = useQuery((s) => s.getTransferWindow() ?? null).data ?? null;
   const fin = useQuery((s) => s.getFinance()).data;
-  const all = useQuery((s) => s.listTransferListings?.() ?? []).data ?? [];
-  const bids = useQuery((s) => s.listBids?.() ?? []).data ?? [];
+  const all = useQuery((s) => s.listTransferListings()).data ?? [];
+  const bids = useQuery((s) => s.listBids()).data ?? [];
   const [view, setView] = useState<View>('market');
   const forSale = all.filter((l) => l.sellerClubId !== snap.userClubId).length;
 
@@ -128,12 +127,12 @@ function MarketView({ all, bids }: { all: TransferListing[]; bids: Bid[] }) {
   const filtered =
     useQuery(
       (s) =>
-        s.listTransferListings?.({
+        s.listTransferListings({
           kind: kind === 'ALL' ? undefined : kind,
           position: pos || undefined,
           minOvr: minOvr || undefined,
           maxPrice: maxPrice || undefined,
-        }) ?? [],
+        }),
       [kind, pos, minOvr, maxPrice],
     ).data ?? [];
   const others = filtered.filter((l) => l.sellerClubId !== snap.userClubId);
@@ -291,15 +290,15 @@ function BidForm({ l, bid, onClose }: { l: TransferListing; bid?: Bid; onClose: 
 
   const input: BidInput = fa ? { listingId: l.id, bonus: bonus ?? 0, salary: salary ?? 0, seasons } : { listingId: l.id, fee: fee ?? 0 };
   const submit = () => {
-    const r = run((s) => s.placeBid?.(input), bid ? '입찰을 고쳤어요' : '입찰했어요. 금액이 예약됐어요');
+    const r = run((s) => s.placeBid(input), bid ? '입찰을 고쳤어요' : '입찰했어요. 금액이 예약됐어요');
     if (r) onClose();
   };
   const propose = () => {
-    const r = run((s) => s.proposeDeal?.({ payload: { kind: 'TRANSFER_BID', bid: input }, reason: reason.trim() }), '입찰 제안을 보냈어요. 구단주 승인을 기다려요');
+    const r = run((s) => s.proposeDeal({ payload: { kind: 'TRANSFER_BID', bid: input }, reason: reason.trim() }), '입찰 제안을 보냈어요. 구단주 승인을 기다려요');
     if (r) onClose();
   };
   const withdraw = () => {
-    run((s) => s.withdrawBid?.(l.id), '입찰을 철회했어요. 예약이 풀렸어요');
+    run((s) => s.withdrawBid(l.id), '입찰을 철회했어요. 예약이 풀렸어요');
     onClose();
   };
   return (
@@ -412,7 +411,7 @@ function SellView({ all, win }: { all: TransferListing[]; win: TransferWindow })
                   </span>
                 </span>
                 {isOwner && (
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => run((s) => s.withdrawListing?.(l.id), '판매 등록을 철회했어요')}>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => run((s) => s.withdrawListing(l.id), '판매 등록을 철회했어요')}>
                     철회
                   </button>
                 )}
@@ -456,11 +455,11 @@ function SellSheet({ p, onClose }: { p: Player; onClose: () => void }) {
   const snap = useGame();
   const { run, error } = useInlineAction();
   // 2.2.1 선택 메서드: 평가가치 V 와 허용 최저가 범위(0.7V~1.3V). 없으면 서비스 오류 문구가 범위를 알려 준다
-  const v = useQuery((s) => s.getPlayerValue?.(p.id) ?? null, [p.id]).data ?? null;
+  const v = useQuery((s) => s.getPlayerValue(p.id), [p.id]).data ?? null;
   const [price, setPrice] = useState<number | null>(v?.value ?? null);
   const outOfRange = !!v && price !== null && (price < v.minPrice || price > v.maxPrice);
   const submit = () => {
-    const r = run((s) => s.listForSale?.(p.id, price ?? 0), `${p.name} 선수를 판매 명단에 올렸어요`);
+    const r = run((s) => s.listForSale(p.id, price ?? 0), `${p.name} 선수를 판매 명단에 올렸어요`);
     if (r) onClose();
   };
   return (

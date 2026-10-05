@@ -63,7 +63,7 @@ npm run sim:career -- --seeds 20 --seasons 10 --strict  # 커리어 게이트
 node --expose-gc --import tsx scripts/perf-bench.ts --seed 1 --seasons 10   # 성능
 ```
 
-UI만 볼 때 `?fake=1`. 프로덕션 빌드에는 개발자 패널·fake 없음. 옵션: `docs/시뮬레이션_검증.md` 8장, `scripts/sim-career.ts` 머리 주석.
+개발 서버에서는 실제 서비스에 개발자 패널(클럽 탭)이 붙는다. 프로덕션 빌드에는 개발자 패널 없음. 옵션: `docs/시뮬레이션_검증.md` 8장, `scripts/sim-career.ts` 머리 주석.
 
 ## 4. 검증 결과
 

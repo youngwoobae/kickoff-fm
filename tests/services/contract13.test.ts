@@ -1,12 +1,12 @@
 /** 서비스 계약 1.3.0 (추가만): 경기 통계·추가시간·경고 타임라인·경기 흐름 막대·스타일 행렬·적합도·상성 수치 */
 import { describe, expect, it } from 'vitest';
-import { clock } from '../helpers';
+import { svc } from '../helpers';
 import { STYLE_IDS } from '../../src/engine';
-import { createGameService, createMemoryStorage, type GameService } from '../../src/services';
+import { type GameService } from '../../src/services';
 import type { MatchId } from '../../src/types';
 
 const mk = (seed: number): GameService => {
-  const s = createGameService({ storage: createMemoryStorage(), clock });
+  const s = svc();
   s.newGame({ seed, startTier: 'T3' }); // 시드별 기대값이 T3 사람 스쿼드 기준
   return s;
 };

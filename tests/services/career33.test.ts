@@ -1,12 +1,10 @@
 /** M3.3: 시즌 경계(승강·수명주기·K4 정산·D28 보관·U6 멱등)와 스키마 2 → 3 변환 */
 import { describe, expect, it } from 'vitest';
-import { clock } from '../helpers';
-import { createGameService, createMemorySlotStorage, type GameService } from '../../src/services';
+import { clock, svc } from '../helpers';
+import { createMemorySlotStorage } from '../../src/services';
 import { PROMOTION_BONUS_RATE, TIER_ECONOMY, advanceDayState, createInitialState, parachuteOf, startNewSeasonState } from '../../src/domain';
 import type { GameState, Tier } from '../../src/types';
 
-type Svc = Required<Pick<GameService, 'getPyramid' | 'getCareer' | 'openSlot' | 'flush'>> & GameService;
-const svc = (slots = createMemorySlotStorage()) => createGameService({ slots, clock }) as Svc;
 const TIERS: Tier[] = ['T1', 'T2', 'T3', 'T4', 'T5'];
 
 function toSeasonOver(s: GameState): GameState {

@@ -1,6 +1,7 @@
-/** 테스트용 합성 팀·경기 입력, 서비스 테스트 공용 시계 */
+/** 테스트용 합성 팀·경기 입력, 서비스 테스트 공용 시계·서비스 */
 import { ENGINE_VERSION, mulberry32, simulateMatch } from '../src/engine';
 import { PACKAGES, generateSquad, pickLineup, toEngineTeamInput, type PackageId } from '../src/domain';
+import { createGameService, createMemorySlotStorage, type StoragePort } from '../src/services';
 import type { Club, EngineConfig, EngineTeamInput, MatchResult, Player, TeamInstructions } from '../src/types';
 
 export function makeTeam(
@@ -36,3 +37,6 @@ export function play(seed: number, home: EngineTeamInput, away: EngineTeamInput,
 }
 
 export const clock = { nowIso: () => '2026-10-04T00:00:00.000Z' };
+
+/** 메모리 슬롯 저장소 위의 실제 서비스 */
+export const svc = (slots: StoragePort = createMemorySlotStorage()) => createGameService({ slots, clock });

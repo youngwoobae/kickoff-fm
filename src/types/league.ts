@@ -1,7 +1,7 @@
 import type { ClubId, Day, Kc, MatchId, PlayerId, SeasonNo, UserId } from './common';
 import type { ZonePass, RuleId } from './engine';
 import type { MatchPlan } from './plan';
-import type { BotStyle, BotStyleTag, FormationId, SlotKey, StyleId, TacticSlot, TeamInstructions } from './tactics';
+import type { BotStyle, FormationId, SlotKey, StyleId, TacticSlot, TeamInstructions } from './tactics';
 
 export type Tier = 'T1' | 'T2' | 'T3' | 'T4' | 'T5';
 
@@ -62,10 +62,6 @@ export interface Club {
   shortName: string;
   isHuman: boolean;
   ownerUserId?: UserId;
-  /**
-   * @deprecated 1.x 레거시 태그. 세이브 스키마 2 부터 서비스는 쓰지 않는다(style 로 마이그레이션, 'WIDE' → 'WING_PLAY').
-   */
-  botStyle?: BotStyleTag;
   /** 1.2.0: 봇 전술 성향 8종 (사람 팀은 없음) */
   style?: BotStyle;
   playerIds: PlayerId[];
@@ -221,8 +217,6 @@ export interface OpponentRecentMatch {
 /** 홈 카드 상대 분석 요약 (12.3, 11 H01) */
 export interface OpponentScout {
   clubId: ClubId;
-  /** 레거시 5종 표시 태그 (style 을 접은 값: DIRECT → COUNTER, HIGH_LINE → HIGH_PRESS, WING_PLAY·WINGBACK_3 → WIDE) */
-  botStyle?: BotStyleTag;
   /** 1.2.0: 상대 스타일 (봇 성향 또는 최근 지시에서 가장 가까운 스타일 추정) */
   style?: StyleId;
   /** 1.2.0: style 이 최근 경기 지시값에서 추정한 값이면 true (봇 성향 원본이면 false) */

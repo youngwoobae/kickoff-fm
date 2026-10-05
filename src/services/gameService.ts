@@ -209,11 +209,9 @@ import {
 } from './api';
 import { SAVE_SLOT_IDS } from './api';
 import { GameError } from './errors';
-import { createMemorySlotStorage, createMemoryStorage, slotMetaOf, systemClock, type Clock, type LegacyStoragePort, type StoragePort } from './ports';
+import { createMemorySlotStorage, slotMetaOf, systemClock, type Clock, type StoragePort } from './ports';
 
 export interface GameServiceDeps {
-  /** @deprecated 1.x 동기 단일 세이브 (loadGame/resetGame, 슬롯이 열려 있지 않을 때의 저장). 기본: 메모리 */
-  storage?: LegacyStoragePort;
   /** 2.0.0 슬롯 저장소. 기본: 메모리. 브라우저는 createIndexedDbSlotStorage() (IndexedDB, 불가 시 localStorage 폴백) */
   slots?: StoragePort;
   clock?: Clock;
@@ -485,7 +483,6 @@ class LocalGameService implements GameService {
       saveSchema: SCHEMA_VERSION,
     };
   }
-  private readonly storage: LegacyStoragePort;
   private readonly slots: StoragePort;
   private readonly clock: Clock;
   private activeSlot: SaveSlotId | null = null;
@@ -505,7 +502,6 @@ class LocalGameService implements GameService {
   private readonly replayCache = new Map<string, MatchReplay>();
 
   constructor(deps: GameServiceDeps) {
-    this.storage = deps.storage ?? createMemoryStorage();
     this.slots = deps.slots ?? createMemorySlotStorage();
     this.clock = deps.clock ?? systemClock;
   }
@@ -524,26 +520,10 @@ class LocalGameService implements GameService {
   /** 저장 성공 후에만 스냅샷을 교체한다 (원자성) */
   private commit(next: GameState): void {
     if (next.actionLog.length > ACTION_LOG_LIMIT) next = { ...next, actionLog: next.actionLog.slice(-ACTION_LOG_LIMIT) };
-    if (this.activeSlot === null) this.saveLegacy(next);
     if (next.schemaVersion !== this.state?.schemaVersion || next.gameSeed !== this.state?.gameSeed) this.replayCache.clear();
     this.state = next;
     this.scheduleWrite();
     this.notify();
-  }
-
-  private saveLegacy(next: GameState): void {
-    let json: string;
-    try {
-      json = JSON.stringify(next);
-    } catch (e) {
-      throw new GameError('STORAGE_FULL', `상태 직렬화 실패: ${String(e)}`);
-    }
-    try {
-      this.storage.save(json);
-    } catch (e) {
-      if (e instanceof GameError) throw e;
-      throw new GameError('STORAGE_FULL', '저장 공간이 부족해 저장하지 못했습니다. 행동 로그를 내보낸 뒤 새 시즌을 시작하세요');
-    }
   }
 
   // ── 슬롯 저장 (write-behind) ───────────────────────────────────
@@ -766,7 +746,7 @@ class LocalGameService implements GameService {
   // ── 수명 주기 ──────────────────────────────────────────────────
 
   newGame(opts: NewGameOptions = {}): GameSnapshot {
-    const tier = opts.startTier ?? opts.tier ?? DEFAULT_START_TIER;
+    const tier = opts.startTier ?? DEFAULT_START_TIER;
     const seed = opts.seed ?? hashString(`${this.clock.nowIso()}|${Date.now()}`);
     const s0 = createInitialState(
       seed,
@@ -785,27 +765,6 @@ class LocalGameService implements GameService {
     this.replayCache.clear();
     this.commit(s);
     return s;
-  }
-
-  loadGame(): GameSnapshot | null {
-    const raw = this.storage.load();
-    if (!raw) return null;
-    try {
-      const parsed = this.parseSave(raw); // 손상 세이브면 throw → null (부팅 크래시 루프 방지)
-      this.activeSlot = null;
-      this.updateStatus();
-      this.state = parsed;
-      this.replayCache.clear();
-      this.notify();
-      return parsed;
-    } catch {
-      return null;
-    }
-  }
-
-  resetGame(): void {
-    this.storage.clear();
-    this.close();
   }
 
   exportSave(): string {
@@ -1914,15 +1873,7 @@ class LocalGameService implements GameService {
     let log = [...s.actionLog, this.entry(s, kind, data)];
     if (log.length > ACTION_LOG_LIMIT) log = log.slice(-ACTION_LOG_LIMIT);
     (s as GameState).actionLog = log;
-    if (this.activeSlot !== null) {
-      this.scheduleWrite(false); // 로그 저장소에만 쓴다 (세이브 재직렬화 없음)
-      return;
-    }
-    try {
-      this.storage.save(JSON.stringify(s));
-    } catch {
-      // 로그 저장 실패는 게임 진행을 막지 않는다
-    }
+    this.scheduleWrite(false); // 로그 저장소에만 쓴다 (세이브 재직렬화 없음)
   }
 
   exportActionLog(): string {

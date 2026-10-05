@@ -10,7 +10,7 @@ import { useAction, useGame, useIsOwner, useQuery, useService } from '../service
 
 /**
  * 계약 1.2 의 MatchReport·CommentaryLine 에는 새 통계(유효슈팅·코너·경고·시간 점유)와 addedMinute 가 없다.
- * 서비스가 이 선택 필드를 채우면 표시하고, 없으면 "–" 로 둔다 (fake 서비스는 채운다).
+ * 서비스가 이 선택 필드를 채우면 표시하고, 없으면 "–" 로 둔다.
  */
 type SummaryExt = MatchReport['summary'] & {
   shotsOnTargetFor?: number;

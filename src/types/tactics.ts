@@ -155,13 +155,6 @@ export interface TacticSlot {
 /** 전술 상한 A/B 테스트 값 (8.1, 12.3 개발자 패널) */
 export type TacticCap = 0.25 | 0.35 | 0.5 | 0.6 | 0.7;
 
-/**
- * @deprecated 1.x 표시용 레거시 태그 (5종). 'WIDE' = WING_PLAY.
- * 1.2.0 부터 봇 성향의 원본은 Club.style / OpponentScout.style(BotStyle 8종)이다.
- * 이 태그는 UI 호환을 위해 OpponentScout.botStyle 에서 BotStyle 을 가장 가까운 5종으로 접어 계속 내보낸다.
- */
-export type BotStyleTag = 'POSSESSION' | 'COUNTER' | 'HIGH_PRESS' | 'LOW_BLOCK' | 'WIDE';
-
 /** 1.2.0: 봇 전술 성향 8종 (= BALANCED 를 뺀 스타일) */
 export type BotStyle = Exclude<StyleId, 'BALANCED'>;
 

@@ -134,7 +134,7 @@ function buildFrames(p: Omit<PitchViewProps, 'index' | 'beatMs' | 'fast' | 'redu
     const ev = l.event ?? (l.kind === 'GOAL' ? 'GOAL' : l.kind === 'CHANCE' ? 'SHOT' : undefined);
     const reset = l.event ? RESET.has(l.event) : l.kind === 'PERIOD';
     let cue = l.pitch;
-    // 구 세이브·fake 폴백: 구간 zoneBars 최댓값 구역 + 가운데 레인, 팀은 clubId
+    // 구 세이브 폴백: 구간 zoneBars 최댓값 구역 + 가운데 레인, 팀은 clubId
     if (!cue && !hasCues && l.clubId && (l.kind === 'NEUTRAL' || l.kind === 'CHANCE' || l.kind === 'GOAL')) {
       const zb = r.zoneBars[Math.min(17, Math.floor(l.minute / 5))] ?? [0, 1, 0];
       cue = { team: sideOf(l), zone: zb.indexOf(Math.max(...zb)) as 0 | 1 | 2, lane: 'C' };

@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import type { AttrDef, Player, PlayerId } from '../../types';
 import { Badge, Card, ConditionBar, DisciplineBadges, Empty, ErrorNote, FitMark, MoneyField, Segmented, Sheet } from '../components/kit';
 import { FIT_LABEL, MORALE_LABEL, MORALE_SHORT, POS_LABEL, POS_NAME, POS_ORDER, canPropose, fitOf, formatKc, isAvailable } from '../format';
-import { useActor, useGame, useInlineAction, useIsOwner, useQuery, useService } from '../service/ServiceContext';
+import { useActor, useGame, useInlineAction, useIsOwner, useQuery } from '../service/ServiceContext';
 import { josa } from '../../services';
 import { TrainingCard } from './TrainingCard';
 import { YELLOW_LIMIT, yellowAccumOf, yellowCardsOf } from '../types23';
@@ -250,9 +250,8 @@ function ContractSection({ p, onClose }: { p: Player; onClose: () => void }) {
   const snap = useGame();
   const isOwner = useIsOwner();
   // 2.5.0: 선수단·재정 코치는 재계약을 실행 대신 제안한다
-  const service = useService();
   const actor = useActor();
-  const canRenew = !!service.proposeDeal && canPropose(actor, 'RENEWAL');
+  const canRenew = canPropose(actor, 'RENEWAL');
   const [mode, setMode] = useState<'none' | 'renew' | 'release'>('none');
   const mine = p.clubId === snap.userClubId;
   const c = p.contract;
@@ -328,7 +327,7 @@ function ContractSection({ p, onClose }: { p: Player; onClose: () => void }) {
 
 function RenewalPanel({ p, propose }: { p: Player; propose?: boolean }) {
   const snap = useGame();
-  const q = useQuery((s) => s.getRenewalQuote?.(p.id), [p.id]);
+  const q = useQuery((s) => s.getRenewalQuote(p.id), [p.id]);
   const quote = q.data;
   const { run, error } = useInlineAction();
   const [salary, setSalary] = useState<number | null>(quote?.askSalary ?? null);
@@ -348,13 +347,13 @@ function RenewalPanel({ p, propose }: { p: Player; propose?: boolean }) {
   const [lo, hi] = quote.seasonsRange;
   const bonus = Math.round((quote.bonusPerSeasonRate * (salary ?? 0) * seasons) / 1000) * 1000;
   const sendProposal = () => {
-    const r = run((s) => s.proposeDeal?.({ payload: { kind: 'RENEWAL', playerId: p.id, salary: salary ?? 0, seasons }, reason: reason.trim() }), '재계약 제안을 보냈어요. 구단주 승인을 기다려요');
+    const r = run((s) => s.proposeDeal({ payload: { kind: 'RENEWAL', playerId: p.id, salary: salary ?? 0, seasons }, reason: reason.trim() }), '재계약 제안을 보냈어요. 구단주 승인을 기다려요');
     if (r) setSent(true);
   };
   if (sent) return <p className="small"><Badge tone="accent">⏳ 제안함</Badge> 구단주 승인을 기다려요. 코치실 제안함에서 볼 수 있어요.</p>;
   const offer = () => {
     setResult(null);
-    const r = run((s) => s.offerRenewal?.(p.id, salary ?? 0, seasons));
+    const r = run((s) => s.offerRenewal(p.id, salary ?? 0, seasons));
     if (r) setResult({ ...r, bonus });
   };
   return (
@@ -403,7 +402,7 @@ function RenewalPanel({ p, propose }: { p: Player; propose?: boolean }) {
 
 function ReleasePanel({ p, onDone }: { p: Player; onDone: () => void }) {
   const snap = useGame();
-  const q = useQuery((s) => s.getReleaseQuote?.(p.id), [p.id]);
+  const q = useQuery((s) => s.getReleaseQuote(p.id), [p.id]);
   const { run, error } = useInlineAction();
   // 되돌릴 수 없는 동작이라 2단계 확인 (2.4.1 리뷰): 첫 탭은 확인 화면, 두 번째 탭에서 실행
   const [confirm, setConfirm] = useState(false);
@@ -412,7 +411,7 @@ function ReleasePanel({ p, onDone }: { p: Player; onDone: () => void }) {
   if (!quote) return <p className="small muted">방출은 아직 열리지 않았어요.</p>;
   const release = () => {
     const ok = run((s) => {
-      s.releasePlayer?.(p.id);
+      s.releasePlayer(p.id);
       return true;
     }, `${p.name} 선수를 방출했어요`);
     if (ok) onDone();

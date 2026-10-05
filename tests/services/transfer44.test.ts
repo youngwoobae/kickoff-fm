@@ -1,20 +1,19 @@
 /** M4.4: 이적·계약·편지함 서비스 연결 (창 열림 → 입찰 → AI 입찰 → 정산, 판매, 재계약, 방출, 만료 FA, 강제 매각, 결정성, 이전 세이브) */
 import { describe, expect, it } from 'vitest';
-import { clock } from '../helpers';
-import { createGameService, createMemoryStorage, isGameError, type GameService } from '../../src/services';
+import { svc } from '../helpers';
+import { isGameError, type GameService } from '../../src/services';
 import { TRANSFER } from '../../src/domain';
 import type { GameErrorCode, GameState, LedgerEntry } from '../../src/types';
 
-type Svc = Required<GameService>;
-const mk = (seed = 7): Svc => {
-  const s = createGameService({ storage: createMemoryStorage(), clock }) as Svc;
+const mk = (seed = 7): GameService => {
+  const s = svc();
   s.newGame({ seed });
   return s;
 };
-const snap = (s: Svc) => s.getSnapshot()! as GameState;
+const snap = (s: GameService) => s.getSnapshot()! as GameState;
 
 /** (season, day) 까지 진행 (SEASON_OVER 면 새 시즌) */
-function goTo(s: Svc, season: number, day: number): void {
+function goTo(s: GameService, season: number, day: number): void {
   for (let i = 0; i < 200; i++) {
     const t = snap(s).time;
     if (t.season === season && t.day === day && snap(s).phase !== 'SEASON_OVER') return;
@@ -34,7 +33,7 @@ function codeOf(fn: () => unknown): GameErrorCode | null {
   return null;
 }
 
-const userLedger = (s: Svc): LedgerEntry[] => snap(s).finances[snap(s).userClubId]!.ledger;
+const userLedger = (s: GameService): LedgerEntry[] => snap(s).finances[snap(s).userClubId]!.ledger;
 
 describe('이적 연결 (M4.4)', () => {
   it('중간 창: Day 11 열림 → 사람 입찰(예약) → 정산 Day 15 → 선수 이동·원장·편지', () => {
@@ -240,7 +239,7 @@ describe('이적 연결 (M4.4)', () => {
     delete old.inbox;
     delete old.pendingRenewals; // Day 20 을 이 코드 없이 지난 세이브
     delete old.signingsThisSeason;
-    const t = createGameService({ storage: createMemoryStorage(), clock }) as Svc;
+    const t = svc();
     t.importSave(JSON.stringify(old));
     expect(t.getInbox()).toEqual([]);
     t.advanceDay(); // Day 25 정규 창

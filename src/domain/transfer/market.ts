@@ -9,11 +9,11 @@ import type {
   Contract,
   Day,
   Kc,
+  LedgerKind,
   Player,
   PlayerId,
   Position,
   Tier,
-  TransferLedgerKind,
   TransferListing,
   TransferWindow,
 } from '../../types';
@@ -45,7 +45,7 @@ export interface MarketClub {
 /** 원장 후보. LedgerKind 에 합쳐지기 전(M4.6)이라 별도 형태. 부호: 수입 +, 지출 − */
 export interface TransferMoney {
   clubId: ClubId;
-  kind: TransferLedgerKind;
+  kind: LedgerKind;
   amount: Kc;
   playerId: PlayerId;
   /** 지출 중 이적창 한정 예산에서 나간 몫 (나머지는 balance) */

@@ -14,7 +14,7 @@ import {
   simulateMatch,
 } from '../../src/engine';
 import { migrateSave, runCalibration, staticView } from '../../src/domain';
-import { createGameService, createMemoryStorage } from '../../src/services';
+import { createGameService } from '../../src/services';
 import type { EngineConfig, EnginePlayer, TeamInstructions } from '../../src/types';
 import { config, makeTeam, play } from '../helpers';
 
@@ -162,8 +162,7 @@ describe('경기 구조·통계 (0.4.0)', () => {
 
 describe('세이브 스키마 1 → 2 마이그레이션', () => {
   it("botStyle 'WIDE' → style 'WING_PLAY', 3·5백 FB 공격형 풀백 → 윙백, 이전 세이브를 불러올 수 있다", () => {
-    const storage = createMemoryStorage();
-    const s = createGameService({ storage, clock: { nowIso: () => '2026-09-27T00:00:00.000Z' } });
+    const s = createGameService({ clock: { nowIso: () => '2026-09-27T00:00:00.000Z' } });
     s.newGame({ seed: 5 });
     const cur = JSON.parse(s.exportSave()) as Record<string, any>;
     // 스키마 1 세이브를 흉내: style → botStyle(레거시), 3-5-2 슬롯에 FB_OVERLAPPING
@@ -184,23 +183,19 @@ describe('세이브 스키마 1 → 2 마이그레이션', () => {
     expect(migrated.clubs[botIds[0]!].botStyle).toBeUndefined();
     expect(migrated.clubs[botIds[0]!].tactics.B.roles).toContain('WB_WINGBACK');
     expect(migrated.clubs[botIds[0]!].tactics.B.roles).not.toContain('FB_OVERLAPPING');
-    // 서비스로 가져오기 (importSave, loadGame 둘 다)
-    const s2 = createGameService({ storage: createMemoryStorage(), clock: { nowIso: () => '2026-09-27T00:00:00.000Z' } });
+    // 서비스로 가져오기
+    const s2 = createGameService({ clock: { nowIso: () => '2026-09-27T00:00:00.000Z' } });
     const snap = s2.importSave(JSON.stringify(legacy));
     expect(snap.schemaVersion).toBe(3);
     expect(snap.clubs[botIds[0]!]!.style).toBe('WING_PLAY');
-    const st = createMemoryStorage();
-    st.save(JSON.stringify(legacy));
-    expect(createGameService({ storage: st, clock: { nowIso: () => 'x' } }).loadGame()?.clubs[botIds[0]!]!.style).toBe('WING_PLAY');
     const scout = s2.getOpponentScout(botIds[0]!);
-    expect(scout.botStyle).toBe('WIDE');
     expect(scout.style).toBe('WING_PLAY');
   });
 });
 
 describe('서비스 계약 1.2.0', () => {
   const mk = () => {
-    const s = createGameService({ storage: createMemoryStorage(), clock: { nowIso: () => '2026-09-27T00:00:00.000Z' } });
+    const s = createGameService({ clock: { nowIso: () => '2026-09-27T00:00:00.000Z' } });
     s.newGame({ seed: 11 });
     return s;
   };

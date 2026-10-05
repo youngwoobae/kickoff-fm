@@ -39,8 +39,7 @@ const timeIt = (fn: () => unknown, reps = 5) => {
 
 // ── 1) 하루씩 진행 (UI 의 "다음 날" 버튼 경로) ──
 const slots = createMemorySlotStorage();
-type Svc = ReturnType<typeof createGameService> & { flush(): Promise<void> };
-const svc = createGameService({ slots, clock }) as Svc;
+const svc = createGameService({ slots, clock });
 gc();
 const heap0 = process.memoryUsage().heapUsed;
 let t = now();
@@ -101,7 +100,7 @@ for (let season = 1; season <= seasons; season++) {
 }
 
 // ── 2) advanceToSeasonEnd (한 번에 시즌 끝까지) — 같은 시드 별도 인스턴스 ──
-const svc2 = createGameService({ slots: createMemorySlotStorage(), clock }) as Svc;
+const svc2 = createGameService({ slots: createMemorySlotStorage(), clock });
 svc2.newGame({ seed, slotId: 1 });
 await svc2.flush();
 const toEnd: { season: number; ms: number; saveMs: number }[] = [];

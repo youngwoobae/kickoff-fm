@@ -8,11 +8,9 @@ import { createContext, useCallback, useContext, useMemo, useState, useSyncExter
 import { isGameError, type GameError, type GameService } from '../../services';
 import type { GameSnapshot, Membership, SaveStatus } from '../../types';
 import { useToast } from '../components/Toast';
-import type { ServiceMode } from './serviceHost';
 
 interface ServiceCtxValue {
   service: GameService;
-  mode: ServiceMode;
   reportFatal(e: unknown): void;
 }
 
@@ -73,7 +71,7 @@ export function useIsOwner(): boolean {
 
 /** 대기 중 제안 수: 플랜 제안 + 2.5.0 이적·재계약 제안 */
 export function useOpenProposalCount(): number {
-  return useQuery((s) => s.listProposals({ status: 'OPEN' }).length + (s.listDealProposals?.({ status: 'OPEN' }).length ?? 0)).data ?? 0;
+  return useQuery((s) => s.listProposals({ status: 'OPEN' }).length + (s.listDealProposals({ status: 'OPEN' }).length)).data ?? 0;
 }
 
 /** 변경 메서드 실행기 */
@@ -147,12 +145,10 @@ export function useAsyncAction() {
   );
 }
 
-const NO_STATUS: SaveStatus = { slotId: null, pending: false, lastSavedAt: null, error: null };
-
 /** 자동 저장 상태 (getSaveStatus 는 같은 상태면 같은 참조) */
 export function useSaveStatus(): SaveStatus {
   const service = useService();
   const sub = useCallback((l: () => void) => service.subscribe(l), [service]);
-  const get = useCallback(() => service.getSaveStatus?.() ?? NO_STATUS, [service]);
+  const get = useCallback(() => service.getSaveStatus(), [service]);
   return useSyncExternalStore(sub, get, get);
 }

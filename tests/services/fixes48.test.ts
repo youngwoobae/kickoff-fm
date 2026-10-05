@@ -1,18 +1,17 @@
 /** M4.8: 서비스로 확인된 도메인 문제 수정 (긴급 FA·자기 선수 입찰·재계약 선수 판매·중간 창 2차 AI 입찰) */
 import { describe, expect, it } from 'vitest';
-import { clock } from '../helpers';
-import { createGameService, createMemoryStorage, isGameError, type GameService } from '../../src/services';
+import { svc } from '../helpers';
+import { isGameError, type GameService } from '../../src/services';
 import type { GameErrorCode, GameState } from '../../src/types';
 
-type Svc = Required<GameService>;
-const mk = (seed = 7): Svc => {
-  const s = createGameService({ storage: createMemoryStorage(), clock }) as Svc;
+const mk = (seed = 7): GameService => {
+  const s = svc();
   s.newGame({ seed });
   return s;
 };
-const snap = (s: Svc) => s.getSnapshot()! as GameState;
+const snap = (s: GameService) => s.getSnapshot()! as GameState;
 
-function goTo(s: Svc, season: number, day: number): void {
+function goTo(s: GameService, season: number, day: number): void {
   for (let i = 0; i < 200; i++) {
     const t = snap(s).time;
     if (t.season === season && t.day === day && snap(s).phase !== 'SEASON_OVER') return;
@@ -32,7 +31,7 @@ function codeOf(fn: () => unknown): GameErrorCode | null {
   return null;
 }
 
-const registered = (s: Svc) => s.getSquad().filter((x) => !x.isTemporary);
+const registered = (s: GameService) => s.getSquad().filter((x) => !x.isTemporary);
 
 describe('M4.8 도메인 수정', () => {
   it('긴급 FA: Day 28 에 18명이면 계약하지 않고, 경계에서 만료로 줄면 새 시즌 Day 1 날짜로 채운다. 방출한 선수는 다시 데려오지 않는다', () => {

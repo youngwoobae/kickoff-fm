@@ -5,7 +5,6 @@ import { Badge, Card, Empty, Meter, Segmented, Toggle } from '../components/kit'
 import { downloadText, signed } from '../format';
 import { useNav } from '../app/nav';
 import { useAction, useAsyncAction, useGame, useQuery, useServiceCtx } from '../service/ServiceContext';
-import { reloadInFakeMode, reloadInRealMode } from '../service/serviceHost';
 import { getPrefs } from '../prefs';
 import { lastUserFixture } from './HomeScreen';
 import { trackSlotOp } from './TitleScreen';
@@ -23,8 +22,8 @@ export function DevPanel() {
   const snap = useGame();
   const run = useAction();
   const act = useAsyncAction();
-  const { service, mode, reportFatal } = useServiceCtx();
-  const slot = service.getActiveSlot?.() ?? null;
+  const { service, reportFatal } = useServiceCtx();
+  const slot = service.getActiveSlot();
   const { go } = useNav();
   const [days, setDays] = useState('7');
   const [seed, setSeed] = useState('');
@@ -44,13 +43,10 @@ export function DevPanel() {
 
   return (
     <div className="screen dev">
-      <Card title="서비스" extra={<Badge tone={mode === 'fake' ? 'warn' : 'good'}>{mode === 'fake' ? 'FAKE' : 'REAL'}</Badge>}>
+      <Card title="서비스">
         <p className="small muted">
           계약 {service.contractVersion} · 엔진 {snap.engineVersion} · 시드 {snap.gameSeed}
         </p>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={mode === 'fake' ? reloadInRealMode : reloadInFakeMode}>
-          {mode === 'fake' ? '실제 서비스로 전환 (?fake 제거)' : 'fake 모드로 전환 (?fake=1)'}
-        </button>
       </Card>
 
       <Card title="가속 진행">
@@ -94,8 +90,8 @@ export function DevPanel() {
             type="button"
             className="btn btn-ghost"
             onClick={() => {
-              if (slot === null) void act((s) => s.closeSlot?.());
-              else if (confirm(`슬롯 ${slot} 세이브를 지우고 타이틀로 갈까요?`)) void trackSlotOp(act((s) => s.deleteSlot?.(slot), `슬롯 ${slot} 세이브를 지웠어요`));
+              if (slot === null) void act((s) => s.closeSlot());
+              else if (confirm(`슬롯 ${slot} 세이브를 지우고 타이틀로 갈까요?`)) void trackSlotOp(act((s) => s.deleteSlot(slot), `슬롯 ${slot} 세이브를 지웠어요`));
             }}
           >
             {slot === null ? '타이틀로' : `슬롯 ${slot} 삭제`}

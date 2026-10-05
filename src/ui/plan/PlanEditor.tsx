@@ -52,7 +52,7 @@ export function PlanEditorProvider({ children }: { children: ReactNode }) {
       lastFormation.current = formationOf(base);
     } else {
       // m4: 포메이션이 바뀌면 선발을 새 자리에 재배치한다. 편집 전 미리보기는 서비스가 새 포메이션으로 다시 고르므로 그대로 따른다
-      if (plan && lastFormation.current && lastFormation.current !== formation && (dirty || !baseIsPreview) && service.remapLineup) {
+      if (plan && lastFormation.current && lastFormation.current !== formation && (dirty || !baseIsPreview)) {
         const next = service.remapLineup(plan, plan.startSlot);
         if (!same(next.lineup, plan.lineup)) {
           setPlan(next);

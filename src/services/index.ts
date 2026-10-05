@@ -17,7 +17,6 @@ export {
 export { GameError, isGameError } from './errors';
 export { josa, fmtM } from '../domain';
 export {
-  createMemoryStorage,
   createMemorySlotStorage,
   createLocalStorageSlotStorage,
   kvSlotStorage,

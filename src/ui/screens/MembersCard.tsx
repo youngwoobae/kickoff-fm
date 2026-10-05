@@ -6,20 +6,18 @@ import { useState } from 'react';
 import type { Membership, RoleLabel } from '../../types';
 import { Card, ErrorNote, Segmented, Sheet } from '../components/kit';
 import { ROLE_NAME, ROLE_ORDER, ROLE_SHORT, memberRoleText, memberText, proposeAreaText } from '../format';
-import { useGame, useInlineAction, useIsOwner, useQuery, useService } from '../service/ServiceContext';
+import { useGame, useInlineAction, useIsOwner, useQuery } from '../service/ServiceContext';
 import { useMembers } from './ProfileSheet';
 
 const MAX_COACHES = 5;
 const EMOJIS = ['🟦', '🟩', '🟥', '🟪', '🟧', '🟫', '🧢', '⚽', '🦁', '🐯', '🦊', '🐻'];
 
 export function MembersCard() {
-  const service = useService();
   const isOwner = useIsOwner();
   const members = useMembers();
-  const hasPin = useQuery((s) => s.hasOwnerPin?.() ?? false).data ?? false;
+  const hasPin = useQuery((s) => s.hasOwnerPin()).data ?? false;
   const [edit, setEdit] = useState<Membership | 'new' | null>(null);
   const [pinOpen, setPinOpen] = useState(false);
-  if (!service.addMember) return null;
   const coaches = members.filter((m) => m.seat !== 'OWNER').length;
   const full = coaches >= MAX_COACHES;
 
@@ -46,11 +44,9 @@ export function MembersCard() {
           <button type="button" className="btn btn-primary" disabled={full} onClick={() => setEdit('new')}>
             코치 추가
           </button>
-          {service.setOwnerPin && (
-            <button type="button" className="btn btn-secondary" onClick={() => setPinOpen(true)}>
-              {hasPin ? 'PIN 바꾸기·해제' : '구단주 PIN 설정'}
-            </button>
-          )}
+          <button type="button" className="btn btn-secondary" onClick={() => setPinOpen(true)}>
+            {hasPin ? 'PIN 바꾸기·해제' : '구단주 PIN 설정'}
+          </button>
         </div>
       )}
       {isOwner && full && <p className="small muted">코치는 최대 {MAX_COACHES}명이에요. 추가하려면 먼저 한 명을 내보내 주세요.</p>}
@@ -76,14 +72,14 @@ function MemberSheet({ target, onClose }: { target: Membership | null; onClose: 
 
   const save = () => {
     const r = target
-      ? run((s) => s.updateMember?.(target.userId, owner ? { name: name.trim(), ...(emoji ? { emoji } : {}) } : { name: name.trim(), role, subRole: subRole ?? null, ...(emoji ? { emoji } : {}) }), '멤버 정보를 고쳤어요')
-      : run((s) => s.addMember?.(name.trim(), role, { ...(subRole ? { subRole } : {}), ...(emoji ? { emoji } : {}) }), `${name.trim()} 코치를 추가했어요`);
+      ? run((s) => s.updateMember(target.userId, owner ? { name: name.trim(), ...(emoji ? { emoji } : {}) } : { name: name.trim(), role, subRole: subRole ?? null, ...(emoji ? { emoji } : {}) }), '멤버 정보를 고쳤어요')
+      : run((s) => s.addMember(name.trim(), role, { ...(subRole ? { subRole } : {}), ...(emoji ? { emoji } : {}) }), `${name.trim()} 코치를 추가했어요`);
     if (r) onClose();
   };
   const remove = () => {
     if (!target) return;
     const ok = run((s) => {
-      s.removeMember?.(target.userId);
+      s.removeMember(target.userId);
       return true;
     }, `${target.name ?? '코치'} 코치를 내보냈어요`);
     if (ok) onClose();
@@ -175,14 +171,14 @@ function PinSheet({ hasPin, onClose }: { hasPin: boolean; onClose: () => void })
   const digits = (v: string) => v.replace(/\D/g, '').slice(0, 4);
   const set = () => {
     const r = run((s) => {
-      s.setOwnerPin?.(pin);
+      s.setOwnerPin(pin);
       return true;
     }, '구단주 PIN 을 설정했어요. 구단주로 바꿀 때마다 물어볼게요');
     if (r) onClose();
   };
   const unset = () => {
     const r = run((s) => {
-      s.setOwnerPin?.(null);
+      s.setOwnerPin(null);
       return true;
     }, '구단주 PIN 을 해제했어요');
     if (r) onClose();

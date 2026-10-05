@@ -4,7 +4,6 @@
  */
 import { useCallback, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { BuildInfo } from '../../services';
 import { Card, Segmented, Sheet, Toggle } from '../components/kit';
 import { useToast } from '../components/Toast';
 import { downloadText } from '../format';
@@ -22,8 +21,8 @@ export function SettingsSheet({ open, onClose, inGame }: { open: boolean; onClos
   const act = useAsyncAction();
   const toast = useToast();
   const { go } = useNav();
-  const build: BuildInfo | undefined = service.getBuildInfo?.();
-  const slot = inGame ? (service.getActiveSlot?.() ?? null) : null;
+  const build = service.getBuildInfo();
+  const slot = inGame ? service.getActiveSlot() : null;
 
   const replayTour = () => {
     restartTour();
@@ -131,21 +130,21 @@ export function SettingsSheet({ open, onClose, inGame }: { open: boolean; onClos
             className="btn btn-secondary btn-block"
             onClick={async () => {
               onClose();
-              await act((s) => s.closeSlot?.());
+              await act((s) => s.closeSlot());
             }}
           >
             저장하고 세이브 관리로
           </button>
           <small className="muted">타이틀 화면에서 슬롯 이어하기·내보내기·삭제를 할 수 있어요.</small>
-          {slot !== null && service.exportSlot && (
+          {slot !== null && (
             <>
               <button
                 type="button"
                 className="btn btn-secondary btn-block"
                 onClick={() =>
                   void act(async (s) => {
-                    await s.flush?.();
-                    return s.exportSlot?.(slot);
+                    await s.flush();
+                    return s.exportSlot(slot);
                   }).then((json) => json && downloadText(`kickoff-slot${slot}-${new Date().toLocaleDateString('sv-SE')}.json`, json))
                 }
               >
@@ -160,7 +159,7 @@ export function SettingsSheet({ open, onClose, inGame }: { open: boolean; onClos
       <Card title="정보">
         <p className="small">
           앱 {APP_VERSION}
-          {build && ` · 엔진 ${build.engineVersion} · 계약 ${build.contractVersion} · 세이브 형식 ${build.saveSchema}`}
+          {` · 엔진 ${build.engineVersion} · 계약 ${build.contractVersion} · 세이브 형식 ${build.saveSchema}`}
         </p>
         <p className="small muted">킥오프 FM은 인터넷 없이 동작하고, 모든 기록은 이 기기에만 저장돼요.</p>
         <button

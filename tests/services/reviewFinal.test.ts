@@ -6,8 +6,6 @@ import { packBody, unpackBody } from '../../src/services/idbStorage';
 import { guardSlotOwner, type SlotChannel } from '../../src/ui/app/slotGuard';
 import type { GameState } from '../../src/types';
 
-type Svc = Required<GameService>;
-
 /** 같은 저장소를 보는 두 창 + 서로 이어진 채널 */
 function linkedChannels(): [SlotChannel, SlotChannel] {
   const mk = (): SlotChannel & { peer?: SlotChannel } => ({ onmessage: null, postMessage(m) { this.peer?.onmessage?.({ data: m } as MessageEvent); }, close() {} });
@@ -23,8 +21,8 @@ const flushMicro = () => new Promise((r) => setTimeout(r, 0));
 describe('F-M1 같은 슬롯을 두 창에서 열면 앞 창은 저장 후 닫는다', () => {
   it('뒤 창이 슬롯을 열면 앞 창 게임이 닫히고, 앞 창의 진행이 저장소에 남는다', async () => {
     const slots = createMemorySlotStorage();
-    const a = createGameService({ slots, clock }) as Svc;
-    const b = createGameService({ slots, clock }) as Svc;
+    const a = createGameService({ slots, clock }) as GameService;
+    const b = createGameService({ slots, clock }) as GameService;
     const [ca, cb] = linkedChannels();
     const taken: number[] = [];
     const offA = guardSlotOwner(a, ca, (id) => taken.push(id));
@@ -72,7 +70,7 @@ describe('F-M2 세이브 본문 압축 실패·해제 불가', () => {
 
 describe('F-m 가져오기 검증 보강', () => {
   const base = () => {
-    const s = createGameService({ clock }) as Svc;
+    const s = createGameService({ clock }) as GameService;
     s.newGame({ seed: 5 });
     return JSON.parse(s.exportSave()) as GameState;
   };
@@ -80,7 +78,7 @@ describe('F-m 가져오기 검증 보강', () => {
     const x = base();
     mut(x);
     try {
-      (createGameService({ clock }) as Svc).importSave(JSON.stringify(x));
+      (createGameService({ clock }) as GameService).importSave(JSON.stringify(x));
       return null;
     } catch (e) {
       return isGameError(e) ? e.code : String(e);
@@ -105,7 +103,7 @@ describe('F-m 가져오기 검증 보강', () => {
 describe('F-m 손상 슬롯 내보내기', () => {
   it('압축 본문이 깨진 슬롯은 빈 파일 대신 SAVE_INCOMPATIBLE', async () => {
     const slots = createMemorySlotStorage();
-    const s = createGameService({ slots: { ...slots, read: async () => '' }, clock }) as Svc;
+    const s = createGameService({ slots: { ...slots, read: async () => '' }, clock }) as GameService;
     await expect(s.exportSlot(1)).rejects.toMatchObject({ code: 'SAVE_INCOMPATIBLE' });
   });
 });

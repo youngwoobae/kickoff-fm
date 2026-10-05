@@ -1,10 +1,10 @@
 /** 서비스 계약 2.4.0 (추가만): 2D 중계 큐(event·pitch·formations·starters·ballTrack), getBuildInfo, 도메인 조사 */
 import { describe, expect, it } from 'vitest';
 import { josa } from '../../src/domain/josa';
-import { CONTRACT_VERSION, createGameService, createMemoryStorage } from '../../src/services';
+import { CONTRACT_VERSION, createGameService } from '../../src/services';
 import type { MatchId } from '../../src/types';
 
-const s = createGameService({ storage: createMemoryStorage(), clock: { nowIso: () => '2026-10-05T00:00:00.000Z' } });
+const s = createGameService({ clock: { nowIso: () => '2026-10-05T00:00:00.000Z' } });
 s.newGame({ seed: 24, startTier: 'T3' });
 const ids: MatchId[] = [];
 while (ids.length < 6) {
