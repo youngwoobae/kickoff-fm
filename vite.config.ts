@@ -29,6 +29,7 @@ function serviceWorker(): Plugin {
 }
 
 export default defineConfig({
+  base: process.env.VITE_BASE ?? '/',
   plugins: [react(), serviceWorker()],
   define: { __APP_VERSION__: JSON.stringify(version) },
   worker: { format: 'es' },
