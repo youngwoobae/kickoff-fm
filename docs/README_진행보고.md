@@ -146,9 +146,16 @@ Q4·Q9·Q11·Q12·Q14·Q15는 v2 기본값 그대로 적용.
 | N8 | 재계약 후 방출 위약금(m11) | 현재 계약 · 새 계약 |
 | N9 | 탭 알림 점에 숫자 배지 | 디자인 결정 |
 
-## 7. 다음 단계
+## 7. 배포
 
-1. M7.5 실기기 증거 → 실패 항목 수정 → v1.0 태그
+- **라이브 URL**: https://youngwoobae.github.io/kickoff-fm/ (GitHub Pages, `.github/workflows/deploy.yml` — master 푸시 시 typecheck·test → `VITE_BASE=/kickoff-fm/` 빌드 → 자동 배포)
+- 2026-10-18 재확인: `npm run sim:batch -- --n 2000 --strict` ALL PASS(80/80), `npm run sim:career -- --seeds 20 --seasons 10 --strict` hard 25/25·warn 3. `완성본_DoD_증거.md` 9·15번 FAIL은 이후 커밋(`3bc15d8`·`7f4f645`)에서 해소됨
+- 배포 확인: 라이브 URL 접속 → 새 게임 생성 → Day 1 플랜 화면까지 콘솔 에러 0, SW 등록 scope `/kickoff-fm/` 정상, manifest `start_url`/`scope` `./` 정상 로드
+- 실기기 검증(안드로이드/iOS 설치, 비행기 모드, Lighthouse)은 이제 이 URL로 바로 가능 — `완성본_DoD_증거.md` 끝 "실기기 확인 절차" 1~3번에서 `localhost:5440` 대신 위 URL 사용
+
+## 8. 다음 단계
+
+1. M7.5 실기기 증거(위 URL로 12·13·17번, 375×812 수동 3시즌 2번) → 실패 항목 수정 → v1.0 태그
 2. N5~N8 결정
 3. v1.1: 시설 싱크, 컵, 플랜 저장소, F-m9·F-m10, m3·m4
 4. 플레이테스트(기획서 v2 12.3 게이트)
