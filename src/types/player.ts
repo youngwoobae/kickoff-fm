@@ -4,6 +4,9 @@ import type { Tier } from './league';
 /** 기획서 4.4 포지션 그룹. WB 는 3백/5백 포메이션의 FB 슬롯으로 표현한다. */
 export type Position = 'GK' | 'CB' | 'FB' | 'DM' | 'CM' | 'AM' | 'W' | 'ST';
 
+/** 2.6.0: 국적(이름 생성용, 표시 전용 — 경제·전력에 영향 없음). 외국 국적은 소수 출신 비중만 반영한다 */
+export type Nationality = 'KR' | 'BR' | 'JP' | 'GB' | 'FR' | 'NG' | 'AR' | 'ES';
+
 /** 필드 능력치 12종 (기술 5 + 정신 4 + 신체 3). 1~20 정수. */
 export type OutfieldAttr =
   | 'passing'
@@ -90,6 +93,8 @@ export interface Player {
   id: PlayerId;
   clubId: ClubId | null;
   name: string;
+  /** 2.6.0: 국적. 없으면 'KR' 로 간주(스키마 3 구세이브 호환) */
+  nationality?: Nationality;
   age: number;
   primary: Position;
   /** 누락된 포지션은 UNSUITED 로 간주 */

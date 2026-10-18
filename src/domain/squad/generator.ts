@@ -5,6 +5,7 @@ import type {
   BotStyle,
   Club,
   FitLevel,
+  Nationality,
   Player,
   Position,
   ScoutGrade,
@@ -93,6 +94,83 @@ const FAMILY = ['김', '이', '박', '최', '정', '강', '조', '윤', '장', '
 const GIVEN_A = ['민', '서', '도', '준', '현', '지', '태', '우', '승', '재', '하', '시', '건', '유', '동', '성', '은', '영', '진', '한'];
 const GIVEN_B = ['준', '호', '윤', '우', '민', '혁', '빈', '수', '훈', '원', '석', '규', '찬', '환', '결', '율', '겸', '온', '철', '범'];
 
+/**
+ * 2.6.0: 국적별 실제 이름 생성(한글 표기 — 게임 전체가 한국어 단일이라 외국 선수도
+ * 중계·목록에서 로마자 없이 한글로 통일한다. 실존 선수 이름은 쓰지 않는다).
+ * 소유: A. 각 풀은 "해당 국가에서 실제 쓰이는 이름 성분"이되 대표성 있는 소수 샘플만 둔다
+ * (완전한 현지 데이터베이스가 아님 — 분위기용).
+ */
+interface NamePool {
+  given: string[];
+  family: string[];
+  order: 'given-family' | 'family-given';
+}
+
+const NATIONALITY_POOLS: Record<Nationality, NamePool> = {
+  KR: { given: [], family: [], order: 'family-given' }, // 기존 FAMILY/GIVEN_A/GIVEN_B 조합 경로를 그대로 씀(아래 generateName 참고)
+  BR: {
+    given: ['루카스', '가브리엘', '마테우스', '라파엘', '브루누', '치아구', '펠리피', '지에구', '카이우', '비니시우스'],
+    family: ['실바', '산투스', '올리베이라', '소우자', '페레이라', '코스타', '아우메이다', '페헤이라', '호드리게스', '카르발류'],
+    order: 'given-family',
+  },
+  JP: {
+    given: ['히로토', '렌', '하루토', '유마', '소타', '이츠키', '리쿠', '미나토', '아오이', '유토'],
+    family: ['사토', '스즈키', '다카하시', '다나카', '와타나베', '이토', '야마모토', '나카무라', '고바야시', '가토'],
+    order: 'family-given',
+  },
+  GB: {
+    given: ['잭', '해리', '찰리', '조지', '올리버', '토마스', '윌리엄', '제임스', '벤', '루카스'],
+    family: ['스미스', '존스', '테일러', '브라운', '윌리엄스', '윌슨', '존슨', '데이비스', '로빈슨', '워커'],
+    order: 'given-family',
+  },
+  FR: {
+    given: ['루카', '루이', '가브리엘', '레오', '라파엘', '아르튀르', '쥘', '아당', '테오', '위고'],
+    family: ['마르탱', '베르나르', '뒤부아', '토마', '로베르', '리샤르', '프티', '뒤랑', '르루아', '모로'],
+    order: 'given-family',
+  },
+  NG: {
+    given: ['치네두', '에메카', '올루와세운', '이페올루와', '다니엘', '사무엘', '조슈아', '빅터', '이삭', '주드'],
+    family: ['오콘크워', '아데예미', '오콜리', '이부딘', '발로군', '에제', '은와치쿠', '오예레미', '우고', '아비올라'],
+    order: 'given-family',
+  },
+  AR: {
+    given: ['마티아스', '니콜라스', '파쿤도', '산티아고', '레안드로', '에세키엘', '발렌틴', '토마스', '아구스틴', '브루노'],
+    family: ['로드리게스', '곤잘레스', '페르난데스', '로페스', '디아스', '마르티네스', '알바레스', '로메로', '수아레스', '토레스'],
+    order: 'given-family',
+  },
+  ES: {
+    given: ['알바로', '세르히오', '파블로', '마르코스', '디에고', '호르헤', '이반', '라울', '아드리안', '빅토르'],
+    family: ['가르시아', '마르틴', '로페스', '산체스', '페레스', '고메스', '모레노', '히메네스', '루이즈', '디아즈'],
+    order: 'given-family',
+  },
+};
+
+/** 국적 분포: 한국 리그이므로 절대다수는 국내 출신, 외국 선수는 소수 비중(용병) */
+const NATIONALITY_WEIGHTS: [Nationality, number][] = [
+  ['KR', 0.85],
+  ['BR', 0.03],
+  ['JP', 0.03],
+  ['GB', 0.02],
+  ['FR', 0.02],
+  ['NG', 0.02],
+  ['AR', 0.02],
+  ['ES', 0.01],
+];
+
+/**
+ * 주입 rng 를 소비하지 않고 playerId 해시로만 국적·이름을 고른다(salaryFor 와 같은 이유:
+ * rng 를 쓰면 같은 시드의 다음 선수 능력치가 밀려 엔진 보정 표본이 흔들린다).
+ */
+export function nationalityFor(playerId: string): Nationality {
+  const u = hashString(`${playerId}|nationality`) / 0x100000000;
+  let acc = 0;
+  for (const [nat, w] of NATIONALITY_WEIGHTS) {
+    acc += w;
+    if (u < acc) return nat;
+  }
+  return 'KR';
+}
+
 export function gauss(rng: Rng): number {
   const u = Math.max(1e-9, rng());
   const v = rng();
@@ -116,8 +194,13 @@ export function scoutGrade(v: number): ScoutGrade {
   return 'E';
 }
 
-export function generateName(rng: Rng): string {
-  return pick(rng, FAMILY) + pick(rng, GIVEN_A) + pick(rng, GIVEN_B);
+export function generateName(rng: Rng, nationality: Nationality): string {
+  if (nationality === 'KR') return pick(rng, FAMILY) + pick(rng, GIVEN_A) + pick(rng, GIVEN_B);
+  const pool = NATIONALITY_POOLS[nationality];
+  const given = pick(rng, pool.given);
+  const family = pick(rng, pool.family);
+  rng(); // KR 경로(3회 소비)와 draw 수를 맞춘다 — 이 함수의 rng 소비량이 국적에 따라 달라지면 같은 시드의 다음 선수부터 능력치가 밀려 엔진 보정 표본이 흔들린다
+  return pool.order === 'given-family' ? `${given} ${family}` : `${family} ${given}`;
 }
 
 export function generatePlayer(rng: Rng, position: Position, targetOvr: number, age?: number, legacyRng = false): Player {
@@ -158,10 +241,13 @@ export function generatePlayer(rng: Rng, position: Position, targetOvr: number, 
   if (legacyRng && ageV > 28 && age === undefined && Math.round(25 + g * 4) <= 28) rng();
   const potential = clamp(ovr + growth, ovr, 95);
   const seasonsLeft = ageV <= 23 ? randInt(rng, 1, 3) : randInt(rng, 1, 5);
+  const id = `x${Math.floor(rng() * 0xffffffff).toString(16)}`;
+  const nationality = nationalityFor(id);
   return {
-    id: `x${Math.floor(rng() * 0xffffffff).toString(16)}`,
+    id,
     clubId: null,
-    name: generateName(rng),
+    name: generateName(rng, nationality),
+    nationality,
     age: ageV,
     primary: position,
     positions,
