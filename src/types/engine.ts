@@ -238,6 +238,27 @@ export interface MatchResult {
   log: DecisionLog[];
 }
 
+/**
+ * 2.6.0: 실시간 관전용 세그먼트 스텝(segments.ts M03-live). 18 세그먼트(5분 단위) 경계마다 한 번 yield.
+ * simulateMatchSteps() 제너레이터가 내보낸다 — simulateMatch() 는 그대로 한 번에 전체를 계산한다(변경 없음).
+ */
+export interface MatchStep {
+  /** 0~17 */
+  seg: number;
+  /** 이번 세그먼트가 끝난 시점의 분(세그먼트 경계, 45 또는 90 포함) */
+  minute: number;
+  /** 직전 yield 이후 새로 발생한 이벤트만(누적 아님) */
+  newEvents: MatchEvent[];
+  homeGoals: number;
+  awayGoals: number;
+}
+
+/** 다음 세그먼트부터 반영할 사용자 쪽 전술 변경. generator.next(override) 로 전달 */
+export interface TacticOverride {
+  side: 'home' | 'away';
+  instructions: Partial<TeamInstructions>;
+}
+
 /** 8.8-2 VALUE 테이블: 결정 성공/실패의 기대 xG 차. 엔진 버전별 데이터 파일 */
 export interface ValueTable {
   engineVersion: string;

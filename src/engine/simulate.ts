@@ -16,6 +16,7 @@ import type {
   Lane,
   MatchEvent,
   MatchResult,
+  MatchStep,
   OpenPlayChance,
   PlayerMatchLine,
   RoleId,
@@ -23,6 +24,7 @@ import type {
   SimulateInput,
   SlotKey,
   Step,
+  TacticOverride,
   TeamInstructions,
   TeamMatchStats,
   TriggerCondition,
@@ -981,6 +983,18 @@ class Match {
   }
 
   run(): MatchResult {
+    const gen = this.runSegments();
+    let r = gen.next();
+    while (!r.done) r = gen.next();
+    return r.value;
+  }
+
+  /**
+   * 2.6.0: 실시간 관전용. 세그먼트(5분)마다 한 번 yield — 새 이벤트·현재 스코어를 넘기고,
+   * generator.next(override) 로 받은 전술 변경을 다음 세그먼트부터 반영한다. run() 은 이를
+   * 그대로 끝까지 드레인하므로 기존 simulateMatch() 동작은 바이트 단위로 그대로다.
+   */
+  *runSegments(): Generator<MatchStep, MatchResult, TacticOverride | undefined> {
     const { home, away } = this;
     const rng = this.rng;
     const tempoMean = (home.instr.tempo + away.instr.tempo) / 2;
@@ -1002,6 +1016,7 @@ class Match {
     const startFormations = { home: home.formation.id, away: away.formation.id };
     const startInstr = { home: { ...home.instr }, away: { ...away.instr } };
     const momentum: number[] = [];
+    let eventsCursor = 0;
 
     this.emit({ type: 'KICK_OFF', minute: 0 });
     for (let seg = 0; seg < SEGMENTS; seg++) {
@@ -1050,6 +1065,14 @@ class Match {
       const hx = home.stats.segXg[seg]!;
       const ax = away.stats.segXg[seg]!;
       momentum.push(round3(clamp((hE - aE + 3 * (hx - ax)) / Math.max(4, hE + aE), -1, 1)));
+
+      const newEvents = this.events.slice(eventsCursor);
+      eventsCursor = this.events.length;
+      const override = yield { seg, minute: this.minute, newEvents, homeGoals: home.goals, awayGoals: away.goals };
+      if (override) {
+        const target = override.side === 'home' ? home : away;
+        target.instr = { ...target.instr, ...override.instructions };
+      }
     }
     this.emit({ type: 'FULL_TIME', minute: 90 });
 
@@ -1110,6 +1133,11 @@ function round3(x: number): number {
 
 export function simulateMatch(input: SimulateInput): MatchResult {
   return new Match(input).run();
+}
+
+/** 2.6.0: 실시간 관전용 세그먼트 스텝 제너레이터. simulateMatch() 와 완전히 같은 계산, 끊어서 받을 뿐 */
+export function simulateMatchSteps(input: SimulateInput): Generator<MatchStep, MatchResult, TacticOverride | undefined> {
+  return new Match(input).runSegments();
 }
 
 /** 조건부 지시 중 SWITCH_SLOT 으로 사용된 슬롯 (도메인 숙련도 반영용) */

@@ -1,5 +1,5 @@
 /** 엔진 공개 API. domain 은 이 파일만 import 한다. */
-export { simulateMatch, usedSlotsOf } from './simulate';
+export { simulateMatch, simulateMatchSteps, usedSlotsOf } from './simulate';
 export { explainMatch, decomposeBinary, valueOf } from './explain';
 export { computeUnits, computeUnitsFromOccupants, computeShape, conditionEfficiency, eff, fitOf, type Occupant } from './units';
 export { mulberry32, seedFrom, hashString, pickWeighted, type Rng } from './rng';
