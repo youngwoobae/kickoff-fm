@@ -8,7 +8,7 @@ import { MembersCard } from './MembersCard';
 import { ProfileSheet } from './ProfileSheet';
 import { ProposeSheet } from '../plan/PlanActions';
 import { useToast } from '../components/Toast';
-import { useAction, useActor, useGame, useQuery } from '../service/ServiceContext';
+import { useAction, useActor, useGame, useIsOwner, useQuery } from '../service/ServiceContext';
 
 const REJECT_REASONS = ['이번 경기엔 안 맞음', '다른 제안과 겹침', '선수 컨디션 고려', '기타'];
 const DEAL_REJECT_REASONS = ['예산이 빠듯해요', '다른 선수가 먼저예요', '조건이 맞지 않아요', '기타'];
@@ -27,6 +27,7 @@ export function CoachScreen() {
 
   return (
     <div className="screen coach">
+      <ClubCard />
       <Card title="지금 사용자">
         <div className="row-between">
           <strong>{actor ? memberText(actor) : '–'}</strong>
@@ -60,6 +61,65 @@ export function CoachScreen() {
         <ActivityLog entries={snap.actionLog} memberships={snap.memberships} />
       </Card>
     </div>
+  );
+}
+
+/** 2.6.0: 구단 이름 표시·수정(구단주 전용) */
+function ClubCard() {
+  const snap = useGame();
+  const isOwner = useIsOwner();
+  const act = useAction();
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState('');
+  const club = snap.clubs[snap.userClubId];
+  const nameBad = name !== '' && (name.trim().length < 1 || [...name.trim()].length > 20);
+  return (
+    <Card title="구단">
+      <div className="row-between">
+        <strong>{club?.name ?? '–'}</strong>
+        {isOwner && (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => {
+              setName(club?.name ?? '');
+              setEditing(true);
+            }}
+          >
+            이름 바꾸기
+          </button>
+        )}
+      </div>
+      {editing && (
+        <Sheet
+          open
+          title="구단 이름"
+          onClose={() => setEditing(false)}
+          footer={
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={nameBad || name.trim() === ''}
+              onClick={() => {
+                if (act((s) => s.renameClub(name), '구단 이름을 바꿨어요') !== undefined) setEditing(false);
+              }}
+            >
+              저장
+            </button>
+          }
+        >
+          <div className="form-stack">
+            <label className="field">
+              <span>구단 이름 (1~20자)</span>
+              <input value={name} maxLength={20} aria-invalid={nameBad || undefined} aria-describedby="club-name-count" onChange={(e) => setName(e.target.value)} placeholder="예: 성수 유나이티드" />
+              <small id="club-name-count" className="muted">
+                {[...name].length}/20
+              </small>
+            </label>
+          </div>
+        </Sheet>
+      )}
+    </Card>
   );
 }
 

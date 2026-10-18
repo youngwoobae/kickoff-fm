@@ -141,6 +141,7 @@ import {
   computeStandings,
   createInitialState,
   createProposal,
+  DomainError,
   findConflicting,
   isAvailable,
   isDomainError,
@@ -252,6 +253,13 @@ const CATALOG: Catalog = {
 function toGameError(e: unknown): unknown {
   if (isDomainError(e)) return new GameError(e.code, e.message, e.details);
   return e;
+}
+
+/** 2.6.0: 구단·선수 이름 수정 입력 정리(trim + 길이 제한) */
+function cleanDisplayName(name: unknown, max: number): string {
+  const n = typeof name === 'string' ? name.trim() : '';
+  if (n.length < 1 || [...n].length > max) throw new DomainError('INVALID_NAME', `이름은 1~${max}자여야 해요`);
+  return n;
 }
 
 function isStep(v: unknown): boolean {
@@ -996,6 +1004,29 @@ class LocalGameService implements GameService {
     const p = marketPlayer(this.require(), playerId); // NPC 매물 선수 포함 (2.2.1)
     if (!p) throw new GameError('NOT_FOUND', `선수 없음: ${playerId}`);
     return p;
+  }
+
+  /** 2.6.0: 구단 이름 수정(구단주 전용). shortName 은 첫 단어를 잘라 자동 파생 */
+  renameClub(name: string): void {
+    const s = this.require();
+    this.ownerManage(s);
+    const club = this.run(() => {
+      const clean = cleanDisplayName(name, 20);
+      const shortName = (clean.split(/\s+/)[0] ?? clean).slice(0, 6);
+      return { ...s.clubs[s.userClubId]!, name: clean, shortName };
+    });
+    this.commit(this.withLog({ ...s, clubs: { ...s.clubs, [s.userClubId]: club } }, 'CLUB_RENAMED', { name: club.name }));
+  }
+
+  /** 2.6.0: 선수 이름 수정(내 구단 선수만, 구단주 전용) */
+  renamePlayer(playerId: PlayerId, name: string): Player {
+    const s = this.require();
+    this.ownerManage(s);
+    const cur = s.players[playerId];
+    if (!cur || cur.clubId !== s.userClubId) throw new GameError('NOT_FOUND', `선수 없음: ${playerId}`);
+    const next = this.run(() => ({ ...cur, name: cleanDisplayName(name, 20) }));
+    this.commit(this.withLog({ ...s, players: { ...s.players, [playerId]: next } }, 'PLAYER_RENAMED', { playerId, name: next.name }));
+    return next;
   }
 
   getStandings(leagueId?: LeagueId): StandingRow[] {

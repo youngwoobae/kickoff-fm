@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import type { AttrDef, Player, PlayerId } from '../../types';
 import { Badge, Card, ConditionBar, DisciplineBadges, Empty, ErrorNote, FitMark, MoneyField, Segmented, Sheet } from '../components/kit';
 import { FIT_LABEL, MORALE_LABEL, MORALE_SHORT, POS_LABEL, POS_NAME, POS_ORDER, canPropose, fitOf, formatKc, isAvailable } from '../format';
-import { useActor, useGame, useInlineAction, useIsOwner, useQuery } from '../service/ServiceContext';
+import { useAction, useActor, useGame, useInlineAction, useIsOwner, useQuery } from '../service/ServiceContext';
 import { josa } from '../../services';
 import { TrainingCard } from './TrainingCard';
 import { YELLOW_LIMIT, yellowAccumOf, yellowCardsOf } from '../types23';
@@ -101,12 +101,62 @@ export function PlayerSheet({ playerId, onClose }: { playerId: PlayerId | null; 
   );
 }
 
+/** 2.6.0: 선수 이름 수정(구단주·내 구단 선수만) */
+function PlayerNameEdit({ p }: { p: Player }) {
+  const snap = useGame();
+  const isOwner = useIsOwner();
+  const act = useAction();
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState('');
+  if (!isOwner || p.clubId !== snap.userClubId) return null;
+  const nameBad = name !== '' && (name.trim().length < 1 || [...name.trim()].length > 20);
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        className="btn btn-secondary btn-sm pd-rename"
+        onClick={() => {
+          setName(p.name);
+          setEditing(true);
+        }}
+      >
+        이름 바꾸기
+      </button>
+    );
+  }
+  return (
+    <div className="form-stack pd-rename-form">
+      <label className="field">
+        <span>선수 이름 (1~20자)</span>
+        <input value={name} maxLength={20} aria-invalid={nameBad || undefined} autoFocus onChange={(e) => setName(e.target.value)} />
+        <small className="muted">{[...name].length}/20</small>
+      </label>
+      <div className="row-between">
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => setEditing(false)}>
+          취소
+        </button>
+        <button
+          type="button"
+          className="btn btn-primary btn-sm"
+          disabled={nameBad || name.trim() === ''}
+          onClick={() => {
+            if (act((s) => s.renamePlayer(p.id, name), '선수 이름을 바꿨어요') !== undefined) setEditing(false);
+          }}
+        >
+          저장
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function PlayerDetail({ p, attrs, onClose }: { p: Player; attrs: AttrDef[]; onClose: () => void }) {
   const groups: [AttrDef['group'], string][] = p.primary === 'GK'
     ? [['GOALKEEPING', '골키핑'], ['MENTAL', '정신'], ['PHYSICAL', '신체'], ['TECHNICAL', '기술']]
     : [['TECHNICAL', '기술'], ['MENTAL', '정신'], ['PHYSICAL', '신체']];
   return (
     <div className="player-detail">
+      <PlayerNameEdit p={p} />
       <div className="pd-top">
         <span className={`pos-badge pos-${p.primary}`}>{POS_LABEL[p.primary]}</span>
         <span>

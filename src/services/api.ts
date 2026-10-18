@@ -75,7 +75,7 @@ import type {
 } from '../types';
 
 /** 버전별 변경 이력: docs/아키텍처.md 16장 */
-export const CONTRACT_VERSION = '3.0.0';
+export const CONTRACT_VERSION = '3.1.0';
 
 /** 2.4.0: 정보 화면용 빌드 정보 (온보딩_UX 2.3) */
 export interface BuildInfo {
@@ -205,6 +205,10 @@ export interface GameService {
   hasOwnerPin(): boolean;
   /** OWNER 전용. 숫자 4자리 또는 null(해제). 솔트 해시만 저장. 잊으면 세이브 내보내기 JSON 에서 ownerPin 을 지우고 가져오기 */
   setOwnerPin(pin: string | null): void;
+  /** 2.6.0 OWNER 전용. 구단 이름 수정(1~20자). shortName 은 자동 파생. 위반 = INVALID_NAME */
+  renameClub(name: string): void;
+  /** 2.6.0 OWNER 전용. 내 구단 선수 이름 수정(1~20자). 위반 = INVALID_NAME, 남의 구단 선수 = NOT_FOUND */
+  renamePlayer(playerId: PlayerId, name: string): Player;
 
   // ── 조회 ─────────────────────────────────────────────────────────
   getCatalog(): Catalog;

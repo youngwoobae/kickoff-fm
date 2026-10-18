@@ -88,7 +88,10 @@ export type ActionLogKind =
   | 'MEMBER_ADDED'
   | 'MEMBER_UPDATED'
   | 'MEMBER_REMOVED'
-  | 'OWNER_PIN_SET';
+  | 'OWNER_PIN_SET'
+  /** 2.6.0: 구단·선수 이름 수정 */
+  | 'CLUB_RENAMED'
+  | 'PLAYER_RENAMED';
 
 /** UI 가 logEvent() 로 직접 남길 수 있는 종류 (나머지는 services 가 자동 기록) */
 export type UiLogKind = 'SESSION_START' | 'SESSION_END' | 'REPORT_VIEWED' | 'REPLAY_VIEWED' | 'SCOUT_VIEWED';
@@ -219,7 +222,9 @@ export type GameErrorCode =
   | 'RENEWAL_NOT_OPEN'
   | 'NEGATIVE_BALANCE_LOCK'
   /** 2.5.0: 멤버 이름·역할·인원 규칙 위반 */
-  | 'INVALID_MEMBER';
+  | 'INVALID_MEMBER'
+  /** 2.6.0: 구단·선수 이름 수정 규칙 위반 */
+  | 'INVALID_NAME';
 
 export interface PlanValidationIssue {
   severity: 'ERROR' | 'WARNING';
