@@ -9,6 +9,7 @@ import type {
   Club,
   ClubId,
   DayResult,
+  EngineConfig,
   Finance,
   Fixture,
   GameState,
@@ -329,6 +330,27 @@ export function matchSeed(state: Pick<GameState, 'gameSeed'>, matchId: string, e
   return seedFrom(state.gameSeed, matchId, engineVersion);
 }
 
+/**
+ * 2.6.0: 실시간 관전 — 오늘 사용자 구단 경기가 있으면 엔진 입력을 미리 만든다(상태 변경 없음).
+ * resolveFor 는 state 만의 순수 함수라 advanceDayState 내부에서 같은 fixture 에 다시 호출해도
+ * 바이트 단위로 같은 입력이 나온다(봇 플랜의 rng 도 매치마다 독립 시드라 소비 순서 영향 없음).
+ */
+export function prepareUserMatchInput(state: GameState): { fixtureId: string; seed: number; home: ReturnType<typeof toEngineTeamInput>; away: ReturnType<typeof toEngineTeamInput>; config: EngineConfig } | null {
+  if (state.phase !== 'MATCHDAY') return null;
+  const d = state.time.day;
+  const f = state.fixtures.find((x) => x.season === state.time.season && x.day === d && !x.played && (x.homeId === state.userClubId || x.awayId === state.userClubId));
+  if (!f) return null;
+  const rpHome = resolveFor(state, state.clubs[f.homeId]!, f);
+  const rpAway = resolveFor(state, state.clubs[f.awayId]!, f);
+  return {
+    fixtureId: f.id,
+    seed: matchSeed(state, f.id),
+    home: toEngineTeamInput(state.clubs[f.homeId]!, rpHome, state.players, true),
+    away: toEngineTeamInput(state.clubs[f.awayId]!, rpAway, state.players, false),
+    config: { engineVersion: ENGINE_VERSION, tacCap: state.settings.tacCap, tacticsEnabled: true, disabledRules: [] },
+  };
+}
+
 function applyResultToClub(state: GameState, clubId: ClubId, result: MatchResult, gf: number, ga: number): void {
   const letter = gf > ga ? 'W' : gf === ga ? 'D' : 'L';
   const lines = new Map(result.players.filter((l) => l.clubId === clubId).map((l) => [l.playerId, l]));
@@ -431,7 +453,7 @@ function shallowCopy(input: GameState): GameState {
   };
 }
 
-export function advanceDayState(input: GameState, nowIso: string): AdvanceOutcome {
+export function advanceDayState(input: GameState, nowIso: string, userMatchOverride?: { fixtureId: string; result: MatchResult }): AdvanceOutcome {
   if (input.phase === 'SEASON_OVER') throw new DomainError('INVALID_PHASE', '시즌이 끝났어요. 새 시즌을 시작해 보세요');
   const state = shallowCopy(input);
   const from = { ...state.time };
@@ -484,13 +506,17 @@ export function advanceDayState(input: GameState, nowIso: string): AdvanceOutcom
       const rp = resolved.get(f.id)!;
       const homeIn = toEngineTeamInput(state.clubs[f.homeId]!, rp.home, state.players, true);
       const awayIn = toEngineTeamInput(state.clubs[f.awayId]!, rp.away, state.players, false);
-      const result = simulateMatch({
-        matchId: f.id,
-        seed: matchSeed(state, f.id),
-        home: homeIn,
-        away: awayIn,
-        config: { engineVersion: ENGINE_VERSION, tacCap: state.settings.tacCap, tacticsEnabled: true, disabledRules: [] },
-      });
+      // 2.6.0: 실시간 관전으로 이미 끝낸 사용자 경기는 재시뮬 대신 그 결과를 그대로 쓴다(같은 입력이면 어차피 바이트 단위로 같다)
+      const result =
+        userMatchOverride && userMatchOverride.fixtureId === f.id
+          ? userMatchOverride.result
+          : simulateMatch({
+              matchId: f.id,
+              seed: matchSeed(state, f.id),
+              home: homeIn,
+              away: awayIn,
+              config: { engineVersion: ENGINE_VERSION, tacCap: state.settings.tacCap, tacticsEnabled: true, disabledRules: [] },
+            });
       pending.push({ f, result, homeIn, awayIn, rp });
     }
     for (const { f, result, homeIn, awayIn, rp } of pending) {

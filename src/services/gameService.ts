@@ -32,6 +32,8 @@ import type {
   MatchPlan,
   MatchReplay,
   MatchReport,
+  MatchResult,
+  MatchStep,
   MatchupPreview,
   Membership,
   ClubMember,
@@ -70,6 +72,7 @@ import type {
   StoredMatchRecord,
   StyleFit,
   StyleId,
+  TacticOverride,
   TacticSlot,
   TacticCap,
   TeamInstructions,
@@ -101,6 +104,7 @@ import {
   mulberry32,
   nearestStyle,
   simulateMatch,
+  simulateMatchSteps,
 } from '../engine';
 import {
   COACH_ID,
@@ -149,6 +153,7 @@ import {
   matchupPreview,
   migrateSave,
   pickLineup,
+  prepareUserMatchInput,
   staticView,
   styleFitOf,
   toEnginePlayer,
@@ -505,6 +510,8 @@ class LocalGameService implements GameService {
   private readonly listeners = new Set<() => void>();
   private state: GameState | null = null;
   private standingsCache: { state: GameState; rows: Map<LeagueId, StandingRow[]> } | null = null;
+  /** 2.6.0: 실시간 관전 중인 사용자 경기(영속화하지 않음 — 세션 중에만 유지) */
+  private liveMatch: { fixtureId: string; gen: Generator<MatchStep, MatchResult, TacticOverride | undefined> } | null = null;
   private pyramidCache: { state: GameState; pyramid: Pyramid } | null = null;
   private inboxCache: { state: GameState; unread: boolean; list: InboxMessage[] } | null = null;
   private readonly replayCache = new Map<string, MatchReplay>();
@@ -1546,8 +1553,8 @@ class LocalGameService implements GameService {
 
   // ── 진행 ───────────────────────────────────────────────────────
 
-  private step(s: GameState): { state: GameState; result: DayResult } {
-    const out = this.run(() => advanceDayState(s, this.clock.nowIso()));
+  private step(s: GameState, userMatchOverride?: { fixtureId: string; result: MatchResult }): { state: GameState; result: DayResult } {
+    const out = this.run(() => advanceDayState(s, this.clock.nowIso(), userMatchOverride));
     const state = {
       ...out.state,
       actionLog: [...out.state.actionLog, this.entry(out.state, 'DAY_ADVANCED', { from: out.result.from, to: out.result.to, userMatchId: out.result.userMatchId ?? null })],
@@ -1574,9 +1581,50 @@ class LocalGameService implements GameService {
     const s = this.require();
     this.guard(s, 'ADVANCE_DAY');
     if (s.phase === 'SEASON_OVER') throw new GameError('INVALID_PHASE', '시즌이 끝났습니다. 새 시즌을 시작하세요');
+    this.liveMatch = null; // 보던 라이브 경기를 두고 그냥 넘겼으면 버린다(상태엔 아무 영향 없음)
     const { state, result } = this.step(s);
     this.commit(state);
     return result;
+  }
+
+  // ── 2.6.0 실시간 관전 ──────────────────────────────────────────────
+
+  /** 오늘 사용자 구단 경기가 있으면 라이브 세션을 시작한다. 없으면 null(호출부는 advanceDay() 로 폴백) */
+  beginUserMatch(): { fixtureId: string } | null {
+    const s = this.require();
+    this.guard(s, 'ADVANCE_DAY');
+    if (s.phase === 'SEASON_OVER') throw new GameError('INVALID_PHASE', '시즌이 끝났습니다. 새 시즌을 시작하세요');
+    const prep = this.run(() => prepareUserMatchInput(s));
+    if (!prep) return null;
+    this.liveMatch = {
+      fixtureId: prep.fixtureId,
+      gen: simulateMatchSteps({ matchId: prep.fixtureId, seed: prep.seed, home: prep.home, away: prep.away, config: prep.config }),
+    };
+    return { fixtureId: prep.fixtureId };
+  }
+
+  /** 세그먼트 하나 진행. override 는 다음 세그먼트부터 반영. 끝났으면 하루 처리까지 마치고 DayResult 를 돌려준다 */
+  stepUserMatch(override?: TacticOverride): { done: false; step: MatchStep } | { done: true; result: DayResult } {
+    if (!this.liveMatch) throw new GameError('NOT_FOUND', '진행 중인 라이브 경기가 없어요');
+    const r = this.liveMatch.gen.next(override);
+    if (!r.done) return { done: false, step: r.value };
+    return { done: true, result: this.finishUserMatch(this.liveMatch.fixtureId, r.value) };
+  }
+
+  /** 남은 세그먼트를 전술 변경 없이 바로 끝까지 돌리고 하루 처리를 마친다("건너뛰기") */
+  skipUserMatch(): DayResult {
+    if (!this.liveMatch) throw new GameError('NOT_FOUND', '진행 중인 라이브 경기가 없어요');
+    let r = this.liveMatch.gen.next();
+    while (!r.done) r = this.liveMatch.gen.next();
+    return this.finishUserMatch(this.liveMatch.fixtureId, r.value);
+  }
+
+  private finishUserMatch(fixtureId: string, result: MatchResult): DayResult {
+    this.liveMatch = null;
+    const s = this.require();
+    const { state, result: dayResult } = this.step(s, { fixtureId, result });
+    this.commit(state);
+    return dayResult;
   }
 
   advanceDays(n: number): DayResult[] {

@@ -29,6 +29,7 @@ import type {
   MatchPlan,
   MatchReplay,
   MatchReport,
+  MatchStep,
   MatchupPreview,
   Membership,
   ClubMember,
@@ -67,6 +68,7 @@ import type {
   StyleFit,
   StyleId,
   TacticCap,
+  TacticOverride,
   TacticSlot,
   Tier,
   TrainingFocus,
@@ -75,7 +77,7 @@ import type {
 } from '../types';
 
 /** 버전별 변경 이력: docs/아키텍처.md 16장 */
-export const CONTRACT_VERSION = '3.1.0';
+export const CONTRACT_VERSION = '3.2.0';
 
 /** 2.4.0: 정보 화면용 빌드 정보 (온보딩_UX 2.3) */
 export interface BuildInfo {
@@ -331,6 +333,14 @@ export interface GameService {
   advanceDays(n: number): DayResult[];
   /** Day 28 처리까지 진행 (SEASON_OVER 에서 멈춤) */
   advanceToSeasonEnd(): DayResult[];
+
+  // ── 2.6.0 실시간 관전 ──────────────────────────────────────────────
+  /** 오늘 사용자 구단 경기가 있으면 라이브 세션 시작. 없으면 null(호출부는 advanceDay() 로 폴백) */
+  beginUserMatch(): { fixtureId: string } | null;
+  /** 세그먼트(5분) 하나 진행. override 는 다음 세그먼트부터 반영. 마지막이면 하루 처리까지 마친 DayResult 를 돌려준다. 세션 없으면 NOT_FOUND */
+  stepUserMatch(override?: TacticOverride): { done: false; step: MatchStep } | { done: true; result: DayResult };
+  /** 남은 세그먼트를 전술 변경 없이 즉시 끝내고 하루 처리를 마친다("건너뛰기"). 세션 없으면 NOT_FOUND */
+  skipUserMatch(): DayResult;
   /** SEASON_OVER 에서만. 나이 +1, 계약 −1, 봇 재생성, 새 일정, Day 1 00:00 처리 */
   startNewSeason(): GameSnapshot;
   /** 기본값: 가장 최근 판정 */

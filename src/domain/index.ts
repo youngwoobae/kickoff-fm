@@ -63,6 +63,7 @@ export {
   createInitialState,
   clubPlayers,
   post,
+  prepareUserMatchInput,
   salaryTotal,
   starterOvr,
   SCHEMA_VERSION,
