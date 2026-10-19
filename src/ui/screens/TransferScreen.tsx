@@ -374,7 +374,7 @@ function BidForm({ l, bid, onClose }: { l: TransferListing; bid?: Bid; onClose: 
             <span>제안 이유 (필수, 최대 80자)</span>
             <input value={reason} maxLength={80} aria-describedby="bid-reason-count" onChange={(e) => setReason(e.target.value)} placeholder="예: 왼쪽 수비 보강이 급해요" />
             <small id="bid-reason-count" className="muted">
-              {reason.length}/80 · 구단주가 다음 날로 넘기기 전에 승인하면 입찰돼요
+              {reason.length}/80 · 구단주가 경기를 진행하기 전에 승인하면 입찰돼요
             </small>
           </label>
         )}

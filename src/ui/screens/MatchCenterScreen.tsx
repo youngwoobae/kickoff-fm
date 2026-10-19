@@ -39,7 +39,7 @@ export function MatchCenterScreen() {
   );
   const matchId = nav.matchId && played.some((f) => f.id === nav.matchId) ? nav.matchId : (played[0]?.id ?? null);
 
-  if (!matchId) return <Empty>아직 치른 경기가 없어요. 홈에서 ‘다음 날로 넘기기’를 눌러 보세요.</Empty>;
+  if (!matchId) return <Empty>아직 치른 경기가 없어요. 홈에서 경기를 진행해 보세요.</Empty>;
   return (
     <div className="screen match">
       <label className="field">

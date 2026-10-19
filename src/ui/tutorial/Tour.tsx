@@ -75,7 +75,7 @@ export const TOUR_STEPS: StepDef[] = [
   {
     nav: { tab: 'home' },
     bubbles: [
-      { target: 'home.advance', title: '다음 날로 넘기기', text: '준비가 끝났어요. ‘다음 날로 넘기기’를 누르면 경기가 진행돼요.' },
+      { target: 'home.advance', title: '경기 진행', text: '준비가 끝났어요. 버튼을 누르면 경기일엔 실시간으로 지켜보고, 아니면 바로 다음 날로 넘어가요.' },
       { target: 'dayResult.replay', title: '중계 보기', text: '결과가 나왔어요. ‘중계 보기’로 경기를 다시 볼 수 있어요.' },
     ],
   },

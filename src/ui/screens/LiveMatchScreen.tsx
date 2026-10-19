@@ -1,9 +1,9 @@
 /** 2.6.0: 실시간 관전 — 세그먼트(5분)마다 진행, 경기 중 전술 변경 가능, 미니 피치 시각화 (소유: B) */
 import { useEffect, useRef, useState } from 'react';
-import type { ClubId, CommentaryKind, DayResult, MatchEvent, Step, TacticOverride } from '../../types';
+import type { ClubId, CommentaryKind, DayResult, FormationDef, MatchEvent, Step, TacticOverride } from '../../types';
 import { Card, Sheet, StepSlider } from '../components/kit';
-import { INSTR_LABEL, SLIDERS, type SliderKey } from '../format';
-import { useGame, useIsOwner, useService } from '../service/ServiceContext';
+import { INSTR_LABEL, SLIDERS, pitchRows, type SliderKey } from '../format';
+import { useGame, useIsOwner, useQuery, useService } from '../service/ServiceContext';
 import { getPrefs, type ReplaySpeed } from '../prefs';
 
 const SEGMENTS = 18;
@@ -74,16 +74,51 @@ function posOf(e: MatchEvent, homeId: ClubId): BallPos | null {
   }
 }
 
-function LivePitch({ pos, homeLabel, awayLabel, goalFlash }: { pos: BallPos | null; homeLabel: string; awayLabel: string; goalFlash: 'L' | 'R' | null }) {
+/** 포메이션 슬롯 11개의 기본 배치(u=자기 골문에서 거리, v=측면). PitchView.tsx 의 baseOf 와 같은 계산이지만
+ * 그 파일은 별도 lazy 청크라 가져오지 않고, 이미 공개된 pitchRows() 만으로 가볍게 다시 만든다. */
+const ROW_U = [0.04, 0.17, 0.27, 0.36, 0.45, 0.55];
+const POS_CAT = { GK: 0, CB: 1, FB: 1, DM: 2, CM: 3, AM: 4, W: 4, ST: 5 } as const;
+function formationDots(f: FormationDef | undefined): [number, number][] {
+  if (!f) return [];
+  const out: [number, number][] = f.slots.map(() => [0.5, 0.5]);
+  for (const row of [...pitchRows(f)].reverse()) {
+    const slots = row.map((i) => f.slots[i]);
+    const key = slots.find((s) => s && s.position !== 'FB' && s.position !== 'W') ?? slots[0];
+    const u = ROW_U[key ? POS_CAT[key.position] : 3] ?? 0.36;
+    row.forEach((si, k) => (out[si] = [u, (k + 1) / (row.length + 1)]));
+  }
+  return out;
+}
+
+function LivePitch({
+  pos,
+  homeLabel,
+  awayLabel,
+  goalFlash,
+  userIsHome,
+  homeFormation,
+  awayFormation,
+}: {
+  pos: BallPos | null;
+  homeLabel: string;
+  awayLabel: string;
+  goalFlash: 'L' | 'R' | null;
+  userIsHome: boolean;
+  homeFormation?: FormationDef;
+  awayFormation?: FormationDef;
+}) {
   const p = pos ?? { u: 0.5, v: 0.5, team: null };
   // 사용자 팀은 항상 오른쪽으로 공격하는 방향으로 그린다(team=null 은 좌우 상관없이 중앙)
-  const x = p.team === 'away' ? (1 - p.u) * W : p.u * W;
-  const y = p.team === 'away' ? (1 - p.v) * H : p.v * H;
+  const flip = (team: 'home' | 'away', u: number, v: number): [number, number] => {
+    const mine = team === (userIsHome ? 'home' : 'away');
+    return mine ? [u * W, v * H] : [(1 - u) * W, (1 - v) * H];
+  };
+  const [bx, by] = p.team ? flip(p.team, p.u, p.v) : [p.u * W, p.v * H];
   return (
     <figure className="live-pitch">
       <span className="live-end live-end-home">{homeLabel}</span>
       <span className="live-end live-end-away">{awayLabel}</span>
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="미니 피치 — 공 대략 위치">
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="미니 피치 — 선수 배치·공 대략 위치">
         <rect className="pitch-bg" width={W} height={H} />
         <g className="pitch-lines">
           <rect x={0.5} y={0.5} width={W - 1} height={H - 1} />
@@ -93,7 +128,23 @@ function LivePitch({ pos, homeLabel, awayLabel, goalFlash }: { pos: BallPos | nu
           <rect x={W - 17} y={13.85} width={16.5} height={40.3} />
         </g>
         {goalFlash && <rect className="pitch-goal-flash" x={goalFlash === 'R' ? W - 3 : 0} y={30.34} width={3} height={7.32} />}
-        <g className="ball" style={{ transform: `translate(${x}px, ${y}px)` }}>
+        {formationDots(homeFormation).map(([u, v], i) => {
+          const [x, y] = flip('home', u, v);
+          return (
+            <g key={`h${i}`} className={userIsHome ? 'dot is-us' : 'dot is-them'} style={{ transform: `translate(${x}px, ${y}px)` }}>
+              <circle r={1.7} />
+            </g>
+          );
+        })}
+        {formationDots(awayFormation).map(([u, v], i) => {
+          const [x, y] = flip('away', u, v);
+          return (
+            <g key={`a${i}`} className={!userIsHome ? 'dot is-us' : 'dot is-them'} style={{ transform: `translate(${x}px, ${y}px)` }}>
+              <circle r={1.7} />
+            </g>
+          );
+        })}
+        <g className="ball" style={{ transform: `translate(${bx}px, ${by}px)` }}>
           <polygon points="0,-1.6 1.6,0 0,1.6 -1.6,0" />
         </g>
       </svg>
@@ -105,11 +156,14 @@ export function LiveMatchScreen({ fixtureId, onDone }: { fixtureId: string; onDo
   const svc = useService();
   const snap = useGame();
   const isOwner = useIsOwner();
+  const catalog = useQuery((s) => s.getCatalog()).data;
   const fixture = snap.fixtures.find((f) => f.id === fixtureId);
   const homeClub = fixture ? snap.clubs[fixture.homeId] : undefined;
   const awayClub = fixture ? snap.clubs[fixture.awayId] : undefined;
   const userIsHome = fixture?.homeId === snap.userClubId;
   const playerName = (id?: string) => (id ? (snap.players[id]?.name ?? id) : '');
+  const homeFormation = catalog?.formations.find((f) => f.id === homeClub?.tactics.A.formation);
+  const awayFormation = catalog?.formations.find((f) => f.id === awayClub?.tactics.A.formation);
 
   const [lines, setLines] = useState<Line[]>([]);
   const [seg, setSeg] = useState(0);
@@ -187,7 +241,15 @@ export function LiveMatchScreen({ fixtureId, onDone }: { fixtureId: string; onDo
         </div>
       </Card>
 
-      <LivePitch pos={ballPos} homeLabel={homeClub.shortName} awayLabel={awayClub.shortName} goalFlash={goalFlash} />
+      <LivePitch
+        pos={ballPos}
+        homeLabel={homeClub.shortName}
+        awayLabel={awayClub.shortName}
+        goalFlash={goalFlash}
+        userIsHome={userIsHome}
+        homeFormation={homeFormation}
+        awayFormation={awayFormation}
+      />
 
       <ol className="feed" aria-label="실시간 중계" aria-live="polite">
         {lines.length === 0 && (

@@ -124,7 +124,7 @@ export function PlanActions() {
         className="btn btn-primary"
         data-tour="plan.submit"
         onClick={() => {
-          if (run((s) => s.submitPlan(plan), '확정 제출했어요 · ‘다음 날로 넘기기’ 전까지 고칠 수 있어요')) markSaved();
+          if (run((s) => s.submitPlan(plan), '확정 제출했어요 · 경기를 진행하기 전까지 고칠 수 있어요')) markSaved();
         }}
       >
         확정 제출

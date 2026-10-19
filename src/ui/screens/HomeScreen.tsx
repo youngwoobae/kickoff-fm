@@ -21,6 +21,8 @@ export function HomeScreen() {
   const [liveFixtureId, setLiveFixtureId] = useState<string | null>(null);
   const preview = useQuery((s) => s.previewResolvedPlan()).data ?? null;
   const next = useQuery((s) => s.getNextMatch()).data ?? null;
+  /** 2.6.0: 오늘이 매치데이면 즉시 넘기기 선택지를 없애고 실시간 관전만 허용한다 */
+  const isMatchToday = !!next && next.day === snap.time.day && snap.phase === 'MATCHDAY';
 
   const planState = useQuery((s) => s.getPlanState()).data;
   const lock = usePlanLock();
@@ -107,13 +109,15 @@ export function HomeScreen() {
               추천대로 제출
             </button>
           )}
-          {next && next.day === snap.time.day && snap.phase === 'MATCHDAY' && (
-            <button type="button" className="btn btn-secondary" disabled={advancing} onClick={watchLive}>
-              실시간으로 보기
-            </button>
-          )}
-          <button type="button" className="btn btn-primary" data-tour="home.advance" disabled={advancing} aria-busy={advancing} onClick={advance}>
-            {advancing ? '진행 중…' : '다음 날로 넘기기 ▶'}
+          <button
+            type="button"
+            className="btn btn-primary"
+            data-tour="home.advance"
+            disabled={advancing}
+            aria-busy={advancing}
+            onClick={isMatchToday ? watchLive : advance}
+          >
+            {advancing ? '진행 중…' : isMatchToday ? '경기 보기 ▶' : '다음 날로 넘기기 ▶'}
           </button>
         </StickyActions>
       )}
@@ -143,7 +147,7 @@ function NextMatchCard({ fixture }: { fixture: Fixture }) {
         </span>
         {oppRow && <span className="muted">{oppRow.position}위 · 승점 {oppRow.points}</span>}
       </div>
-      <p className="muted small">‘다음 날로 넘기기’를 누르면 플랜이 마감되고 경기가 진행돼요</p>
+      <p className="muted small">플랜이 마감되면 경기가 진행돼요. 경기일에는 실시간으로 지켜봐요</p>
       {scout && (
         <div className="scout">
           <div>
