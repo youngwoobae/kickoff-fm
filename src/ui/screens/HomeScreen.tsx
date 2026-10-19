@@ -10,6 +10,7 @@ import { usePlanEditor } from '../plan/PlanEditor';
 import { getPrefs } from '../prefs';
 import { PlanStatusLine, usePlanLock } from '../plan/PlanActions';
 import { useAction, useActor, useGame, useOpenProposalCount, useQuery, useService } from '../service/ServiceContext';
+import { LiveMatchScreen } from './LiveMatchScreen';
 
 export function HomeScreen() {
   const snap = useGame();
@@ -17,15 +18,16 @@ export function HomeScreen() {
   const actor = useActor();
   const isOwner = actor?.seat === 'OWNER';
   const [dayResult, setDayResult] = useState<DayResult | null>(null);
+  const [liveFixtureId, setLiveFixtureId] = useState<string | null>(null);
   const preview = useQuery((s) => s.previewResolvedPlan()).data ?? null;
   const next = useQuery((s) => s.getNextMatch()).data ?? null;
 
   const planState = useQuery((s) => s.getPlanState()).data;
   const lock = usePlanLock();
   const [advancing, setAdvancing] = useState(false);
+  const confirmUnsubmitted = () => !getPrefs().confirmUnsubmitted || !next || !planState?.matchId || planState.confirmed || confirm('오늘 플랜을 확정 제출하지 않았어요. 기본 플랜으로 경기할까요?');
   const advance = () => {
-    if (advancing) return;
-    if (getPrefs().confirmUnsubmitted && next && planState?.matchId && !planState.confirmed && !confirm('오늘 플랜을 확정 제출하지 않았어요. 기본 플랜으로 경기할까요?')) return;
+    if (advancing || !confirmUnsubmitted()) return;
     setAdvancing(true);
     // '진행 중'을 먼저 그린 뒤 계산한다: rAF 는 페인트 직전, 그 안의 setTimeout 은 페인트 뒤 태스크.
     // ponytail: advanceDay 는 여전히 메인 스레드 동기 계산(4× 스로틀 약 350ms)이라 그동안 화면이 멈춘다.
@@ -38,6 +40,23 @@ export function HomeScreen() {
       }, 0),
     );
   };
+  const watchLive = () => {
+    if (advancing || !confirmUnsubmitted()) return;
+    const begin = run((s) => s.beginUserMatch());
+    if (begin) setLiveFixtureId(begin.fixtureId);
+  };
+
+  if (liveFixtureId) {
+    return (
+      <LiveMatchScreen
+        fixtureId={liveFixtureId}
+        onDone={(r) => {
+          setLiveFixtureId(null);
+          setDayResult(r);
+        }}
+      />
+    );
+  }
   const recommendAndSubmit = () =>
     run((s) => {
       const plan = s.recommendPlan();
@@ -86,6 +105,11 @@ export function HomeScreen() {
           {next && (
             <button type="button" className="btn btn-secondary" disabled={!isOwner} title={isOwner ? undefined : '구단주만 할 수 있어요'} onClick={recommendAndSubmit}>
               추천대로 제출
+            </button>
+          )}
+          {next && next.day === snap.time.day && snap.phase === 'MATCHDAY' && (
+            <button type="button" className="btn btn-secondary" disabled={advancing} onClick={watchLive}>
+              실시간으로 보기
             </button>
           )}
           <button type="button" className="btn btn-primary" data-tour="home.advance" disabled={advancing} aria-busy={advancing} onClick={advance}>
