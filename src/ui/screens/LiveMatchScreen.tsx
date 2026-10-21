@@ -1,4 +1,4 @@
-/** 2.6.0: 실시간 관전 — 세그먼트(5분)마다 진행, 경기 중 전술 변경 가능, 미니 피치 시각화 (소유: B) */
+/** 2.6.0: 실시간 관전 — 세그먼트(5분)마다 진행, 경기 중 전술 변경 가능, 0~90분 연속 움직임 시각화 (소유: B) */
 import { useEffect, useRef, useState } from 'react';
 import type { ClubId, CommentaryKind, DayResult, FormationDef, MatchEvent, Step, TacticOverride } from '../../types';
 import { Card, Sheet, StepSlider } from '../components/kit';
@@ -55,6 +55,14 @@ const H = 68;
 const ZONE_U = [0.17, 0.5, 0.83];
 const LANE_V = [0.22, 0.5, 0.78];
 type BallPos = { u: number; v: number; team: 'home' | 'away' | null };
+type XY = { x: number; y: number };
+/** 한 세그먼트(5분) 동안 공·시계가 연속으로 움직일 구간: start(ms, performance.now 기준)~dur 뒤 minFrom→minTo */
+interface AnimWindow {
+  start: number;
+  dur: number;
+  minFrom: number;
+  minTo: number;
+}
 
 function posOf(e: MatchEvent, homeId: ClubId): BallPos | null {
   const team = (cid: ClubId): 'home' | 'away' => (cid === homeId ? 'home' : 'away');
@@ -106,8 +114,39 @@ function formationDots(f: FormationDef | undefined): [number, number][] {
   return out;
 }
 
+/** 0~1 결정적 유사난수(쿼터 변동용 — 게임 로직과 무관, rng 스트림 안 씀) */
+function hash01(seed: number): number {
+  const x = Math.sin(seed * 12.9898) * 43758.5453;
+  return x - Math.floor(x);
+}
+/** from→to 사이 지그재그로 몇 번 터치하며 가는 경로점(드리블·패스 주고받는 느낌) */
+function pathPoints(from: XY, to: XY, seed: number): XY[] {
+  const n = 3;
+  const pts: XY[] = [from];
+  for (let i = 1; i <= n; i++) {
+    const t = i / (n + 1);
+    const bx = from.x + (to.x - from.x) * t;
+    const by = from.y + (to.y - from.y) * t;
+    const jx = (hash01(seed + i) - 0.5) * 16;
+    const jy = (hash01(seed + i + 71) - 0.5) * 12;
+    pts.push({ x: Math.min(W - 2, Math.max(2, bx + jx)), y: Math.min(H - 2, Math.max(2, by + jy)) });
+  }
+  pts.push(to);
+  return pts;
+}
+function pointAt(pts: XY[], t: number): XY {
+  const segs = pts.length - 1;
+  const tt = Math.min(segs, Math.max(0, t * segs));
+  const i = Math.min(segs - 1, Math.floor(tt));
+  const lt = tt - i;
+  const a = pts[i]!;
+  const b = pts[i + 1]!;
+  return { x: a.x + (b.x - a.x) * lt, y: a.y + (b.y - a.y) * lt };
+}
+
 function LivePitch({
-  pos,
+  target,
+  anim,
   homeLabel,
   awayLabel,
   goalFlash,
@@ -117,7 +156,8 @@ function LivePitch({
   homeId,
   awayId,
 }: {
-  pos: BallPos | null;
+  target: BallPos | null;
+  anim: AnimWindow;
   homeLabel: string;
   awayLabel: string;
   goalFlash: 'L' | 'R' | null;
@@ -127,28 +167,61 @@ function LivePitch({
   homeId: string;
   awayId: string;
 }) {
-  const p = pos ?? { u: 0.5, v: 0.5, team: null };
-  // 사용자 팀은 항상 오른쪽으로 공격하는 방향으로 그린다(team=null 은 좌우 상관없이 중앙)
-  const flip = (team: 'home' | 'away', u: number, v: number): [number, number] => {
+  const flip = (team: 'home' | 'away', u: number, v: number): XY => {
     const mine = team === (userIsHome ? 'home' : 'away');
-    return mine ? [u * W, v * H] : [(1 - u) * W, (1 - v) * H];
+    return mine ? { x: u * W, y: v * H } : { x: (1 - u) * W, y: (1 - v) * H };
   };
+  const [ball, setBall] = useState<XY>({ x: W / 2, y: H / 2 });
+  const [trail, setTrail] = useState<XY[]>([]);
+  const prevXY = useRef<XY>({ x: W / 2, y: H / 2 });
+  const rafRef = useRef<number>();
+
+  useEffect(() => {
+    if (rafRef.current !== undefined) cancelAnimationFrame(rafRef.current);
+    const to = target ? (target.team ? flip(target.team, target.u, target.v) : { x: target.u * W, y: target.v * H }) : { x: W / 2, y: H / 2 };
+    const from = prevXY.current;
+    if (anim.dur < 50) {
+      setBall(to);
+      prevXY.current = to;
+      setTrail([]);
+      return;
+    }
+    const pts = pathPoints(from, to, Math.floor(anim.start) % 100000);
+    let frameCount = 0;
+    const frame = (now: number) => {
+      const t = (now - anim.start) / anim.dur;
+      const p = pointAt(pts, t);
+      setBall(p);
+      prevXY.current = p;
+      frameCount++;
+      if (frameCount % 7 === 0) setTrail((xs) => [...xs.slice(-3), p]);
+      if (t < 1) rafRef.current = requestAnimationFrame(frame);
+      else setTrail([]);
+    };
+    rafRef.current = requestAnimationFrame(frame);
+    return () => {
+      if (rafRef.current !== undefined) cancelAnimationFrame(rafRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target, anim]);
+
   // 공이 어느 팀 쪽에 있는지로 대형을 살짝 밀어올리거나 내린다(압박/후퇴 느낌)
-  const press = (team: 'home' | 'away'): number => (p.team === team ? 0.045 : p.team && p.team !== team ? -0.025 : 0);
-  const [bx, by] = p.team ? flip(p.team, p.u, p.v) : [p.u * W, p.v * H];
+  const press = (team: 'home' | 'away'): number => (target?.team === team ? 0.045 : target?.team && target.team !== team ? -0.025 : 0);
   const colors = teamColors(homeId, awayId);
+  const territoryPct = Math.round((ball.x / W) * 100);
 
   return (
     <figure className="live-pitch" style={{ ['--home-c' as string]: colors.home, ['--away-c' as string]: colors.away }}>
-      <span className="live-end live-end-home">
-        <i className="live-dot" style={{ background: colors.home }} />
-        {homeLabel}
-      </span>
-      <span className="live-end live-end-away">
-        {awayLabel}
-        <i className="live-dot" style={{ background: colors.away }} />
-      </span>
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="미니 피치 — 선수 배치·공 대략 위치">
+      <div className="live-field">
+        <span className="live-end live-end-home">
+          <i className="live-dot" style={{ background: colors.home }} />
+          {homeLabel}
+        </span>
+        <span className="live-end live-end-away">
+          {awayLabel}
+          <i className="live-dot" style={{ background: colors.away }} />
+        </span>
+        <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="미니 피치 — 선수·공 실시간 위치(근사)">
         <defs>
           <pattern id="turf" width={W / 8} height={H} patternUnits="userSpaceOnUse">
             <rect width={W / 8} height={H} className="turf-a" />
@@ -157,6 +230,10 @@ function LivePitch({
           <radialGradient id="ballShade" cx="35%" cy="30%" r="75%">
             <stop offset="0%" stopColor="#fff" />
             <stop offset="100%" stopColor="#cbd5c9" />
+          </radialGradient>
+          <radialGradient id="vignette" cx="50%" cy="50%" r="72%">
+            <stop offset="60%" stopColor="#000" stopOpacity="0" />
+            <stop offset="100%" stopColor="#000" stopOpacity="0.28" />
           </radialGradient>
         </defs>
         <rect width={W} height={H} fill="url(#turf)" />
@@ -172,29 +249,41 @@ function LivePitch({
         </g>
         {goalFlash && <rect className="pitch-goal-flash" x={goalFlash === 'R' ? W - 3 : 0} y={30.34} width={3} height={7.32} />}
         {formationDots(homeFormation).map(([u, v], i) => {
-          const [x, y] = flip('home', Math.min(0.92, Math.max(0.03, u + press('home'))), v);
+          const p = flip('home', Math.min(0.92, Math.max(0.03, u + press('home'))), v);
           return (
-            <g key={`h${i}`} className="player" style={{ transform: `translate(${x}px, ${y}px)` }}>
-              <circle r={2.3} className="player-shadow" />
-              <circle r={2} fill={colors.home} className="player-body" />
+            <g key={`h${i}`} className="player" style={{ transform: `translate(${p.x}px, ${p.y}px)` }}>
+              <g className="player-wobble" style={{ animationDelay: `${(i * 173) % 1700}ms` }}>
+                <circle r={2.3} className="player-shadow" />
+                <circle r={2} fill={colors.home} className="player-body" />
+              </g>
             </g>
           );
         })}
         {formationDots(awayFormation).map(([u, v], i) => {
-          const [x, y] = flip('away', Math.min(0.92, Math.max(0.03, u + press('away'))), v);
+          const p = flip('away', Math.min(0.92, Math.max(0.03, u + press('away'))), v);
           return (
-            <g key={`a${i}`} className="player" style={{ transform: `translate(${x}px, ${y}px)` }}>
-              <circle r={2.3} className="player-shadow" />
-              <circle r={2} fill={colors.away} className="player-body" />
+            <g key={`a${i}`} className="player" style={{ transform: `translate(${p.x}px, ${p.y}px)` }}>
+              <g className="player-wobble" style={{ animationDelay: `${(i * 211 + 400) % 1700}ms` }}>
+                <circle r={2.3} className="player-shadow" />
+                <circle r={2} fill={colors.away} className="player-body" />
+              </g>
             </g>
           );
         })}
-        <g className="ball" style={{ transform: `translate(${bx}px, ${by}px)` }}>
+        {trail.map((p, i) => (
+          <circle key={i} className="ball-trail" cx={p.x} cy={p.y} r={1.1} style={{ opacity: 0.12 + i * 0.1 }} />
+        ))}
+        <g className="ball" style={{ transform: `translate(${ball.x}px, ${ball.y}px)` }}>
           <ellipse cx={0} cy={1.3} rx={1.5} ry={0.5} className="ball-shadow" />
           <circle r={1.5} fill="url(#ballShade)" stroke="#1f2937" strokeWidth={0.25} />
           <path d="M-0.6,-0.7 L0.6,-0.7 L0.9,0.3 L0,1 L-0.9,0.3 Z" className="ball-seam" />
         </g>
-      </svg>
+        <rect width={W} height={H} fill="url(#vignette)" pointerEvents="none" />
+        </svg>
+      </div>
+      <div className="live-territory" aria-hidden="true">
+        <i className="live-territory-mark" style={{ left: `${territoryPct}%` }} />
+      </div>
     </figure>
   );
 }
@@ -216,7 +305,9 @@ export function LiveMatchScreen({ fixtureId, onDone }: { fixtureId: string; onDo
   const [seg, setSeg] = useState(0);
   const [score, setScore] = useState<[number, number]>([0, 0]);
   const [scorePulse, setScorePulse] = useState(0);
-  const [ballPos, setBallPos] = useState<BallPos | null>(null);
+  const [target, setTarget] = useState<BallPos | null>(null);
+  const [anim, setAnim] = useState<AnimWindow>({ start: performance.now(), dur: 0, minFrom: 0, minTo: 0 });
+  const [displayMinute, setDisplayMinute] = useState(0);
   const [goalFlash, setGoalFlash] = useState<'L' | 'R' | null>(null);
   const [finished, setFinished] = useState(false);
   const [tacticsOpen, setTacticsOpen] = useState(false);
@@ -224,6 +315,7 @@ export function LiveMatchScreen({ fixtureId, onDone }: { fixtureId: string; onDo
   const pendingOverride = useRef<TacticOverride | undefined>(undefined);
   const stepping = useRef(false);
   const flashTimer = useRef<ReturnType<typeof setTimeout>>();
+  const prevMinuteRef = useRef(0);
 
   // 라이브 세션은 호출부(HomeScreen)가 beginUserMatch() 로 이미 시작해 두고 fixtureId 를 넘긴다 — 여기서는 진행만
   useEffect(() => {
@@ -240,9 +332,10 @@ export function LiveMatchScreen({ fixtureId, onDone }: { fixtureId: string; onDo
         if (!r.done) {
           const newLines = r.step.newEvents.map((e) => lineOf(e, playerName)).filter((l): l is Line => l !== null);
           if (newLines.length) setLines((xs) => [...xs, ...newLines]);
+          let lastPos: BallPos | null = null;
           for (const e of r.step.newEvents) {
             const pos = posOf(e, fixture.homeId);
-            if (pos) setBallPos(pos);
+            if (pos) lastPos = pos;
             if (e.type === 'GOAL') {
               const scorerIsUser = (e.clubId === fixture.homeId) === userIsHome;
               setGoalFlash(scorerIsUser ? 'R' : 'L');
@@ -251,9 +344,13 @@ export function LiveMatchScreen({ fixtureId, onDone }: { fixtureId: string; onDo
               flashTimer.current = setTimeout(() => setGoalFlash(null), 700);
             }
           }
+          if (lastPos) setTarget(lastPos);
+          setAnim({ start: performance.now(), dur: delay, minFrom: prevMinuteRef.current, minTo: r.step.minute });
+          prevMinuteRef.current = r.step.minute;
           setScore([r.step.homeGoals, r.step.awayGoals]);
           setSeg(r.step.seg + 1);
         } else {
+          setDisplayMinute(90);
           setFinished(true);
           onDone(r.result);
         }
@@ -263,6 +360,21 @@ export function LiveMatchScreen({ fixtureId, onDone }: { fixtureId: string; onDo
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seg, finished]);
+
+  // 시계를 세그먼트 대기 시간 동안 부드럽게 올린다(공 애니메이션과 같은 구간)
+  useEffect(() => {
+    if (anim.dur < 50) {
+      setDisplayMinute(anim.minTo);
+      return;
+    }
+    setDisplayMinute(anim.minFrom);
+    const id = setInterval(() => {
+      const t = Math.min(1, (performance.now() - anim.start) / anim.dur);
+      setDisplayMinute(Math.round(anim.minFrom + (anim.minTo - anim.minFrom) * t));
+      if (t >= 1) clearInterval(id);
+    }, 250);
+    return () => clearInterval(id);
+  }, [anim]);
 
   useEffect(() => () => clearTimeout(flashTimer.current), []);
 
@@ -286,7 +398,7 @@ export function LiveMatchScreen({ fixtureId, onDone }: { fixtureId: string; onDo
             LIVE
           </span>
           <span className="muted">
-            {Math.min(90, seg * 5)}분 · {seg}/{SEGMENTS}구간
+            {displayMinute}' · {seg}/{SEGMENTS}구간
           </span>
         </div>
         <div className="live-score-row">
@@ -299,7 +411,8 @@ export function LiveMatchScreen({ fixtureId, onDone }: { fixtureId: string; onDo
       </Card>
 
       <LivePitch
-        pos={ballPos}
+        target={target}
+        anim={anim}
         homeLabel={homeClub.shortName}
         awayLabel={awayClub.shortName}
         goalFlash={goalFlash}
