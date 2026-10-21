@@ -10,6 +10,8 @@ const SEGMENTS = 18;
 /** 세그먼트당 대기(ms). 기본값('2')이 18세그먼트 기준 약 3~5분대가 되도록 맞췄다 */
 const SEG_DELAY_MS: Record<ReplaySpeed, number> = { '1': 20_000, '2': 13_000, '4': 6_000, instant: 0 };
 
+const KIND_ICON: Record<string, string> = { GOAL: '⚽', CARD: '🟨', SUB: '🔁', TACTIC: '↕️', PERIOD: '⏱', CHANCE: '➤', NEUTRAL: '•' };
+
 interface Line {
   minute: number;
   kind: CommentaryKind;
@@ -74,6 +76,20 @@ function posOf(e: MatchEvent, homeId: ClubId): BallPos | null {
   }
 }
 
+/** 구단 id → 고정 색상(해시). 두 팀이 비슷한 색이면 한쪽을 90° 돌린다 */
+function hueOf(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return h % 360;
+}
+function teamColors(homeId: string, awayId: string): { home: string; away: string } {
+  const h1 = hueOf(homeId);
+  let h2 = hueOf(`${awayId}|2`);
+  const d = Math.abs(h1 - h2);
+  if (d < 50 || d > 310) h2 = (h2 + 110) % 360;
+  return { home: `hsl(${h1} 70% 52%)`, away: `hsl(${h2} 70% 52%)` };
+}
+
 /** 포메이션 슬롯 11개의 기본 배치(u=자기 골문에서 거리, v=측면). PitchView.tsx 의 baseOf 와 같은 계산이지만
  * 그 파일은 별도 lazy 청크라 가져오지 않고, 이미 공개된 pitchRows() 만으로 가볍게 다시 만든다. */
 const ROW_U = [0.04, 0.17, 0.27, 0.36, 0.45, 0.55];
@@ -98,6 +114,8 @@ function LivePitch({
   userIsHome,
   homeFormation,
   awayFormation,
+  homeId,
+  awayId,
 }: {
   pos: BallPos | null;
   homeLabel: string;
@@ -106,6 +124,8 @@ function LivePitch({
   userIsHome: boolean;
   homeFormation?: FormationDef;
   awayFormation?: FormationDef;
+  homeId: string;
+  awayId: string;
 }) {
   const p = pos ?? { u: 0.5, v: 0.5, team: null };
   // 사용자 팀은 항상 오른쪽으로 공격하는 방향으로 그린다(team=null 은 좌우 상관없이 중앙)
@@ -113,39 +133,66 @@ function LivePitch({
     const mine = team === (userIsHome ? 'home' : 'away');
     return mine ? [u * W, v * H] : [(1 - u) * W, (1 - v) * H];
   };
+  // 공이 어느 팀 쪽에 있는지로 대형을 살짝 밀어올리거나 내린다(압박/후퇴 느낌)
+  const press = (team: 'home' | 'away'): number => (p.team === team ? 0.045 : p.team && p.team !== team ? -0.025 : 0);
   const [bx, by] = p.team ? flip(p.team, p.u, p.v) : [p.u * W, p.v * H];
+  const colors = teamColors(homeId, awayId);
+
   return (
-    <figure className="live-pitch">
-      <span className="live-end live-end-home">{homeLabel}</span>
-      <span className="live-end live-end-away">{awayLabel}</span>
+    <figure className="live-pitch" style={{ ['--home-c' as string]: colors.home, ['--away-c' as string]: colors.away }}>
+      <span className="live-end live-end-home">
+        <i className="live-dot" style={{ background: colors.home }} />
+        {homeLabel}
+      </span>
+      <span className="live-end live-end-away">
+        {awayLabel}
+        <i className="live-dot" style={{ background: colors.away }} />
+      </span>
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="미니 피치 — 선수 배치·공 대략 위치">
-        <rect className="pitch-bg" width={W} height={H} />
+        <defs>
+          <pattern id="turf" width={W / 8} height={H} patternUnits="userSpaceOnUse">
+            <rect width={W / 8} height={H} className="turf-a" />
+            <rect width={W / 16} height={H} className="turf-b" />
+          </pattern>
+          <radialGradient id="ballShade" cx="35%" cy="30%" r="75%">
+            <stop offset="0%" stopColor="#fff" />
+            <stop offset="100%" stopColor="#cbd5c9" />
+          </radialGradient>
+        </defs>
+        <rect width={W} height={H} fill="url(#turf)" />
         <g className="pitch-lines">
           <rect x={0.5} y={0.5} width={W - 1} height={H - 1} />
           <line x1={W / 2} y1={0.5} x2={W / 2} y2={H - 0.5} />
           <circle cx={W / 2} cy={H / 2} r={9.15} />
+          <circle cx={W / 2} cy={H / 2} r={0.5} className="pitch-dot" />
           <rect x={0.5} y={13.85} width={16.5} height={40.3} />
           <rect x={W - 17} y={13.85} width={16.5} height={40.3} />
+          <rect x={0.5} y={24.85} width={5.5} height={18.3} />
+          <rect x={W - 6} y={24.85} width={5.5} height={18.3} />
         </g>
         {goalFlash && <rect className="pitch-goal-flash" x={goalFlash === 'R' ? W - 3 : 0} y={30.34} width={3} height={7.32} />}
         {formationDots(homeFormation).map(([u, v], i) => {
-          const [x, y] = flip('home', u, v);
+          const [x, y] = flip('home', Math.min(0.92, Math.max(0.03, u + press('home'))), v);
           return (
-            <g key={`h${i}`} className={userIsHome ? 'dot is-us' : 'dot is-them'} style={{ transform: `translate(${x}px, ${y}px)` }}>
-              <circle r={1.7} />
+            <g key={`h${i}`} className="player" style={{ transform: `translate(${x}px, ${y}px)` }}>
+              <circle r={2.3} className="player-shadow" />
+              <circle r={2} fill={colors.home} className="player-body" />
             </g>
           );
         })}
         {formationDots(awayFormation).map(([u, v], i) => {
-          const [x, y] = flip('away', u, v);
+          const [x, y] = flip('away', Math.min(0.92, Math.max(0.03, u + press('away'))), v);
           return (
-            <g key={`a${i}`} className={!userIsHome ? 'dot is-us' : 'dot is-them'} style={{ transform: `translate(${x}px, ${y}px)` }}>
-              <circle r={1.7} />
+            <g key={`a${i}`} className="player" style={{ transform: `translate(${x}px, ${y}px)` }}>
+              <circle r={2.3} className="player-shadow" />
+              <circle r={2} fill={colors.away} className="player-body" />
             </g>
           );
         })}
         <g className="ball" style={{ transform: `translate(${bx}px, ${by}px)` }}>
-          <polygon points="0,-1.6 1.6,0 0,1.6 -1.6,0" />
+          <ellipse cx={0} cy={1.3} rx={1.5} ry={0.5} className="ball-shadow" />
+          <circle r={1.5} fill="url(#ballShade)" stroke="#1f2937" strokeWidth={0.25} />
+          <path d="M-0.6,-0.7 L0.6,-0.7 L0.9,0.3 L0,1 L-0.9,0.3 Z" className="ball-seam" />
         </g>
       </svg>
     </figure>
@@ -168,6 +215,7 @@ export function LiveMatchScreen({ fixtureId, onDone }: { fixtureId: string; onDo
   const [lines, setLines] = useState<Line[]>([]);
   const [seg, setSeg] = useState(0);
   const [score, setScore] = useState<[number, number]>([0, 0]);
+  const [scorePulse, setScorePulse] = useState(0);
   const [ballPos, setBallPos] = useState<BallPos | null>(null);
   const [goalFlash, setGoalFlash] = useState<'L' | 'R' | null>(null);
   const [finished, setFinished] = useState(false);
@@ -198,8 +246,9 @@ export function LiveMatchScreen({ fixtureId, onDone }: { fixtureId: string; onDo
             if (e.type === 'GOAL') {
               const scorerIsUser = (e.clubId === fixture.homeId) === userIsHome;
               setGoalFlash(scorerIsUser ? 'R' : 'L');
+              setScorePulse((n) => n + 1);
               clearTimeout(flashTimer.current);
-              flashTimer.current = setTimeout(() => setGoalFlash(null), 600);
+              flashTimer.current = setTimeout(() => setGoalFlash(null), 700);
             }
           }
           setScore([r.step.homeGoals, r.step.awayGoals]);
@@ -231,13 +280,21 @@ export function LiveMatchScreen({ fixtureId, onDone }: { fixtureId: string; onDo
   return (
     <div className="screen live-match">
       <Card className="card-compact live-score">
-        <div className="row-between">
-          <strong>
-            {homeClub.shortName} {score[0]} : {score[1]} {awayClub.shortName}
-          </strong>
+        <div className="live-score-top">
+          <span className="live-badge">
+            <i className="live-pulse" />
+            LIVE
+          </span>
           <span className="muted">
             {Math.min(90, seg * 5)}분 · {seg}/{SEGMENTS}구간
           </span>
+        </div>
+        <div className="live-score-row">
+          <span className="live-team-name">{homeClub.shortName}</span>
+          <strong key={scorePulse} className="live-score-num">
+            {score[0]} : {score[1]}
+          </strong>
+          <span className="live-team-name">{awayClub.shortName}</span>
         </div>
       </Card>
 
@@ -249,6 +306,8 @@ export function LiveMatchScreen({ fixtureId, onDone }: { fixtureId: string; onDo
         userIsHome={userIsHome}
         homeFormation={homeFormation}
         awayFormation={awayFormation}
+        homeId={fixture.homeId}
+        awayId={fixture.awayId}
       />
 
       <ol className="feed" aria-label="실시간 중계" aria-live="polite">
@@ -263,6 +322,9 @@ export function LiveMatchScreen({ fixtureId, onDone }: { fixtureId: string; onDo
           .map((l, i) => (
             <li key={`${l.minute}-${i}`} className={`feed-line kind-${l.kind.toLowerCase()}`}>
               <span className="feed-min">{l.minute}'</span>
+              <span className="feed-icon" aria-hidden="true">
+                {KIND_ICON[l.kind] ?? '•'}
+              </span>
               <span>{l.text}</span>
             </li>
           ))}
